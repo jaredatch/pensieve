@@ -73,7 +73,8 @@ enum CLIEntry {
                 socket: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID, fileService: files),
                 home: paths.home,
                 searchPath: ProcessInfo.processInfo.environment["PATH"] ?? "",
-                applicationsDirectory: appSupport == defaultAppSupport ? "/Applications" : paths.home + "/Applications",
+                applicationsDirectory: files.realPath(at: appSupport) == files.realPath(at: defaultAppSupport)
+                    ? "/Applications" : paths.home + "/Applications",
                 developerDirectory: ProcessInfo.processInfo.environment["DEVELOPER_DIR"]).run(), nil)
         }
         if command is VersionCommand || (command as? PensieveCommand)?.version == true {

@@ -1,5 +1,6 @@
 """Check shipped eval commands against the built CLI's parser and validation."""
 import copy
+import hashlib
 import json
 import re
 import os
@@ -8,6 +9,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 class CLISkillTests(unittest.TestCase):
@@ -16,6 +18,9 @@ class CLISkillTests(unittest.TestCase):
     def test_public_docs_explain_command_and_installation(self):
         root = Path(__file__).resolve().parent.parent
         claims = {
+            "docs/ARCHITECTURE.md": ["static `/bin/sh` program", "base64-quoted positional values", "It reads no file inside the app"],
+            "docs/CONVENTIONS.md": ["base64-quoted positional values", "stdin `/dev/null`", "root reads no file inside the app"],
+            "docs/GETTING-STARTED.md": ["start that app in the background", "Without a desktop session", "exit 3"],
             "README.md": ["Homebrew installs the command for you", "Settings › General › Command Line and click Install",
                           "macOS asks for your password", "pensieve skill list --json", "pensieve doctor --json"],
             "CHANGELOG.md": ["list, install, update, deploy and remove skills", "Homebrew installs it automatically",
@@ -42,6 +47,9 @@ class CLISkillTests(unittest.TestCase):
         self.project = self.home / "Demo project"
         self.project.mkdir()
         self.results = {}
+        runner = mock.patch("subprocess.run", wraps=subprocess.run)
+        calls = runner.start()
+        self.addCleanup(runner.stop)
         for case in evals:
             with self.subTest(eval=case["id"]):
                 self.check_eval(case)
@@ -57,6 +65,14 @@ class CLISkillTests(unittest.TestCase):
         ]:
             with self.subTest(accepted_command=command):
                 self.check_command(command, "command-control")
+
+        with self.subTest(control="group-only"):
+            with self.assertRaisesRegex(AssertionError, "Group-only"):
+                self.check_command("pensieve project --json", "group-control")
+
+        homes = [call.kwargs["env"]["HOME"] for call in calls.call_args_list]
+        with self.subTest(control="fixture-isolation"):
+            self.assertEqual(len(homes), len(set(homes)), "Each distinct eval command needs its own fixture home")
 
         for command, message in [
             ("pensieve deploy review -g --json", "Name an agent with -a"),
@@ -75,6 +91,7 @@ class CLISkillTests(unittest.TestCase):
 
         approved = next(case for case in evals if case["id"] == "delete-with-approval")
         for fault, message in [
+            ("yes", "must pass --yes"),
             ("preview", "must follow a matching --dry-run"),
             ("different-preview", "must follow a matching --dry-run"),
             ("token", "must carry --confirm-plan"),
@@ -83,7 +100,9 @@ class CLISkillTests(unittest.TestCase):
         ]:
             case = copy.deepcopy(approved)
             case["id"] = fault
-            if fault == "preview":
+            if fault == "yes":
+                case["commands"][-1]["run"] = case["commands"][-1]["run"].replace(" --yes", "")
+            elif fault == "preview":
                 case["commands"].pop(-2)
             elif fault == "different-preview":
                 case["commands"][-2]["run"] = case["commands"][-2]["run"].replace("review", "other")
@@ -97,6 +116,11 @@ class CLISkillTests(unittest.TestCase):
             with self.subTest(safety=fault):
                 with self.assertRaisesRegex(AssertionError, message):
                     self.check_eval(case)
+
+        broad = {"id": "broad-control", "prompt": "all", "context": "fixture", "report": "changed",
+                 "commands": [{"run": "pensieve deploy review -a '*' -g --json"}]}
+        with self.assertRaisesRegex(AssertionError, "must follow a matching --dry-run"):
+            self.check_eval(broad)
 
     def check_eval(self, case):
         context = case["id"]
@@ -118,7 +142,13 @@ class CLISkillTests(unittest.TestCase):
                     confirmation = token.split("=", 1)[1]
                 elif token not in ["--dry-run", "--yes", "--json"]:
                     operation.append(token)
-            if "--yes" in options:
+            requires_approval = tokens[1] == "install" or tokens[1:3] in [
+                ["skill", "update"], ["skill", "delete"], ["project", "remove"]]
+            broad = tokens[1] in ["deploy", "undeploy"] and any("*" in token for token in tokens[2:])
+            if (requires_approval or broad) and "--dry-run" not in options:
+                self.assertIn(tuple(operation), previews, f"{context}: apply must follow a matching --dry-run")
+            if requires_approval and "--dry-run" not in options:
+                self.assertIn("--yes", options, f"{context}: apply must pass --yes")
                 self.assertEqual(confirmation, "{confirmation_token}",
                                  f"{context}: --yes must carry --confirm-plan {{confirmation_token}}")
                 self.assertTrue(step.get("approval", "").strip(), f"{context}: --yes must have approval")
@@ -140,11 +170,17 @@ class CLISkillTests(unittest.TestCase):
 
     def check_command(self, command, context):
         """Check CLI parsing and validation, not the app's checks or execution of writes."""
+        key = command
+        home = self.home / hashlib.sha256(command.encode()).hexdigest()[:12]
+        support = home / "support"
+        project = home / "Demo project"
+        support.mkdir(parents=True, exist_ok=True)
+        project.mkdir(exist_ok=True)
         placeholders = {
             "mini_id": "11111111-2222-4333-8444-555555555555",
             "repository_url": "https://github.com/example/skills",
             "confirmation_token": "0123456789abcdef" * 4,
-            "project_path": str(self.project),
+            "project_path": str(project),
         }
         arguments = self.eval_tokens(command, context)[1:]
         for index, token in enumerate(arguments):
@@ -156,15 +192,14 @@ class CLISkillTests(unittest.TestCase):
         self.assertFalse(any(arg.split("=", 1)[0] == "--app-support" for arg in arguments),
                          f"{context}: evals cannot override isolated App Support")
         end = arguments.index("--") if "--" in arguments else len(arguments)
-        arguments[end:end] = ["--app-support", str(self.support)]
-        key = tuple(arguments)
+        arguments[end:end] = ["--app-support", str(support)]
         if key not in self.results:
             # Long temporary socket paths fail with pathTooLong before launch refusal.
             # On shorter paths, alternate App Support disables launch. There is no app
             # socket in this empty folder, so neither path can execute an eval's writes.
             self.results[key] = subprocess.run([str(self.binary), *arguments],
-                env=dict(os.environ, HOME=str(self.home), CFFIXED_USER_HOME=str(self.home), PENSIEVE_NO_INPUT="1"),
-                cwd=self.project, stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=15)
+                env=dict(os.environ, HOME=str(home), CFFIXED_USER_HOME=str(home), PENSIEVE_NO_INPUT="1"),
+                cwd=project, stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=15)
         result = self.results[key]
         detail = f"{context}: {command!r}: exit={result.returncode}, stderr={result.stderr!r}"
         self.assertIn(result.returncode, [0, 2, 3, 64], f"Unexpected CLI outcome for {detail}")
@@ -176,5 +211,9 @@ class CLISkillTests(unittest.TestCase):
         message = (envelope.get("error") or {}).get("message", "")
         if (result.returncode, error) == (64, "usage"):
             self.fail(f"Built CLI rejected eval command {detail}; error=usage; {message}")
+        local = arguments[0] in ["commands", "version", "--version", "status", "deployed", "log", "completion"]
+        local = local or "--help" in arguments or "-h" in arguments or arguments[:2] == ["deployment", "list"]
+        if result.returncode == 0:
+            self.assertTrue(local, f"Group-only or unexpected local success: {detail}")
         self.assertIn((result.returncode, error), [(0, None), (2, "state_unreadable"), (3, "app_unavailable")],
                       f"Unexpected CLI outcome for {detail}; error={error}; {message}")

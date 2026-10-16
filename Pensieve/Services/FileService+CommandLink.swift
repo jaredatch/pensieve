@@ -10,6 +10,46 @@ struct CommandLinkEntry: Equatable, Codable {
     let target: String?
 }
 
+enum CommandLinkStatus: Equatable {
+    case absent, installed(String), homebrew(String), broken, occupied(String)
+    indirect case alongsideHomebrew(CommandLinkStatus, String)
+
+    var message: String {
+        switch self {
+        case .alongsideHomebrew(let local, let brew): return local.message + "; also installed by Homebrew at " + brew
+        case .absent: return "Not installed"
+        case .installed(let path): return "Installed at \(path)"
+        case .homebrew(let path): return "Installed by Homebrew at \(path)"
+        case .broken: return "The link points to a Pensieve that was moved or deleted"
+        case .occupied(let detail): return detail
+        }
+    }
+
+    var hasProblem: Bool {
+        switch self {
+        case .broken, .occupied: return true
+        case .alongsideHomebrew(let local, _): return local.hasProblem
+        default: return false
+        }
+    }
+
+    var actions: [CommandLinkAction] {
+        if case .alongsideHomebrew(let local, _) = self { return local.actions }
+        if self == .broken { return [.repair, .uninstall] }
+        return action.map { [$0] } ?? []
+    }
+
+    var action: CommandLinkAction? {
+        switch self {
+        case .alongsideHomebrew(let local, _): return local.action
+        case .absent, .occupied: return .install
+        case .installed: return .uninstall
+        case .broken: return .repair
+        case .homebrew: return nil
+        }
+    }
+}
+
 enum CommandLinkAction: String, Codable { case install, uninstall, repair }
 
 struct CommandLinkRequest: Codable {
@@ -118,8 +158,23 @@ extension FileService {
 /// bounded regular-file plist proving a Pensieve bundle ID, or a missing app of any name.
 /// All targets must have the absolute, standardized app-helper shape; no empty or dot components.
 enum CommandLinkOwnership {
+    static func status(entry: CommandLinkEntry?, path: String, executable: String, files: FileServiceProtocol,
+                       resolveExecutable: Bool = false) throws -> CommandLinkStatus {
+        guard let entry else { return .absent }
+        if let raw = entry.target {
+            let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+            let absolute = PathSyntax.isAbsolute(raw) ? raw : directory + "/" + raw
+            let target = resolveExecutable && files.isExecutableFile(at: absolute) ? files.realPath(at: absolute) : raw
+            if try isPensieve(target, executable: executable, files: files) {
+                return files.isExecutableFile(at: target) ? .installed(path) : .broken
+            }
+        }
+        return .occupied(entry.target.map { "\(path) is taken by a link to \($0)" }
+            ?? "\(path) is taken by another file")
+    }
+
     static func appPath(_ target: String) -> String? {
-        guard PathSyntax.isAbsolute(target),
+        guard !target.contains("\n"), PathSyntax.isAbsolute(target),
               PathSyntax.components(target, omittingEmptySubsequences: false).dropFirst()
                 .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
         let url = URL(fileURLWithPath: target)
@@ -134,7 +189,6 @@ enum CommandLinkOwnership {
 
     static func isPensieve(_ target: String, executable: String, files: FileServiceProtocol) throws -> Bool {
         guard let app = appPath(target) else { return false }
-        if target == executable { return true }
         guard try files.entryExistsWithoutFollowingLinks(at: app) else { return true }
         guard let bytes = try? files.readRegularFileData(at: app + "/Contents/Info.plist", maximumBytes: 1_048_576),
               let info = try? PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any] else {

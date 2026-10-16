@@ -45,6 +45,7 @@ final class CommandLineSetupTests: XCTestCase {
             environment: ["PATH": bin, "DEVELOPER_DIR": fixture.root + "/missing-tools"]))
         XCTAssertEqual(noTools["git"]?["ok"], .bool(false), "The system git stub is not installed developer tools")
         try await checkLinkOwnership(fixture, bin: bin)
+        try await checkIndirectLinks(fixture, bin: bin)
         try await checkOptionalAgent(fixture, bin: bin)
         try await checkCursorApplication(fixture, bin: bin)
         try fixture.files.deleteFile(at: bin + "/git")
@@ -59,6 +60,10 @@ final class CommandLineSetupTests: XCTestCase {
         XCTAssertEqual(broken["socket"]?["ok"], .bool(true))
         guard case .string(let pathMessage) = broken["path"]?["message"] else { return XCTFail("Missing path diagnostic") }
         XCTAssertTrue(pathMessage.contains("broken link"))
+        try await checkUnavailableApps(fixture, bin: bin)
+    }
+
+    private func checkUnavailableApps(_ fixture: CLILibraryFixture, bin: String) async throws {
         fixture.runtime.commandServer?.stop()
         fixture.runtime.commandServer = nil
         let unavailable = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
@@ -66,25 +71,65 @@ final class CommandLineSetupTests: XCTestCase {
         XCTAssertEqual(unavailable["socket"]?["ok"], .bool(false))
         let socket = CLIProtocol.socketPath(appSupport: fixture.paths.appSupportDir,
                                            bundleID: try XCTUnwrap(Bundle.main.bundleIdentifier))
-        let other = try AppSocketServer(path: socket,
+        var other: AppSocketServer? = try AppSocketServer(path: socket,
             handshake: CLIHandshake(bundlePath: fixture.root + "/Other.app", appVersion: "1"), fileService: fixture.files) { _ in
                 XCTFail("doctor must only inspect the handshake")
                 return .success(.null)
             }
-        defer { other.stop() }
+        defer { other?.stop() }
         let wrong = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
         XCTAssertEqual(wrong["app"]?["ok"], .bool(false))
+        XCTAssertEqual(wrong["app"]?["message"], .string("Another Pensieve copy answered: " + fixture.root + "/Other.app"))
+        XCTAssertEqual(wrong["app"]?["hint"], .string("Quit that copy and open "
+            + fixture.files.realPath(at: Bundle.main.bundlePath) + "."))
+        other?.stop()
+        other = nil
+        let mismatch = try AppSocketServer(path: socket, handshake: CLIHandshake(bundlePath: Bundle.main.bundlePath,
+            protocolVersion: 99, appVersion: "1"), fileService: fixture.files) { _ in .success(.null) }
+        defer { mismatch.stop() }
+        let protocolFailure = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
+        XCTAssertEqual(protocolFailure["app"]?["message"], .string("The app uses a different command protocol."))
+        XCTAssertEqual(protocolFailure["app"]?["hint"], .string("Use the command bundled with this app."))
         XCTAssertEqual(wrong["socket"]?["ok"], .bool(true))
+    }
+
+    private func checkIndirectLinks(_ fixture: CLILibraryFixture, bin: String) async throws {
+        let chain = fixture.root + "/helper-chain"
+        try fixture.files.createSymlink(at: chain, pointingTo: Bundle.main.bundlePath + "/Contents/Helpers/pensieve")
+        for target in [chain, "../helper-chain"] {
+            try fixture.files.deleteFile(at: bin + "/pensieve")
+            XCTAssertEqual(symlink(target, bin + "/pensieve"), 0)
+            let resolved = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
+            XCTAssertEqual(resolved["path"]?["ok"], .bool(true), "Working indirect PATH links must pass")
+        }
+        let other = fixture.root + "/OtherCopy.app"
+        try fixture.files.writeData(at: other + "/Contents/Info.plist",
+                                   data: fixture.files.readData(at: Bundle.main.bundlePath + "/Contents/Info.plist"))
+        try fixture.files.writeExecutableFile(at: other + "/Contents/Helpers/pensieve", content: "#!/bin/sh\nexit 0\n")
+        try fixture.files.deleteFile(at: bin + "/pensieve")
+        try fixture.files.createSymlink(at: bin + "/pensieve", pointingTo: other + "/Contents/Helpers/pensieve")
+        let otherCopy = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
+        XCTAssertEqual(otherCopy["path"]?["ok"], .bool(true))
+        XCTAssertEqual(otherCopy["path"]?["message"],
+                       .string(bin + "/pensieve: another Pensieve copy at " + other + "/Contents/Helpers/pensieve"))
+        try fixture.files.deleteFile(at: bin + "/pensieve")
+        try fixture.files.createSymlink(at: bin + "/pensieve", pointingTo: Bundle.main.bundlePath + "/Contents/Helpers/pensieve")
     }
 
     private func checkLinkOwnership(_ fixture: CLILibraryFixture, bin: String) async throws {
         let path = bin + "/pensieve"
+        defer {
+            try? fixture.files.deleteFile(at: path)
+            try? fixture.files.createSymlink(at: path, pointingTo: Bundle.main.bundlePath + "/Contents/Helpers/pensieve")
+        }
         let app = fixture.root + "/Incomplete.app"
         try fixture.files.writeData(at: app + "/Contents/Info.plist",
                                    data: fixture.files.readData(at: Bundle.main.bundlePath + "/Contents/Info.plist"))
         for (target, isBroken) in [(app + "/Contents/Helpers/pensieve", true),
                                    (fixture.root + "/Work.app/Contents/Helpers/pensieve", true),
                                    (fixture.root + "//Work.app/Contents/Helpers/pensieve", false),
+                                   (fixture.root + "/Work.app/Contents//Helpers/pensieve", false),
+                                   (fixture.root + "/Work.app/Contents/Helpers//pensieve", false),
                                    (fixture.root + "/./Work.app/Contents/Helpers/pensieve", false),
                                    (fixture.root + "/gone/../Work.app/Contents/Helpers/pensieve", false),
                                    ("Work.app/Contents/Helpers/pensieve", false)] {

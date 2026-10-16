@@ -74,7 +74,10 @@ extension CommandLinkInstallerTests {
         }
         for (message, expected) in [("User canceled. (128)", "User canceled."),
                                     ("User canceled. (-128) (1)", "User canceled. (-128)"),
-                                    ("The link target changed. (1)", "The link target changed.")] {
+                                    ("The link target changed. (1)", "The link target changed."),
+                                    ("The command exited with a non-zero status. (1)", "The administrator command failed."),
+                                    ("The command terminated due to receipt of a signal. (1015)",
+                                     "The administrator command failed.")] {
             let error = AppleScriptAdministratorPrompt.failure(status: 1, message: "0:2927: execution error: " + message)
             XCTAssertEqual(error.code, 1, "A shell failure cannot forge cancellation")
             XCTAssertEqual(error.localizedDescription, expected)
@@ -83,10 +86,10 @@ extension CommandLinkInstallerTests {
                        "The administrator command failed.")
         let prompt = AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
         do {
-            try await BlockingWork.run { try prompt.run(shellCommand: "printf '%s' 'fixture failure' >&2; exit 7") }
+            try await BlockingWork.run { try prompt.run(shellCommand: "exit 7") }
             XCTFail("A failed shell command must be reported")
         } catch {
-            XCTAssertEqual(error.localizedDescription, "fixture failure")
+            XCTAssertEqual(error.localizedDescription, "The administrator command failed.")
             XCTAssertNotEqual((error as NSError).code, -128)
         }
     }

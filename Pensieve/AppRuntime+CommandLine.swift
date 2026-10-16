@@ -23,7 +23,8 @@ extension AppRuntimePaths {
             directory: live ? "/usr/local/bin" : appSupportDir + "/command-line/bin",
             executable: Bundle.main.bundlePath + "/Contents/Helpers/pensieve", user: getuid(),
             homebrewDirectories: live ? ["/opt/homebrew/bin", "/usr/local/bin"] : [],
-            authorization: live ? AdminCommandLinkAuthorization() : UnavailableCommandLinkAuthorization())
+            authorization: live ? AdminCommandLinkAuthorization() : UnavailableCommandLinkAuthorization(),
+            ancestorOwner: live ? 0 : getuid())
         return CommandLineSettingsModel(installer: installer)
     }
 }

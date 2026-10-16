@@ -45,8 +45,10 @@ struct AppleScriptAdministratorPrompt: AdministratorPromptRunning {
             with: "", options: .regularExpression)
             .replacingOccurrences(of: #" \(-?\d+\)$"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let silent = sentence.isEmpty || ["The command exited with a non-zero status.",
+                                          "The command terminated due to receipt of a signal."].contains(sentence)
         return NSError(domain: errorDomain, code: cancelled ? -128 : Int(status),
-                       userInfo: [NSLocalizedDescriptionKey: sentence.isEmpty ? "The administrator command failed." : sentence])
+                       userInfo: [NSLocalizedDescriptionKey: silent ? "The administrator command failed." : sentence])
     }
 }
 

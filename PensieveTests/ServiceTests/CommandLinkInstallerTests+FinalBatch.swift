@@ -6,7 +6,7 @@ extension CommandLinkInstallerTests {
     func assertUnicodeArgumentsAndMissingParents() async throws {
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
-        let target = fixture.root + "/Café ' \" \n/PensieveMoved.app/Contents/Helpers/pensieve"
+        let target = fixture.root + "/Café ' \" /PensieveMoved.app/Contents/Helpers/pensieve"
         try fixture.files.createDirectory(at: fixture.directory)
         XCTAssertEqual(symlink(target, fixture.path), 0)
         XCTAssertEqual(Data(try fixture.files.symlinkTarget(at: fixture.path).utf8), Data(target.utf8),
@@ -30,13 +30,26 @@ extension CommandLinkInstallerTests {
     func assertRootRejectsInvalidArguments() async throws {
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
-        for executable in [fixture.root + "/pensieve", "Relative.app/Contents/Helpers/pensieve"] {
+        for executable in [fixture.root + "/pensieve", "Relative.app/Contents/Helpers/pensieve",
+                           fixture.root + "/../Work.app/Contents/Helpers/pensieve",
+                           fixture.root + "/./Work.app/Contents/Helpers/pensieve",
+                           fixture.root + "//Work.app/Contents/Helpers/pensieve",
+                           fixture.root + "/.app/Contents/Helpers/pensieve",
+                           fixture.root + "/New\nline.app/Contents/Helpers/pensieve"] {
             let request = CommandLinkRequest(action: .install, directory: fixture.directory,
                 executable: executable, user: getuid(), expected: nil)
             XCTAssertThrowsError(try FixtureCommandAuthorization().run(request), "Root must require an absolute app helper")
             if try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) {
                 try fixture.files.deleteFile(at: fixture.path)
             }
+            try fixture.files.createDirectory(at: fixture.directory)
+            XCTAssertEqual(symlink(executable, fixture.path), 0)
+            let before = try fixture.files.commandLinkEntry(at: fixture.path)
+            let removal = CommandLinkRequest(action: .uninstall, directory: fixture.directory,
+                executable: fixture.executable, user: getuid(), expected: before)
+            XCTAssertThrowsError(try FixtureCommandAuthorization().run(removal), "Root must reject malformed captured targets")
+            XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+            try fixture.files.deleteFile(at: fixture.path)
         }
         let highDevice = CommandLinkEntry(kind: .symlink, owner: getuid(), device: Int32.min, inode: 123,
                                           target: fixture.removedExecutable)
@@ -77,7 +90,8 @@ extension CommandLinkInstallerTests {
                            fixture.root + "/AppTranslocation/token/d/Pensieve.app/Contents/Helpers/pensieve"] {
             let installer = fixture.installer(executable: executable)
             let model = CommandLineSettingsModel(installer: installer)
-            await model.perform(.install)
+            await model.repairAtLaunch()
+            await model.refresh()
             XCTAssertEqual(model.error, "Move Pensieve to your Applications folder first.")
             if try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) {
                 try fixture.files.deleteFile(at: fixture.path)
@@ -88,6 +102,18 @@ extension CommandLinkInstallerTests {
             try fixture.files.deleteFile(at: fixture.path)
         }
         XCTAssertEqual(fixture.authorization.calls, 0, "A temporary app location must refuse before prompting")
+        let temporaryApp = fixture.root + "/AppTranslocation/Temporary.app"
+        try fixture.files.writeExecutableFile(at: temporaryApp + "/Contents/Helpers/pensieve", content: "#!/bin/sh\nexit 0\n")
+        let alias = fixture.root + "/Alias.app"
+        try fixture.files.createSymlink(at: alias, pointingTo: temporaryApp)
+        let moved = CommandLineSettingsModel(installer: fixture.installer(executable: alias + "/Contents/Helpers/pensieve"))
+        await moved.repairAtLaunch()
+        await moved.refresh()
+        XCTAssertEqual(moved.error, "Move Pensieve to your Applications folder first.")
+        try fixture.files.deleteFile(at: alias)
+        try fixture.files.createSymlink(at: alias, pointingTo: Bundle.main.bundlePath)
+        await moved.refresh()
+        XCTAssertNil(moved.error, "The typed location error clears when the real location becomes permanent")
     }
 
     func assertUnreadablePlistIsOccupied() async throws {
@@ -112,7 +138,8 @@ extension CommandLinkInstallerTests {
             }
             let before = try fixture.files.commandLinkEntry(at: fixture.path)
             await model.refresh()
-            XCTAssertNil(model.error, "An unproven identity is an occupied path, not an unavailable Settings page")
+            // An unchanged occupied status preserves the previous action refusal.
+            if identity == "missing" { XCTAssertNil(model.error) }
             if case .occupied = model.status {} else { XCTFail("Unproven apps must be occupied: \(identity)") }
             for action in [CommandLinkAction.install, .uninstall, .repair] {
                 await model.perform(action)
@@ -134,6 +161,7 @@ struct SettingsCheckingInstaller: CommandLinkInstalling {
     }
     func perform(_ action: CommandLinkAction) throws { try base.perform(action) }
     func repairAtLaunch() throws { try base.repairAtLaunch() }
+    func checkAppLocation() throws { try base.checkAppLocation() }
 }
 
 extension CommandLinkInstallerTests {
@@ -200,8 +228,9 @@ extension CommandLinkInstallerTests {
             let app = fixture.root + "/Work.app"
             let helper = app + "/Contents/Helpers/pensieve"
             try fixture.files.writeExecutableFile(at: helper, content: "#!/bin/sh\nexit 0\n")
-            if identifier != "own-helper" {
-                let data = try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": identifier],
+            do {
+                let identity = identifier == "own-helper" ? "com.jaredatch.Pensieve.debug" : identifier
+                let data = try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": identity],
                                                               format: .xml, options: 0)
                 try fixture.files.writeData(at: app + "/Contents/Info.plist", data: data)
             }
@@ -220,12 +249,13 @@ extension CommandLinkInstallerTests {
                 if try !fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) { try fixture.link(to: helper) }
                 try fixture.files.createDirectory(at: fixture.root + "/local/Caskroom/pensieve")
                 XCTAssertEqual(try fixture.installer(homebrew: [fixture.directory], executable: helper).status(),
-                               .homebrew(fixture.path), "Homebrew must recognize our own helper without a plist")
+                               .homebrew(fixture.path), "Homebrew must recognize our own identified helper")
                 try fixture.files.deleteDirectory(at: fixture.root + "/local/Caskroom")
             }
             await model.perform(.uninstall)
             XCTAssertNil(model.error, "A renamed Pensieve app must be uninstallable")
             XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
+            if identifier == "own-helper" { try assertForeignReplacement(fixture, helper: helper, app: app) }
             try fixture.files.deleteDirectory(at: app)
             try fixture.link(to: helper)
             let moved = CommandLineSettingsModel(installer: fixture.installer())
@@ -236,6 +266,23 @@ extension CommandLinkInstallerTests {
             XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
         }
     }
+    private func assertForeignReplacement(_ fixture: CommandLinkFixture, helper: String, app: String) throws {
+        try fixture.files.writeData(at: app + "/Contents/Info.plist", data: PropertyListSerialization.data(
+            fromPropertyList: ["CFBundleIdentifier": "com.example.foreign"], format: .xml, options: 0))
+        try fixture.link(to: helper)
+        if case .occupied = try fixture.installer(executable: helper).status() {} else {
+            XCTFail("A foreign app at the old launch path must not own the helper")
+        }
+        for action in [CommandLinkAction.repair, .uninstall] {
+            let before = try fixture.files.commandLinkEntry(at: fixture.path)
+            let request = CommandLinkRequest(action: action, directory: fixture.directory,
+                executable: helper, user: getuid(), expected: before)
+            XCTAssertThrowsError(try fixture.files.changeCommandLink(request), "The write recheck must refuse a foreign plist")
+            XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+        }
+        try fixture.files.deleteFile(at: fixture.path)
+    }
+
 }
 
 extension CommandLinkInstallerTests {
@@ -268,4 +315,41 @@ extension CommandLinkInstallerTests {
             }
         }
     }
+}
+
+extension CommandLinkInstallerTests {
+    func assertRefreshCannotOverwriteAction() async throws {
+        let fixture = try CommandLinkFixture()
+        defer { fixture.clean() }
+        let gate = TestWait.Gate(owner: self)
+        let installer = HeldSettingsInstaller(base: fixture.installer(), gate: gate)
+        let model = CommandLineSettingsModel(installer: installer)
+        let refresh = Task { await model.refresh() }
+        await TestWait.until(failureMessage: "Refresh captures the old absent status") { gate.waiterCount == 1 }
+        await model.perform(.install)
+        gate.open()
+        await refresh.value
+        XCTAssertEqual(model.status, .installed(fixture.path), "An older refresh must not overwrite the action result")
+    }
+}
+
+/// Holds one real status snapshot while an action changes the same fixture link.
+private final class HeldSettingsInstaller: CommandLinkInstalling {
+    let base: CommandLinkInstaller
+    let gate: TestWait.Gate
+    private let lock = NSLock()
+    private var hold = true
+    init(base: CommandLinkInstaller, gate: TestWait.Gate) { self.base = base; self.gate = gate }
+    func status() throws -> CommandLinkStatus {
+        let snapshot = try base.status()
+        lock.lock()
+        let held = hold
+        hold = false
+        lock.unlock()
+        if held { try gate.wait() }
+        return snapshot
+    }
+    func perform(_ action: CommandLinkAction) throws { try base.perform(action) }
+    func repairAtLaunch() throws { try base.repairAtLaunch() }
+    func checkAppLocation() throws { try base.checkAppLocation() }
 }

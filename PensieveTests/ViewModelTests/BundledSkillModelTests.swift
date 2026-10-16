@@ -12,9 +12,9 @@ final class BundledSkillModelTests: XCTestCase {
         let model = fixture.runtime.bundledSkill
         model.error = "Stale error"
         await model.refresh(context: fixture.context)
-        XCTAssertNil(model.error, "A successful skill refresh clears stale errors")
+        XCTAssertEqual(model.error, "Stale error", "Unchanged skill state must preserve its error")
         XCTAssertEqual(model.state, .absent)
-        model.add(context: fixture.context)
+        await model.add(context: fixture.context)
         XCTAssertNil(model.error)
         XCTAssertEqual(model.state, .installed)
         let skills = try fixture.context.fetch(FetchDescriptor<Skill>())
@@ -25,7 +25,7 @@ final class BundledSkillModelTests: XCTestCase {
         _ = try await fixture.run(["deploy", "pensieve", "-a", "claude", "-g"])
         XCTAssertEqual(try fixture.files.symlinkTarget(at: fixture.root + "/home/.claude/skills/pensieve"),
                        fixture.paths.skillsDir + "/pensieve")
-        model.add(context: fixture.context)
+        await model.add(context: fixture.context)
         XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 1)
         try await assertUserNamedSkillIsPreserved()
         try await assertManifestFailureStillRecordsTheAddedSkill()
@@ -39,22 +39,21 @@ final class BundledSkillModelTests: XCTestCase {
         let original = try fixture.files.readFile(at: Bundle.main.bundlePath + "/Contents/Resources/pensieve/SKILL.md")
         try fixture.files.writeFile(at: source + "/SKILL.md", content: original)
         let library = fixture.runtime.library
-        let model = BundledSkillModel(files: fixture.files, bundledDirectory: source,
+        let observed = SettingsReadFiles(base: fixture.files)
+        let model = BundledSkillModel(files: observed, bundledDirectory: source,
             receiptPath: fixture.paths.appSupportDir + "/bundled-receipt.json", lockPath: fixture.paths.syncLockPath,
             library: library, importer: fixture.paths.makeImportViewModel(
                 notifier: { library.notifySyncedStateMutation() },
                 echoRegistrar: { library.noteAppAuthoredBodies(directoryNames: $0) }))
-        model.add(context: fixture.context)
+        await model.add(context: fixture.context)
         XCTAssertNil(model.error)
         let skill = try XCTUnwrap(fixture.context.fetch(FetchDescriptor<Skill>()).first)
         let path = fixture.paths.skillsDir + "/pensieve/SKILL.md"
-        // A synced copy has its content but no receipt on this Mac.
-        try fixture.files.deleteFile(at: fixture.paths.appSupportDir + "/bundled-receipt.json")
         let updated = Self.version(original, adding: "Bundled update one.")
         try fixture.files.writeFile(at: source + "/SKILL.md", content: updated)
         await model.refresh(context: fixture.context)
         XCTAssertEqual(model.state, .update)
-        model.update(context: fixture.context)
+        await assertUpdateWinsRefresh(model, observed: observed, context: fixture.context)
         XCTAssertNil(model.error)
         XCTAssertEqual(try fixture.files.readFile(at: path), updated)
         XCTAssertEqual(library.editorBody(for: skill), updated)
@@ -67,19 +66,33 @@ final class BundledSkillModelTests: XCTestCase {
         try fixture.files.writeFile(at: source + "/SKILL.md", content: next)
         await model.refresh(context: fixture.context)
         XCTAssertEqual(model.state, .edited)
-        model.update(context: fixture.context)
+        await model.update(context: fixture.context)
         XCTAssertNotNil(model.error)
+        let refusal = model.error
+        await model.refresh(context: fixture.context)
+        XCTAssertEqual(model.error, refusal, "Focus refresh must preserve an applicable action error")
         XCTAssertEqual(try fixture.files.readFile(at: path), edited)
-        model.update(context: fixture.context, replaceEdits: true)
+        await model.update(context: fixture.context, replaceEdits: true)
         XCTAssertNil(model.error)
         XCTAssertEqual(try fixture.files.readFile(at: path), next)
         XCTAssertEqual(model.state, .installed)
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: next + "unsaved draft")
-        model.update(context: fixture.context, replaceEdits: true)
+        await model.update(context: fixture.context, replaceEdits: true)
         XCTAssertTrue(model.error?.contains("draft") == true)
         XCTAssertEqual(try fixture.files.readFile(at: path), next)
     }
+    private func assertUpdateWinsRefresh(_ model: BundledSkillModel, observed: SettingsReadFiles, context: ModelContext) async {
+        let gate = TestWait.Gate(owner: self)
+        observed.pauseNextRead = gate
+        let refresh = Task { await model.refresh(context: context) }
+        await TestWait.until(failureMessage: "Skill refresh captures the pre-update bytes") { gate.waiterCount == 1 }
+        await model.update(context: context)
+        gate.open()
+        await refresh.value
+        XCTAssertEqual(model.state, .installed, "An older skill refresh cannot overwrite Update")
+    }
+
     private static func version(_ original: String, adding body: String) -> String {
         let content = original.components(separatedBy: "\n").filter { !$0.hasPrefix("pensieve-bundled: ") }
             .joined(separator: "\n") + "\n" + body + "\n"
@@ -91,20 +104,28 @@ final class BundledSkillModelTests: XCTestCase {
         let fixture = try CLILibraryFixture()
         defer { fixture.stop() }
         try await fixture.start()
-        let own = "---\nname: pensieve\ndescription: My own skill\n---\nMy private instructions.\n"
+        let own = try fixture.files.readFile(at: Bundle.main.bundlePath + "/Contents/Resources/pensieve/SKILL.md")
         let directory = try fixture.runtime.library.skillStore.createSkill(name: "pensieve", content: own, avoiding: [])
         fixture.context.insert(Skill(name: "pensieve", directoryName: directory))
         try fixture.context.save()
         let model = fixture.runtime.bundledSkill
         await model.refresh(context: fixture.context)
         XCTAssertEqual(model.state, .absent, "A user's same-named skill must offer Add, never Replace")
-        model.add(context: fixture.context)
+        await model.add(context: fixture.context)
         XCTAssertNil(model.error, "An imported collision is still an added bundled skill")
         XCTAssertEqual(model.state, .installed)
         XCTAssertEqual(try fixture.files.readFile(at: fixture.paths.skillsDir + "/pensieve/SKILL.md"), own)
         XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 2)
-        model.add(context: fixture.context)
+        await model.add(context: fixture.context)
         XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 2, "Retry must not duplicate an imported skill")
-        XCTAssertTrue(fixture.files.fileExists(at: fixture.paths.appSupportDir + "/pensieve-skill-receipt.json"))
+        let receipt = fixture.paths.appSupportDir + "/pensieve-skill-receipt.json"
+        XCTAssertTrue(fixture.files.fileExists(at: receipt))
+        let added = try XCTUnwrap(fixture.context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName != directory })
+        fixture.context.delete(added)
+        try fixture.context.save()
+        await model.refresh(context: fixture.context)
+        XCTAssertEqual(model.state, .absent, "A missing receipt skill offers Add despite a user copy with the marker")
+        await model.update(context: fixture.context, replaceEdits: true)
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.paths.skillsDir + "/pensieve/SKILL.md"), own)
     }
 }

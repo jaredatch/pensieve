@@ -5,6 +5,7 @@ import XCTest
 @MainActor
 final class CommandLinkInstallerTests: XCTestCase {
     func testInstallCreatesFolderAndNewShellRunsBundledVersionThenUninstalls() async throws {
+        try await assertRefreshCannotOverwriteAction()
         try await assertRenamedAppsCanBeUninstalled()
         try assertPromptConfiguration()
         try await assertPromptRejectsInheritedEnvironment()
@@ -81,6 +82,8 @@ final class CommandLinkInstallerTests: XCTestCase {
             executable: "/" + String(repeating: "a", count: 5000) + ".app/Contents/Helpers/pensieve"))
         await failure.perform(.install)
         XCTAssertNotNil(failure.error)
+        XCTAssertEqual(failure.error, "The link wasn't made. The command folder was kept.",
+                       "Tool stderr must not escape the root program")
         XCTAssertTrue(failure.error?.contains("link wasn't made") == true)
         XCTAssertTrue(fixture.files.directoryExists(at: fixture.directory))
         XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
@@ -210,7 +213,10 @@ final class CommandLinkInstallerTests: XCTestCase {
         XCTAssertEqual(try fixture.files.symlinkTarget(at: brew + "/bin/pensieve"), fixture.executable)
         model.error = "An old error"
         await model.refresh()
-        XCTAssertNil(model.error, "A successful refresh clears stale errors")
+        XCTAssertEqual(model.error, "An old error", "An unchanged status must preserve its error")
+        try fixture.link(to: fixture.executable)
+        await model.refresh()
+        XCTAssertNil(model.error, "A changed link state clears the error describing its old state")
     }
 
     func testRepairUsesAuthorizationAndRefusesAStillExistingApp() async throws {
@@ -235,6 +241,7 @@ final class CommandLinkInstallerTests: XCTestCase {
         XCTAssertNotNil(model.error)
         XCTAssertEqual(fixture.authorization.calls, 1)
         XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+        XCTAssertTrue(model.status.actions.contains(.uninstall), "Broken links must also offer Uninstall")
         let request = CommandLinkRequest(action: .repair, directory: fixture.directory,
             executable: fixture.executable, user: getuid(), expected: before)
         XCTAssertThrowsError(try FixtureCommandAuthorization().run(request))

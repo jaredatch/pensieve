@@ -21,7 +21,7 @@ final class CommandLinkFixture {
                    files: FileServiceProtocol? = nil) -> CommandLinkInstaller {
         CommandLinkInstaller(files: files ?? self.files, directory: directory, executable: executable ?? self.executable,
                              user: user, homebrewDirectories: homebrew,
-                             authorization: AdminCommandLinkAuthorization(prompt: authorization))
+                             authorization: AdminCommandLinkAuthorization(prompt: authorization), ancestorOwner: getuid())
     }
 
     func link(to target: String) throws { try files.createSymlink(at: path, pointingTo: target) }
@@ -63,8 +63,19 @@ final class FixtureCommandAuthorization: AdministratorPromptRunning {
         }
         if let failureMessage { throw AppleScriptAdministratorPrompt.failure(status: 1, message: failureMessage) }
         try beforeRun?()
-        try AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
-            .run(shellCommand: "umask 077\n" + shellCommand, action: action)
+        let process = AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
+            .makeProcess(shellCommand: "umask 077\n" + shellCommand, action: action)
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        let result = try CLIProcessProbe.run(process, timeout: 15)
+        XCTAssertFalse(result.timedOut, "The privileged fixture must finish without reading the app FIFO")
+        guard !result.timedOut else { throw CommandLinkError(message: "The privileged fixture timed out.") }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard result.status == 0 else {
+            throw AppleScriptAdministratorPrompt.failure(status: result.status ?? 1,
+                message: String(data: data, encoding: .utf8) ?? "")
+        }
     }
 }
 

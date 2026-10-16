@@ -25,7 +25,7 @@ struct CommandLineSettingsSection: View {
                     .font(.caption)
                 }
                 Spacer(minLength: Spacing.sm)
-                if let action = links.status.action {
+                ForEach(links.status.actions, id: \.rawValue) { action in
                     Button(actionTitle(action)) { Task { await links.perform(action) } }
                         .disabled(links.isWorking || isOccupied)
                         .accessibilityLabel(actionTitle(action) + " command line tool")
@@ -46,12 +46,15 @@ struct CommandLineSettingsSection: View {
                 Spacer(minLength: Spacing.sm)
                 switch skill.state {
                 case .absent:
-                    Button("Add to Library") { skill.add(context: context) }.disabled(runtime.library.addsFenced)
+                    Button("Add to Library") { Task { await skill.add(context: context) } }
+                        .disabled(runtime.library.addsFenced || skill.isWorking)
                 case .installed: EmptyView()
                 case .update:
-                    Button("Update") { skill.update(context: context) }.disabled(runtime.library.addsFenced)
+                    Button("Update") { Task { await skill.update(context: context) } }
+                        .disabled(runtime.library.addsFenced || skill.isWorking)
                 case .edited:
-                    Button("Replace…") { confirmsReplacement = true }.disabled(runtime.library.addsFenced)
+                    Button("Replace…") { confirmsReplacement = true }
+                        .disabled(runtime.library.addsFenced || skill.isWorking)
                 }
             }
             .frame(minHeight: DesignTokens.commandLineRowContentHeight)
@@ -66,7 +69,7 @@ struct CommandLineSettingsSection: View {
         .onChange(of: activeState) { _, _ in Task { await refresh() } }
         .alert("Replace your pensieve skill?", isPresented: $confirmsReplacement) {
             Button("Cancel", role: .cancel) {}
-            Button("Replace", role: .destructive) { skill.update(context: context, replaceEdits: true) }
+            Button("Replace", role: .destructive) { Task { await skill.update(context: context, replaceEdits: true) } }
         } message: {
             Text("This replaces your saved edits with the skill bundled with this app.")
         }

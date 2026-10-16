@@ -27,12 +27,16 @@ final class PensieveSkillTests: XCTestCase {
             "For a known command", "`pensieve <command> --help --json`",
             "`pensieve commands --json` only to find an unfamiliar command",
             "Always pass `--json`", "Look names up", "Never guess",
-            "Never write into `~/.claude/skills`",
+            "Never write into `~/.claude/skills`", "or any other agent's folder",
+            "or choose between ambiguous matches", "`ok`, `changed`, `error.code` and the exit code",
+            "Before `install`, `skill update`, `skill delete` or `project remove`",
+            "`pensieve install <url> --dry-run --json` without `--skill`",
             "`--dry-run` before a broad change", "`-a '*'` only when the person says \"all\"",
             "names skills to install from a repository", "each as `--skill <slug>` in both the dry run and the apply",
             "ask for approval", "`--yes` only after they agree",
             "`confirmationToken` in `--confirm-plan`",
             "Retry only when `error.retryable` is true", "Report what changed",
+            "`partial` result", "`changed: false`", "`next` suggestions",
             "next sync after this Mac pushes", "absolute path inside the intended app",
             "`/Applications/Pensieve.app/Contents/Helpers/pensieve`"
         ]
@@ -41,7 +45,7 @@ final class PensieveSkillTests: XCTestCase {
         }
     }
 
-    func testBuiltAppContainsTheDistributableSkillAndEvals() throws {
+    func testBuiltAppContainsOnlyTheDistributableSkill() throws {
         let resources = try XCTUnwrap(Bundle.main.resourceURL)
         let bundled = resources.appendingPathComponent("pensieve")
         let files = FileService()
@@ -52,6 +56,9 @@ final class PensieveSkillTests: XCTestCase {
         let text = try files.readFile(at: path)
         let lines = text.components(separatedBy: "\n")
         let markers = lines.filter { $0.hasPrefix("pensieve-bundled: ") }
+        XCTAssertTrue(BundledSkillContent.isUnedited(Data(text.utf8)), "Shipped bytes must be recognized as unedited")
+        XCTAssertEqual(BundledSkillContent.version(Data(text.utf8)), markers.first.map { String($0.dropFirst(18)) },
+                       "The marker must be in front matter where version reads it")
         XCTAssertEqual(markers.count, 1, "The shipped skill must carry one version marker")
         let content = lines.filter { !$0.hasPrefix("pensieve-bundled: ") }.joined(separator: "\n")
         let digest = SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()

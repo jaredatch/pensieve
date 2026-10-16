@@ -35,27 +35,12 @@ struct CLIDoctor {
                                    launcher: CLIAppLauncher(fileService: files), bundleID: "")
             let handshake = try checkedHandshake(client, descriptor: descriptor)
             record("app", true, handshake.bundlePath, "This app is reachable.")
+        } catch let refusal as LaunchRefusal {
+            let error = refusal.reply.envelope.error
+            record("app", false, error?.message ?? "The app refused the connection.", error?.hint ?? "Open \(app).")
         } catch { record("app", false, error.localizedDescription, "Open \(app), then run doctor again.") }
         let directories = searchPath.components(separatedBy: ":").filter { PathSyntax.isAbsolute($0) }
-        var found = false
-        for directory in directories {
-            let path = directory + "/pensieve"
-            do {
-                guard let entry = try files.commandLinkEntry(at: path) else { continue }
-                found = true
-                let executable = app + "/Contents/Helpers/pensieve"
-                let owned = try entry.target.map {
-                    try CommandLinkOwnership.isPensieve($0, executable: executable, files: files)
-                } ?? false
-                let runnable = entry.target.map { files.isExecutableFile(at: $0) } ?? false
-                let matches = owned && runnable
-                    && entry.target.map { files.realPath(at: $0) == files.realPath(at: executable) } == true
-                let broken = owned && !runnable
-                record("path", matches, path + (broken ? ": broken link" : ""),
-                       "Use Settings > General > Command Line to install or repair this app's command.")
-            } catch { record("path", false, path + ": " + error.localizedDescription, "Check this PATH entry.") }
-        }
-        if !found { record("path", false, "pensieve is not on PATH.", "Install the command in Settings > General.") }
+        checkPath(directories: directories, record: record)
         let git = directories.map { $0 + "/git" }.first { files.isExecutableFile(at: $0) }
         let gitWorks = git.map { files.realPath(at: $0) != "/usr/bin/git" || developerToolsAvailable() } ?? false
         record("git", gitWorks, gitWorks ? (git ?? "") : "git or its developer tools are missing.",
@@ -68,6 +53,32 @@ struct CLIDoctor {
             error: CLIError(code: "doctor_failed", message: "Some setup checks failed.",
                             hint: "Follow the hint for each failed check.", retryable: false)), exitCode: 1)
     }
+    private func checkPath(directories: [String], record: (String, Bool, String, String) -> Void) {
+        var found = false
+        for directory in directories {
+            let path = directory + "/pensieve"
+            do {
+                guard let entry = try files.commandLinkEntry(at: path) else { continue }
+                found = true
+                let executable = app + "/Contents/Helpers/pensieve"
+                let status = try CommandLinkOwnership.status(entry: entry, path: path, executable: executable,
+                                                             files: files, resolveExecutable: true)
+                let target = entry.target.map {
+                    PathSyntax.isAbsolute($0) ? $0 : directory + "/" + $0
+                }
+                let resolved = target.map { files.realPath(at: $0) }
+                let other = resolved != files.realPath(at: executable)
+                let note = status == .broken ? ": broken link" : ""
+                let message = status.hasProblem ? status.message + note
+                    : path + (other ? ": another Pensieve copy at " + (resolved ?? "") : "")
+                record("path", !status.hasProblem, message,
+                       other && !status.hasProblem ? "This command runs that Pensieve copy."
+                       : "Use Settings > General > Command Line to install or repair this app's command.")
+            } catch { record("path", false, path + ": " + error.localizedDescription, "Check this PATH entry.") }
+        }
+        if !found { record("path", false, "pensieve is not on PATH.", "Install the command in Settings > General.") }
+    }
+
     private func checkedHandshake(_ client: CLIClient, descriptor: Int32) throws -> CLIHandshake {
         try client.validatePeer(descriptor)
         let data = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.requestLimit, timeout: 1)

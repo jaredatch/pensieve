@@ -160,6 +160,6 @@ struct CLIClient {
     }
 }
 
-private struct LaunchRefusal: Error {
+struct LaunchRefusal: Error {
     let reply: CLIReply
 }

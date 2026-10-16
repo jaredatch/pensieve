@@ -8,40 +8,7 @@ protocol CommandLinkInstalling {
     func status() throws -> CommandLinkStatus
     func perform(_ action: CommandLinkAction) throws
     func repairAtLaunch() throws
-}
-
-enum CommandLinkStatus: Equatable {
-    case absent, installed(String), homebrew(String), broken, occupied(String)
-    indirect case alongsideHomebrew(CommandLinkStatus, String)
-
-    var message: String {
-        switch self {
-        case .alongsideHomebrew(let local, let brew): return local.message + "; also installed by Homebrew at " + brew
-        case .absent: return "Not installed"
-        case .installed(let path): return "Installed at \(path)"
-        case .homebrew(let path): return "Installed by Homebrew at \(path)"
-        case .broken: return "The link points to a Pensieve that was moved or deleted"
-        case .occupied(let detail): return detail
-        }
-    }
-
-    var hasProblem: Bool {
-        switch self {
-        case .broken, .occupied: return true
-        case .alongsideHomebrew(let local, _): return local.hasProblem
-        default: return false
-        }
-    }
-
-    var action: CommandLinkAction? {
-        switch self {
-        case .alongsideHomebrew(let local, _): return local.action
-        case .absent, .occupied: return .install
-        case .installed: return .uninstall
-        case .broken: return .repair
-        case .homebrew: return nil
-        }
-    }
+    func checkAppLocation() throws
 }
 
 struct CommandLinkInstaller: CommandLinkInstalling {
@@ -51,6 +18,7 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     let user: UInt32
     let homebrewDirectories: [String]
     let authorization: CommandLinkAuthorizing
+    var ancestorOwner: UInt32 = 0
 
     func status() throws -> CommandLinkStatus {
         try status(entry: files.commandLinkEntry(at: directory + "/pensieve"))
@@ -75,13 +43,7 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     }
 
     private func localStatus(entry: CommandLinkEntry?) throws -> CommandLinkStatus {
-        let path = directory + "/pensieve"
-        guard let entry else { return .absent }
-        if let target = entry.target, try CommandLinkOwnership.isPensieve(target, executable: executable, files: files) {
-            return files.isExecutableFile(at: target) ? .installed(path) : .broken
-        }
-        return .occupied(entry.target.map { "\(path) is taken by a link to \($0)" }
-            ?? "\(path) is taken by another file")
+        try CommandLinkOwnership.status(entry: entry, path: directory + "/pensieve", executable: executable, files: files)
     }
 
     func perform(_ action: CommandLinkAction) throws {
@@ -118,10 +80,10 @@ struct CommandLinkInstaller: CommandLinkInstalling {
         try files.changeCommandLink(request)
     }
 
-    private func checkAppLocation() throws {
+    func checkAppLocation() throws {
         let path = files.realPath(at: executable)
         guard !PathSyntax.isWithin(path, root: "/Volumes"), !PathSyntax.components(path).contains("AppTranslocation") else {
-            throw CommandLinkError(message: "Move Pensieve to your Applications folder first.")
+            throw CommandLinkLocationError.temporaryLocation
         }
     }
 
@@ -134,14 +96,11 @@ struct CommandLinkInstaller: CommandLinkInstalling {
         let parent = URL(fileURLWithPath: directory).deletingLastPathComponent().path
         let ancestor = URL(fileURLWithPath: parent).deletingLastPathComponent().path
         guard let root = try files.commandLinkEntry(at: ancestor), root.kind == .directory,
-              root.owner == 0 || (ancestor != "/usr" && root.owner == user) else {
+              root.owner == ancestorOwner else {
             throw CommandLinkError(message: "\(ancestor) must be an administrator-owned directory.")
         }
         for path in [parent, directory] {
-            guard let entry = try files.commandLinkEntry(at: path) else {
-                if path == directory { continue }
-                continue
-            }
+            guard let entry = try files.commandLinkEntry(at: path) else { continue }
             guard entry.kind == .directory, entry.owner == 0 || entry.owner == user else {
                 throw CommandLinkError(message: "\(path) must be a directory owned by root or your user, not a link.")
             }
@@ -162,4 +121,9 @@ struct AdminCommandLinkAuthorization: CommandLinkAuthorizing {
             throw Cancelled()
         }
     }
+}
+
+enum CommandLinkLocationError: LocalizedError {
+    case temporaryLocation
+    var errorDescription: String? { "Move Pensieve to your Applications folder first." }
 }

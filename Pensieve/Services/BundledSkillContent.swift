@@ -2,10 +2,9 @@ import CryptoKit
 import Foundation
 
 /// The bundled document carries its original byte digest across Macs. Edits keep the version
-/// marker but no longer match it; an unrelated same-named skill has neither this marker nor known bytes.
+/// marker but no longer match it. Settings uses its receipt to identify the copy it owns.
 enum BundledSkillContent {
     private static let prefix = "pensieve-bundled: "
-    private static let legacyDigest = "caab5f804aca0efdc3afa6655fde32b70ccfce37f458b05c4d5c2751ad2b1cc5"
 
     static func version(_ data: Data) -> String? {
         guard let text = String(data: data, encoding: .utf8), text.hasPrefix("---\n") else { return nil }
@@ -14,7 +13,7 @@ enum BundledSkillContent {
             let value = String(line.dropFirst(prefix.count))
             if value.count == 64 && value.allSatisfy({ $0.isHexDigit }) { return value }
         }
-        return digest(data) == legacyDigest ? legacyDigest : nil
+        return nil
     }
 
     static func isUnedited(_ data: Data) -> Bool {
