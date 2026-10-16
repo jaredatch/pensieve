@@ -32,6 +32,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
     @discardableResult
     func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
         var result = RebuildResult()
+        let head = GitHeadStamp(fileService: fileService).read(root: root)
 
         // Read the manifest once. A newer schema or corrupt file must stop reconciliation:
         // an empty fallback would reset skills' scope/tags/cursor/origin and delete categories.
@@ -51,9 +52,9 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
 
         let displayed = StoreIngestState.shared(for: context.container).projectingEdits(onto: snapshot)
         result = rebuild(snapshot: displayed.snapshot, fromRoot: root, context: context)
-        // A successful read is admitted by the caller after its HEAD validation. Launch may
-        // discover that the files moved during this rebuild, so this service cannot clear it.
-        if result.ingestIncomplete { StoreIngestState.shared(for: context.container).invalidate() }
+        let ingest = StoreIngestState.shared(for: context.container)
+        ingest.record(result, head: head)
+        if GitHeadStamp(fileService: fileService).read(root: root) != head { ingest.invalidate() }
         if !result.ingestIncomplete, var read = result.categoryRead {
             read.retainedWindows = displayed.retainedWindows
             CategorySaveWindow.didRebuild(read)

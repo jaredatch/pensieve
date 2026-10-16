@@ -3,6 +3,32 @@ import XCTest
 @testable import Pensieve
 
 extension CategorySaveUndoTests {
+    func testRequiredReingestDoesNotReplayAHealedRename() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        try h.files.deleteDirectory(at: h.root + "/manifest")
+        h.beta.tags = ["healed"]
+        try h.context.save()
+        h.saves.submit(.skillMetadata("beta", ["healed"], nil), context: h.context) { error in
+            XCTAssertNil(error)
+            do {
+                var peer = try h.manifest.read(fromRoot: h.root)
+                peer.categories.append(CategoryRecord(name: "Local", projectKeys: [], skillSlugs: ["beta"]))
+                try h.manifest.write(peer, toRoot: h.root)
+                // The fallback published the queued rename. A later required ingest must
+                // accept the replacement category without applying that rename a second time.
+                StoreIngestState.shared(for: h.context.container).invalidate()
+            } catch { XCTFail(error.localizedDescription) }
+        }
+        h.categories.rename(h.local, to: "Drafts", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.saves.categoryNotice)
+        XCTAssertEqual(h.recording.writes.count, 2, "Both queued operations must finish publication")
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(),
+                       ["Drafts", "Local", "ZDelete"])
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first { $0.name == "Local" }?.skillSlugs, ["beta"])
+    }
+
     func checkPublishedEditsNeverReplay() async throws {
         for deleting in [false, true] {
             for queuedCreate in [true, false] {

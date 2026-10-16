@@ -120,7 +120,7 @@ struct SyncEngine: SyncEngineProtocol {
         guard remote != nil else {
             try? fileService.cleanStoreIntermediates(at: root)
             // Repair only this Mac's index. An unconfigured store still gets no writes or sync error.
-            try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+            try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
             return .noRemote
         }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
@@ -136,8 +136,9 @@ struct SyncEngine: SyncEngineProtocol {
         let headStamp = GitHeadStamp(fileService: fileService)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
-        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
 
+        let admittedParent = headStamp.read(root: root)
         // 1. SwiftData → manifest files (the portable, mergeable source of truth).
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         // 2. Install the union-merge driver + ignore rules (idempotent) so the pull below auto-merges
@@ -145,6 +146,8 @@ struct SyncEngine: SyncEngineProtocol {
         try ensureSyncAttributes(root: root)
         // 3. Commit (false when nothing changed locally).
         let committed = try gitService.stageAllAndCommit(at: root, message: message)
+        StoreIngestState.shared(for: context.container)
+            .recordLocalCommit(from: admittedParent, to: headStamp.read(root: root))
 
         // 4. Pull with rebase. A body/overlay conflict is NOT ours to resolve here: abort (restoring the
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
@@ -164,7 +167,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
 
         // 5. Rebuild the local index from the merged files.
-        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
+        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context, files: fileService)
         // 6. Publish.
         let ingestedHeadStamp = headStamp.read(root: root)
         try gitService.push(at: root, credential: credential)
@@ -307,17 +310,22 @@ struct SyncEngine: SyncEngineProtocol {
                                   context: ModelContext, incoming: FetchedStoreRevision?) throws -> Bool {
         // A failed finish requires ingestion in the retry's fresh context. Healthy conflict
         // preparation still publishes saved window edits that have not reached the manifest.
-        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
+        let stamp = GitHeadStamp(fileService: fileService)
+        let admittedParent = stamp.read(root: root)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
-        return try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
-                                                     credential: credential, fetchedRevision: incoming)
+        let committed = try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
+                                                             credential: credential, fetchedRevision: incoming)
+        StoreIngestState.shared(for: context.container)
+            .recordLocalCommit(from: admittedParent, to: stamp.read(root: root))
+        return committed
     }
 
     private func finishSync(root: String, credential: GitCredential?,
                             context: ModelContext, pulled: Bool) throws -> SyncOutcome {
         let pushed = try gitService.hasCommitsToPush(at: root)
-        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
+        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context, files: fileService)
         try gitService.push(at: root, credential: credential)
         let ingestedHeadStamp = GitHeadStamp(fileService: fileService).read(root: root)
         return .synced(

@@ -56,8 +56,7 @@ actor SyncCoordinator {
     private var machineIdentity: MachineIdentityProviding?
     private var machineStateService: MachineStateServicing?
     private var now: () -> Date = Date.init
-    private var headStamp: () -> String? = { nil }
-    private var lastIngestedHeadStamp: String?
+    private var headState: () -> GitHeadStamp.State = { .unreadable }
 
     func configure(
         engine: SyncEngineProtocol,
@@ -79,11 +78,12 @@ actor SyncCoordinator {
         self.machineIdentity = machine.identity
         self.machineStateService = machine.stateService
         self.now = now
-        self.headStamp = headStamp ?? { GitHeadStamp().read(root: root) }
+        self.headState = headStamp.map { read in { read().map(GitHeadStamp.State.resolved) ?? .unreadable } }
+            ?? { GitHeadStamp().state(root: root) }
     }
 
     func seedLastIngestedHeadStamp(_ stamp: String?) {
-        lastIngestedHeadStamp = stamp
+        StoreIngestState.shared(for: modelContainer).seedHead(stamp)
     }
 
     func runCycle() -> SyncCycleResult {
@@ -101,8 +101,8 @@ actor SyncCoordinator {
             let outcome = try engine.sync(root: root, message: Self.commitMessage(at: now()),
                                           credential: authentication.credential, context: cycleContext,
                                           prepare: { context in
-                    let currentStamp = self.headStamp()
-                    preparedHeadStamp = currentStamp
+                    let currentStamp = self.headState()
+                    preparedHeadStamp = currentStamp.oid
                     if let rebuild = try self.ingestIfNeeded(context: context, stamp: currentStamp) {
                         preflightWarnings = rebuild.warnings
                         preflightAdvanced = true
@@ -138,12 +138,10 @@ actor SyncCoordinator {
         return result
     }
 
-    private func ingestIfNeeded(context: ModelContext, stamp: String?) throws -> RebuildResult? {
-        guard StoreIngestState.shared(for: modelContainer).needsRebuild
-            || lastIngestedHeadStamp == nil || stamp == nil || stamp != lastIngestedHeadStamp else { return nil }
-        let rebuild = try StoreIngestState.rebuild(using: rebuildService, root: root, context: context)
-        lastIngestedHeadStamp = stamp
-        return rebuild
+    private func ingestIfNeeded(context: ModelContext, stamp: GitHeadStamp.State) throws -> RebuildResult? {
+        guard StoreIngestState.shared(for: modelContainer).requiresRebuild(at: stamp) else { return nil }
+        return try StoreIngestState.rebuild(using: rebuildService, root: root, context: context,
+                                           headStamp: { self.headState().oid })
     }
 
     /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.
@@ -167,9 +165,6 @@ actor SyncCoordinator {
             let engineAdvanced = engineIngestedHeadStamp != nil
                 && preparedHeadStamp != nil
                 && engineIngestedHeadStamp != preparedHeadStamp
-            if let ingestedHeadStamp = engineIngestedHeadStamp ?? preparedHeadStamp {
-                lastIngestedHeadStamp = ingestedHeadStamp
-            }
             return .synced(
                 pushed: pushed,
                 warnings: preflightWarnings + warnings,

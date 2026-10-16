@@ -206,7 +206,7 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = true
             return result
         }
-        if result.didRebuild { ingest.record(result.rebuild) }
+        if result.didRebuild { ingest.record(result.rebuild, head: result.ingestedHeadStamp) }
         guard !ingest.needsRebuild else {
             // No launch rebuild ran. A nil head hands this pending work to the coordinator's
             // required preflight rather than making the launch retry wait for a manifest.

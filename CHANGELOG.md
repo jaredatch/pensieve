@@ -47,6 +47,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Importing, deploying, installing or updating skills, removing a project and saving edits now keep category changes pulled by another process, even before the app’s next sync.
+
 - An interrupted conflict resolution preserves untracked files that block a later abort and explains how to move the folder before retrying. Conflicted parents and children must choose the same Mac.
 
 - File/folder conflicts use the original filenames on both sides. Incompatible parent and child choices now explain the mismatch, and failed recovery keeps the original refusal visible.

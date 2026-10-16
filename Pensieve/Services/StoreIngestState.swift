@@ -10,6 +10,7 @@ final class StoreIngestState {
         keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private let lock = NSLock()
     private var pending = false
+    private var ingestedHead: String?
     private struct QueuedEdit {
         let id: UUID
         let change: ManifestChange
@@ -30,6 +31,32 @@ final class StoreIngestState {
         lock.lock()
         defer { lock.unlock() }
         return pending
+    }
+
+    func requiresRebuild(at head: GitHeadStamp.State) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        switch head {
+        case .noRepository, .unborn: return pending
+        case .unreadable: return true
+        case let .resolved(value): return pending || ingestedHead == nil || value != ingestedHead
+        }
+    }
+
+    /// The caller just committed its own snapshot under sync.lock, on the admitted parent.
+    /// This changes commit identity without introducing unseen store content.
+    func recordLocalCommit(from parent: String?, to head: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !pending, let parent, parent == ingestedHead else { return }
+        ingestedHead = head
+    }
+
+    /// Launch has already validated this stamp under sync.lock. Do not clear a failed ingest.
+    func seedHead(_ head: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        if !pending { ingestedHead = head }
     }
 
     func enqueue(_ change: ManifestChange, id: UUID, categoryWindow: UUID?) {
@@ -65,27 +92,39 @@ final class StoreIngestState {
         lock.lock()
         defer { lock.unlock() }
         pending = true
+        ingestedHead = nil
     }
 
-    func record(_ result: RebuildResult) {
+    func record(_ result: RebuildResult, head: String?) {
         lock.lock()
         defer { lock.unlock() }
         pending = result.storeUnreadable || result.ingestIncomplete
+        ingestedHead = pending ? nil : head
     }
 
     /// Writers call this under sync.lock, before applying their local edit. Rebuilding after
     /// the edit could replace it with the still-pending disk snapshot.
     static func rebuildIfNeeded(using service: StoreRebuildServiceProtocol, root: String,
-                                context: ModelContext) throws {
-        guard shared(for: context.container).needsRebuild else { return }
-        _ = try rebuild(using: service, root: root, context: context)
+                                context: ModelContext, files: FileServiceProtocol = FileService()) throws {
+        guard shared(for: context.container).requiresRebuild(at: GitHeadStamp(fileService: files).state(root: root)) else {
+            return
+        }
+        _ = try rebuild(using: service, root: root, context: context, files: files)
     }
 
     /// All sync writers use the same failure admission, including protocol-based rebuild services.
     static func rebuild(using service: StoreRebuildServiceProtocol, root: String,
-                        context: ModelContext) throws -> RebuildResult {
+                        context: ModelContext, files: FileServiceProtocol = FileService(),
+                        headStamp: (() -> String?)? = nil) throws -> RebuildResult {
+        let readHead = headStamp ?? { GitHeadStamp(fileService: files).read(root: root) }
+        let before = readHead()
         let result = service.rebuild(fromRoot: root, context: context)
-        shared(for: context.container).record(result)
+        let state = shared(for: context.container)
+        state.record(result, head: before)
+        if readHead() != before {
+            state.invalidate()
+            throw SyncError.ingestIncomplete
+        }
         if result.manifestDamaged { throw ManifestError.damaged }
         if result.storeUnreadable { throw SyncError.storeUnreadable(result.warnings) }
         if result.ingestIncomplete { throw SyncError.ingestIncomplete }

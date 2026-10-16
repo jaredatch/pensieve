@@ -125,6 +125,9 @@ final class MemoryDeployFileService: FileServiceProtocol {
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         files[path] == nil ? nil : .regular
     }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try entryTypeWithoutFollowingLinks(at: path) != nil
+    }
     func readData(at path: String) throws -> Data { Data(try readFile(at: path).utf8) }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
         let data = try readData(at: path)
