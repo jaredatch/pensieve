@@ -47,6 +47,7 @@ struct SyncStatusView: View {
                 }
             }
         }
+        .task(id: model.state) { await saves?.refreshAndRetry() }
     }
 
     private func perform(_ action: SyncFooterPresentation.Action) {

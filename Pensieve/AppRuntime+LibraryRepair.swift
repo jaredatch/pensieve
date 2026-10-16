@@ -24,5 +24,6 @@ extension AppRuntime {
         library.manifestSaves?.didReadRepairedLibrary = rebuild.manifestDamaged ? repaired : {}
         library.setStoreUnreadable(rebuild.storeUnreadable && !rebuild.manifestDamaged)
         library.manifestSaves?.libraryDamaged = rebuild.manifestDamaged
+        Task { @MainActor in await library.manifestSaves?.refreshAndRetry() }
     }
 }
