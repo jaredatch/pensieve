@@ -41,12 +41,16 @@ struct CLIDoctor {
         for directory in directories {
             let path = directory + "/pensieve"
             do {
-                guard try files.entryExistsWithoutFollowingLinks(at: path) else { continue }
+                guard let entry = try files.commandLinkEntry(at: path) else { continue }
                 found = true
-                let target = try files.commandLinkEntry(at: path)?.target
-                let matches = files.isExecutableFile(at: path)
-                    && files.realPath(at: path) == files.realPath(at: app + "/Contents/Helpers/pensieve")
-                let broken = try target.map { try CommandLinkOwnership.isMissingApp($0, files: files) } ?? false
+                let executable = app + "/Contents/Helpers/pensieve"
+                let owned = try entry.target.map {
+                    try CommandLinkOwnership.isPensieve($0, executable: executable, files: files)
+                } ?? false
+                let runnable = entry.target.map { files.isExecutableFile(at: $0) } ?? false
+                let matches = owned && runnable
+                    && entry.target.map { files.realPath(at: $0) == files.realPath(at: executable) } == true
+                let broken = owned && !runnable
                 record("path", matches, path + (broken ? ": broken link" : ""),
                        "Use Settings > General > Command Line to install or repair this app's command.")
             } catch { record("path", false, path + ": " + error.localizedDescription, "Check this PATH entry.") }

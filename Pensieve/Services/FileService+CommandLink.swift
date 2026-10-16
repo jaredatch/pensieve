@@ -90,7 +90,7 @@ extension FileService {
             guard current == nil else { throw CommandLinkError(message: "\(path) is already occupied.") }
         } else {
             guard let current, current.kind == .symlink, let target = current.target,
-                  try CommandLinkOwnership.isPensieve(target, files: self),
+                  try CommandLinkOwnership.isPensieve(target, executable: request.executable, files: self),
                   try (request.action != .repair || CommandLinkOwnership.isMissingApp(target, files: self)) else {
                 throw CommandLinkError(message: "\(path) no longer holds the Pensieve link to change.")
             }
@@ -114,11 +114,14 @@ extension FileService {
     }
 }
 
-/// A dangling link is recognized by the app/executable spelling, never by resolving its target.
-/// Existing apps also prove their bundle identity before their link may be removed.
+/// One ownership rule for every reader and writer: our own helper, an existing app with a
+/// bounded regular-file plist proving a Pensieve bundle ID, or a missing app of any name.
+/// All targets must have the absolute, standardized app-helper shape; no empty or dot components.
 enum CommandLinkOwnership {
     static func appPath(_ target: String) -> String? {
-        guard PathSyntax.isAbsolute(target) else { return nil }
+        guard PathSyntax.isAbsolute(target),
+              PathSyntax.components(target, omittingEmptySubsequences: false).dropFirst()
+                .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
         let url = URL(fileURLWithPath: target)
         let helpers = url.deletingLastPathComponent()
         let contents = helpers.deletingLastPathComponent()
@@ -129,11 +132,10 @@ enum CommandLinkOwnership {
         return app.path
     }
 
-    static func isPensieve(_ target: String, files: FileServiceProtocol) throws -> Bool {
+    static func isPensieve(_ target: String, executable: String, files: FileServiceProtocol) throws -> Bool {
         guard let app = appPath(target) else { return false }
-        guard try files.entryExistsWithoutFollowingLinks(at: app) else {
-            return URL(fileURLWithPath: app).lastPathComponent.hasPrefix("Pensieve")
-        }
+        if target == executable { return true }
+        guard try files.entryExistsWithoutFollowingLinks(at: app) else { return true }
         guard let bytes = try? files.readRegularFileData(at: app + "/Contents/Info.plist", maximumBytes: 1_048_576),
               let info = try? PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any] else {
             return false

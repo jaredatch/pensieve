@@ -11,7 +11,7 @@ final class CommandLinkFixture {
     let authorization = FixtureCommandAuthorization()
     var directory: String { root + "/local/bin" }
     var path: String { directory + "/pensieve" }
-    var removedExecutable: String { root + "/PensieveRemoved.app/Contents/Helpers/pensieve" }
+    var removedExecutable: String { root + "/Work.app/Contents/Helpers/pensieve" }
     var executable: String { Bundle.main.bundlePath + "/Contents/Helpers/pensieve" }
 
     init() throws { try files.createDirectory(at: root + "/local") }

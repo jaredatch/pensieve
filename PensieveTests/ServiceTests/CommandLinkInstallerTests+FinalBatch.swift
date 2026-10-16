@@ -93,28 +93,35 @@ extension CommandLinkInstallerTests {
     func assertUnreadablePlistIsOccupied() async throws {
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
-        try fixture.link(to: fixture.root + "/Other.app/Contents/Helpers/pensieve")
-        let before = try fixture.files.commandLinkEntry(at: fixture.path)
-        for action in [CommandLinkAction.install, .uninstall, .repair] {
-            XCTAssertThrowsError(try fixture.installer().perform(action))
-            XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
-        }
-        XCTAssertEqual(fixture.authorization.calls, 0, "A foreign dangling app link must refuse before authorization")
-        try fixture.files.deleteFile(at: fixture.path)
-        let app = fixture.root + "/PensieveNoInfo.app"
-        try fixture.files.createDirectory(at: app + "/Contents")
+        let app = fixture.root + "/Other.app"
+        try fixture.files.writeExecutableFile(at: app + "/Contents/Helpers/pensieve", content: "#!/bin/sh\nexit 0\n")
         try fixture.link(to: app + "/Contents/Helpers/pensieve")
         let model = CommandLineSettingsModel(installer: fixture.installer())
-        for unreadable in [false, true] {
-            if unreadable {
-                try fixture.files.writeFile(at: app + "/Contents/Info.plist", content: "unreadable")
-                XCTAssertEqual(chmod(app + "/Contents/Info.plist", 0), 0)
+        for identity in ["missing", "foreign", "symlink", "unreadable"] {
+            let plist = app + "/Contents/Info.plist"
+            if try fixture.files.entryExistsWithoutFollowingLinks(at: plist) { try fixture.files.deleteFile(at: plist) }
+            if identity == "foreign" {
+                let data = try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.example.other"],
+                                                              format: .xml, options: 0)
+                try fixture.files.writeData(at: plist, data: data)
+            } else if identity == "symlink" {
+                try fixture.files.createSymlink(at: plist, pointingTo: Bundle.main.bundlePath + "/Contents/Info.plist")
+            } else if identity == "unreadable" {
+                try fixture.files.writeFile(at: plist, content: "unreadable")
+                XCTAssertEqual(chmod(plist, 0), 0)
             }
+            let before = try fixture.files.commandLinkEntry(at: fixture.path)
             await model.refresh()
-            XCTAssertNil(model.error, "An unreadable identity is an occupied path, not an unavailable Settings page")
-            if case .occupied = model.status {} else { XCTFail("Unproven apps must be occupied") }
+            XCTAssertNil(model.error, "An unproven identity is an occupied path, not an unavailable Settings page")
+            if case .occupied = model.status {} else { XCTFail("Unproven apps must be occupied: \(identity)") }
+            for action in [CommandLinkAction.install, .uninstall, .repair] {
+                await model.perform(action)
+                XCTAssertNotNil(model.error, "Unproven apps must refuse \(action): \(identity)")
+                XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+            }
+            XCTAssertEqual(fixture.authorization.calls, 0, "Unproven apps must refuse before authorization: \(identity)")
+            if identity == "unreadable" { XCTAssertEqual(chmod(plist, 0o600), 0) }
         }
-        _ = chmod(app + "/Contents/Info.plist", 0o600)
     }
 }
 
@@ -153,25 +160,31 @@ extension CommandLinkInstallerTests {
 extension CommandLinkInstallerTests {
     func assertReplacementAfterLeafReadSurvives() throws {
         for action in [CommandLinkAction.install, .uninstall, .repair] {
-            for launch in [false, true] where !launch || action == .repair {
+            for scenario in [(false, false, false), (false, true, false), (true, false, false), (true, true, false),
+                             (false, false, true), (false, true, true), (true, false, true), (true, true, true)]
+                where (!scenario.0 && !scenario.2) || action == .repair {
+                let (launch, brew, liveReplacement) = scenario
                 let fixture = try CommandLinkFixture()
                 defer { fixture.clean() }
                 if action != .install {
-                    try fixture.link(to: action == .repair ? fixture.removedExecutable : fixture.executable)
+                    try fixture.link(to: action == .repair || brew ? fixture.removedExecutable : fixture.executable)
                 }
                 var replacement: CommandLinkEntry?
                 let files = LeafReadSwappingFileService(path: fixture.path) {
                     if try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) {
                         try fixture.files.deleteFile(at: fixture.path)
                     }
-                    let name = action == .repair ? "PensieveReplacement" : "Other"
-                    try fixture.link(to: fixture.root + "/" + name + ".app/Contents/Helpers/pensieve")
+                    try fixture.link(to: liveReplacement ? fixture.executable
+                        : fixture.root + "/Replacement.app/Contents/Helpers/pensieve")
                     replacement = try fixture.files.commandLinkEntry(at: fixture.path)
                 }
-                let installer = fixture.installer(files: files)
+                if brew { try fixture.files.createDirectory(at: fixture.root + "/local/Caskroom/pensieve") }
+                let installer = fixture.installer(homebrew: brew ? [fixture.directory] : [], files: files)
                 if launch { XCTAssertThrowsError(try installer.repairAtLaunch()) } else {
                     XCTAssertThrowsError(try installer.perform(action), "A replacement after the check must refuse")
                 }
+                XCTAssertEqual(fixture.authorization.calls, launch ? 0 : 1,
+                               "The captured entry must decide whether authorization is needed")
                 XCTAssertNotNil(replacement, "The fixture must swap immediately after the first leaf read")
                 XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), replacement,
                                "A replacement after the check must survive \(action), launch=\(launch)")
@@ -199,9 +212,60 @@ extension CommandLinkInstallerTests {
             let model = identifier == "own-helper" ? installed : CommandLineSettingsModel(installer: fixture.installer())
             await model.refresh()
             XCTAssertEqual(model.status, .installed(fixture.path), "Bundle identity must admit a renamed Pensieve app")
+            if identifier == "own-helper" {
+                let expected = try fixture.files.commandLinkEntry(at: fixture.path)
+                let request = CommandLinkRequest(action: .uninstall, directory: fixture.directory,
+                    executable: helper, user: getuid(), expected: expected)
+                XCTAssertNoThrow(try fixture.files.changeCommandLink(request), "The write recheck must recognize our own helper")
+                if try !fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) { try fixture.link(to: helper) }
+                try fixture.files.createDirectory(at: fixture.root + "/local/Caskroom/pensieve")
+                XCTAssertEqual(try fixture.installer(homebrew: [fixture.directory], executable: helper).status(),
+                               .homebrew(fixture.path), "Homebrew must recognize our own helper without a plist")
+                try fixture.files.deleteDirectory(at: fixture.root + "/local/Caskroom")
+            }
             await model.perform(.uninstall)
             XCTAssertNil(model.error, "A renamed Pensieve app must be uninstallable")
             XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
+            try fixture.files.deleteDirectory(at: app)
+            try fixture.link(to: helper)
+            let moved = CommandLineSettingsModel(installer: fixture.installer())
+            await moved.refresh()
+            XCTAssertEqual(moved.status, .broken, "A renamed app remains ours after it disappears")
+            await moved.perform(.uninstall)
+            XCTAssertNil(moved.error, "A renamed missing app must be uninstallable")
+            XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
+        }
+    }
+}
+
+extension CommandLinkInstallerTests {
+    func assertStatusUsesCapturedLeaf() throws {
+        for brew in [false, true] {
+            for captured in ["absent", "installed", "broken", "occupied"] {
+                let fixture = try CommandLinkFixture()
+                defer { fixture.clean() }
+                if brew { try fixture.files.createDirectory(at: fixture.root + "/local/Caskroom/pensieve") }
+                let target = captured == "installed" ? fixture.executable : fixture.removedExecutable
+                if captured == "occupied" {
+                    try fixture.files.writeFile(at: fixture.path, content: "foreign")
+                } else if captured != "absent" { try fixture.link(to: target) }
+                let files = LeafReadSwappingFileService(path: fixture.path) {
+                    if try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) {
+                        try fixture.files.deleteFile(at: fixture.path)
+                    }
+                    try fixture.link(to: captured == "installed" ? fixture.removedExecutable : fixture.executable)
+                }
+                let status = try fixture.installer(homebrew: brew ? [fixture.directory] : [], files: files).status()
+                switch captured {
+                case "absent": XCTAssertEqual(status, .absent, "Status must keep the captured absent leaf")
+                case "installed": XCTAssertEqual(status, brew ? .homebrew(fixture.path) : .installed(fixture.path),
+                                                   "Executability must come from the captured target")
+                case "broken": XCTAssertEqual(status, .broken, "A replacement cannot hide the captured broken link")
+                default: XCTAssertEqual(status, .occupied("\(fixture.path) is taken by another file"),
+                                        "Homebrew cannot hide the captured foreign file")
+                }
+                XCTAssertNil(files.afterRead, "The fixture must swap after the captured read")
+            }
         }
     }
 }

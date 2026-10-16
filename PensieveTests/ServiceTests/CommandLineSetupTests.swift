@@ -11,7 +11,7 @@ final class CommandLineSetupTests: XCTestCase {
             let bin = fixture.paths.appSupportDir + "/command-line/bin"
             defer { _ = chmod(bin, 0o755); fixture.stop() }
             let path = bin + "/pensieve"
-            let removed = fixture.root + "/PensieveMoved.app/Contents/Helpers/pensieve"
+            let removed = fixture.root + "/Work.app/Contents/Helpers/pensieve"
             try fixture.files.createSymlink(at: path, pointingTo: removed)
             if !writable { XCTAssertEqual(chmod(bin, 0o555), 0) }
             try await fixture.start()
@@ -44,13 +44,14 @@ final class CommandLineSetupTests: XCTestCase {
         let noTools = try checks(await fixture.run(["doctor"], exit: 1,
             environment: ["PATH": bin, "DEVELOPER_DIR": fixture.root + "/missing-tools"]))
         XCTAssertEqual(noTools["git"]?["ok"], .bool(false), "The system git stub is not installed developer tools")
+        try await checkLinkOwnership(fixture, bin: bin)
         try await checkOptionalAgent(fixture, bin: bin)
         try await checkCursorApplication(fixture, bin: bin)
         try fixture.files.deleteFile(at: bin + "/git")
         try fixture.files.deleteDirectory(at: fixture.root + "/home/.codex/skills")
         try fixture.files.deleteFile(at: bin + "/pensieve")
         try fixture.files.createSymlink(at: bin + "/pensieve",
-            pointingTo: fixture.root + "/PensieveGone.app/Contents/Helpers/pensieve")
+            pointingTo: fixture.root + "/Work.app/Contents/Helpers/pensieve")
         let broken = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
         for name in ["git", "path"] { XCTAssertEqual(broken[name]?["ok"], .bool(false), name) }
         XCTAssertEqual(broken["agent:codex"]?["ok"], .bool(true), "The skills folder appears on the first sync")
@@ -74,6 +75,29 @@ final class CommandLineSetupTests: XCTestCase {
         let wrong = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
         XCTAssertEqual(wrong["app"]?["ok"], .bool(false))
         XCTAssertEqual(wrong["socket"]?["ok"], .bool(true))
+    }
+
+    private func checkLinkOwnership(_ fixture: CLILibraryFixture, bin: String) async throws {
+        let path = bin + "/pensieve"
+        let app = fixture.root + "/Incomplete.app"
+        try fixture.files.writeData(at: app + "/Contents/Info.plist",
+                                   data: fixture.files.readData(at: Bundle.main.bundlePath + "/Contents/Info.plist"))
+        for (target, isBroken) in [(app + "/Contents/Helpers/pensieve", true),
+                                   (fixture.root + "/Work.app/Contents/Helpers/pensieve", true),
+                                   (fixture.root + "//Work.app/Contents/Helpers/pensieve", false),
+                                   (fixture.root + "/./Work.app/Contents/Helpers/pensieve", false),
+                                   (fixture.root + "/gone/../Work.app/Contents/Helpers/pensieve", false),
+                                   ("Work.app/Contents/Helpers/pensieve", false)] {
+            try fixture.files.deleteFile(at: path)
+            // POSIX preserves malformed spelling for the ownership boundary to reject.
+            XCTAssertEqual(symlink(target, path), 0)
+            let result = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
+            XCTAssertEqual(result["path"]?["ok"], .bool(false))
+            guard case .string(let message) = result["path"]?["message"] else { return XCTFail("Missing path message") }
+            XCTAssertEqual(message.contains("broken link"), isBroken, target)
+        }
+        try fixture.files.deleteFile(at: path)
+        try fixture.files.createSymlink(at: path, pointingTo: Bundle.main.bundlePath + "/Contents/Helpers/pensieve")
     }
 
     private func checkOptionalAgent(_ fixture: CLILibraryFixture, bin: String) async throws {

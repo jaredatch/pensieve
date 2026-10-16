@@ -56,14 +56,17 @@ struct CommandLinkInstaller: CommandLinkInstalling {
         try status(entry: files.commandLinkEntry(at: directory + "/pensieve"))
     }
 
+    /// Classify the captured leaf only. Executability follows its captured target, and a
+    /// Homebrew folder equal to the install folder must reuse this same entry.
     private func status(entry: CommandLinkEntry?) throws -> CommandLinkStatus {
         let local = try localStatus(entry: entry)
         for bin in homebrewDirectories {
             let prefix = URL(fileURLWithPath: bin).deletingLastPathComponent().path
             if try files.entryExistsWithoutFollowingLinks(at: prefix + "/Caskroom/pensieve"),
-               let entry = try files.commandLinkEntry(at: bin + "/pensieve"),
-               let target = entry.target, try CommandLinkOwnership.isPensieve(target, files: files),
-               files.isExecutableFile(at: bin + "/pensieve") {
+               let brewEntry = try bin == directory ? entry : files.commandLinkEntry(at: bin + "/pensieve"),
+               let target = brewEntry.target,
+               try CommandLinkOwnership.isPensieve(target, executable: executable, files: files),
+               files.isExecutableFile(at: target) {
                 if local == .absent || bin == directory { return .homebrew(bin + "/pensieve") }
                 return .alongsideHomebrew(local, bin + "/pensieve")
             }
@@ -74,8 +77,8 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     private func localStatus(entry: CommandLinkEntry?) throws -> CommandLinkStatus {
         let path = directory + "/pensieve"
         guard let entry else { return .absent }
-        if let target = entry.target, try target == executable || CommandLinkOwnership.isPensieve(target, files: files) {
-            return files.isExecutableFile(at: path) ? .installed(path) : .broken
+        if let target = entry.target, try CommandLinkOwnership.isPensieve(target, executable: executable, files: files) {
+            return files.isExecutableFile(at: target) ? .installed(path) : .broken
         }
         return .occupied(entry.target.map { "\(path) is taken by a link to \($0)" }
             ?? "\(path) is taken by another file")

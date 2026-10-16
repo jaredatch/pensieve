@@ -96,7 +96,7 @@ final class CommandLinkInstallerTests: XCTestCase {
             }
             let before = try fixture.files.commandLinkEntry(at: fixture.path)
             let model = CommandLineSettingsModel(installer: fixture.installer())
-            for action in [CommandLinkAction.install, .uninstall] {
+            for action in [CommandLinkAction.install, .uninstall, .repair] {
                 await model.perform(action)
                 XCTAssertNotNil(model.error)
                 if case .occupied(let message) = model.status {
@@ -185,6 +185,7 @@ final class CommandLinkInstallerTests: XCTestCase {
     }
 
     func testHomebrewIsInstalledWithoutOfferingOrCreatingAnotherLink() async throws {
+        try assertStatusUsesCapturedLeaf()
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
         let brew = fixture.root + "/homebrew"
