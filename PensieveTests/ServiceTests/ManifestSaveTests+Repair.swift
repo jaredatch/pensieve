@@ -6,31 +6,33 @@ extension ManifestSaveTests {
     func testDamagedManifestKeepsEditsUntilConfirmedRepair() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
-        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { lock.release() }
-        h.recording.failingSnapshots = 1
-        h.library.updateMetadata(h.alpha, tags: ["readable"], scope: .user, context: h.context)
-        lock.release()
-        await h.saves.waitUntilIdle()
-        XCTAssertNil(h.library.error, "A readable manifest must not fetch the unused fallback")
-        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["readable"])
-        h.recording.failingSnapshots = 0
+        try await assertReadableSaveDoesNotFetchFallback(h)
         let corruptLock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
         defer { corruptLock.release() }
         h.categories.rename(h.local, to: "Healed", context: h.context)
         h.library.updateMetadata(h.alpha, tags: ["latest"], scope: .project, context: h.context)
         try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
-        let expected = try h.manifest.snapshot(from: h.context)
+        var reports: [Error?] = []
+        h.saves.submit(.skillMetadata("alpha", nil, nil), context: h.context) { reports.append($0) }
         corruptLock.release()
         await h.saves.waitUntilIdle()
         XCTAssertEqual(try h.files.readFile(at: h.root + "/manifest/manifest.yaml"), "not: [yaml\n")
         XCTAssertEqual(h.local.name, "Healed")
         XCTAssertEqual(h.alpha.tags, ["latest"])
-        XCTAssertEqual(h.saves.pendingCount, 2)
+        XCTAssertEqual(h.saves.pendingCount, 3)
         XCTAssertTrue(h.saves.showsDamageAlert)
         XCTAssertEqual(ManifestSaveModel.damageTitle, "The synced library file is damaged")
         XCTAssertEqual(ManifestSaveModel.repairAction, "Replace with This Mac's Library…")
         XCTAssertNil(h.saves.categoryNotice)
+        XCTAssertFalse(h.library.categoryEditsFenced, "Damage must leave category edits available")
+        XCTAssertTrue(h.library.addsFenced, "Damage still fences adds")
+        XCTAssertEqual(h.library.addFenceReason,
+            "Pensieve can't add to this library until the damaged library file is repaired.")
+        XCTAssertTrue(reports.isEmpty, "A repair pause is not a completed edit report")
+        h.saves.submit(.skillMetadata("alpha", nil, nil), context: h.context) { _ in }
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(reports.isEmpty, "Repeated pauses must not report waiting edits")
+        let expected = try await assertCategoryChangesWaitForRepair(h)
         let before = try h.manifestBytes()
         h.saves.requestRepair()
         h.saves.cancelRepair()
@@ -45,6 +47,34 @@ extension ManifestSaveTests {
         XCTAssertEqual(saved.categories, expected.categories.sorted { $0.name < $1.name })
         XCTAssertEqual(saved.skills, expected.skills.sorted { $0.slug < $1.slug })
         XCTAssertNil(h.library.error)
+        XCTAssertEqual(reports.count, 1, "Each completed edit reports once")
+        XCTAssertNil(reports.first ?? nil)
+        XCTAssertFalse(h.library.addsFenced, "Local repair lifts the damage fence without sync")
+    }
+
+    private func assertCategoryChangesWaitForRepair(_ h: ManifestSaveFixture) async throws -> ManifestSnapshot {
+        h.categories.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
+        h.categories.setProject(h.project, inCategory: h.local, member: true, context: h.context)
+        h.categories.delete(h.doomed, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.saves.pendingCount, 7, "Membership and removal wait alongside rename and skill edits")
+        XCTAssertEqual(h.local.skillSlugs, ["alpha"])
+        XCTAssertEqual(h.local.projectKeys, ["local-key"])
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name), ["Healed"])
+        XCTAssertNil(h.saves.categoryNotice)
+        return try h.manifest.snapshot(from: h.context)
+    }
+
+    private func assertReadableSaveDoesNotFetchFallback(_ h: ManifestSaveFixture) async throws {
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { lock.release() }
+        h.recording.failingSnapshots = 1
+        h.library.updateMetadata(h.alpha, tags: ["readable"], scope: .user, context: h.context)
+        lock.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error, "A readable manifest must not fetch the unused fallback")
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["readable"])
+        h.recording.failingSnapshots = 0
     }
 
     func testMissingManifestCreatesUnlessIngestIsPending() async throws {
@@ -94,8 +124,33 @@ extension ManifestSaveTests {
                 XCTAssertEqual(try h.manifestBytes(), before, "Stale confirmation grants no write authority")
                 XCTAssertEqual(h.saves.pendingCount, 1)
                 XCTAssertTrue(h.saves.libraryDamaged)
+                XCTAssertEqual(h.saves.repairError, "The library file changed. Review the repair again.")
+                XCTAssertTrue(h.saves.showsDamageAlert, "Changed damage must offer repair again")
+                h.saves.requestRepair()
+                await h.saves.replaceWithThisMac(context: h.context)
+                await h.saves.waitUntilIdle()
+                XCTAssertNil(h.saves.repairError)
+                XCTAssertEqual(h.saves.pendingCount, 0, "The refreshed offer can repair the current file")
             }
         }
+        try await assertNewerReplacementKeepsItsFence()
+    }
+
+    private func assertNewerReplacementKeepsItsFence() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged")
+        h.categories.rename(h.local, to: "Waiting", context: h.context)
+        await h.saves.waitUntilIdle()
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 999\n")
+        h.saves.requestRepair()
+        await h.saves.replaceWithThisMac(context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.files.readFile(at: h.root + "/manifest/manifest.yaml"), "schema_version: 999\n")
+        XCTAssertTrue(h.library.categoryEditsFenced, "A newer replacement retains the newer-schema fence")
+        XCTAssertTrue(h.library.addsFenced)
+        XCTAssertEqual(h.library.addFenceReason, SkillLibraryViewModel.storeUnreadableMessage)
+        XCTAssertEqual(h.local.name, "Local", "Newer-schema refusal keeps ordinary category undo")
     }
 
     func testRepairWaitsForAnotherProcessAndWriteFailureKeepsDamage() async throws {
@@ -113,6 +168,7 @@ extension ManifestSaveTests {
         let repair = Task { await h.saves.replaceWithThisMac(context: h.context) }
         await TestWait.until(failureMessage: "Repair did not wait for the held lock") { h.saves.isWaiting }
         XCTAssertEqual(h.saves.statusMessage, "Your change will save when sync finishes.")
+        XCTAssertTrue(h.saves.hasActiveSaves, "Confirmed repair is actively saving for Quit")
         XCTAssertEqual(try h.manifestBytes(), before)
         files.refuseReplacement = true
         holder.release()

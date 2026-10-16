@@ -25,10 +25,13 @@ final class ManifestSaveModel {
     var showsDamageAlert = false
     var showsRepairConfirmation = false
     var libraryDamaged = false
+    /// Nil until a disk read or an accepted launch/sync verdict supplies the current state.
+    var requiresNewerVersion: Bool?
     var repairError: String?
     @ObservationIgnored var damage: ManifestDamage?
     @ObservationIgnored var confirmedDamage: ManifestDamage?
-    @ObservationIgnored var pausedForRepair = false
+    var pausedForRepair = false
+    var hasActiveSaves: Bool { pendingCount > 0 && !pausedForRepair }
     @ObservationIgnored private var refused: [ManifestRefusedEdit] = []
     @ObservationIgnored private var categoryMessages: [CategorySaveNotice.Entry] = []
     @ObservationIgnored var worker: Task<Void, Never>?
@@ -125,7 +128,6 @@ final class ManifestSaveModel {
                 pausedForRepair = true
                 await refreshDamage()
                 showsDamageAlert = true
-                for queued in items { queued.report(error) }
                 return false
             }
             if item.categoryEdit != nil {

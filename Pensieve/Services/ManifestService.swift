@@ -136,10 +136,17 @@ struct ManifestService: ManifestReadWriting {
         )
     }
 
+    private func readManifestText(at path: String) throws -> String {
+        guard try fileService.entryTypeWithoutFollowingLinks(at: path) != .other else {
+            throw ManifestError.damaged
+        }
+        return try fileService.readFile(at: path)
+    }
+
     private func readSchema(from manifestDir: String) throws -> Int {
         let path = manifestDir + "/manifest.yaml"
         guard fileService.fileExists(at: path) else { return supportedSchemaVersion }
-        guard let top = try? fileService.readFile(at: path),
+        guard let top = try? readManifestText(at: path),
               let obj = (try? CheckedYAMLLoader.load(yaml: top)) as? [String: Any],
               let schema = obj["schema_version"] as? Int else {
             throw ManifestError.corruptManifestFile("manifest.yaml")
@@ -152,7 +159,7 @@ struct ManifestService: ManifestReadWriting {
         let categoriesDir = manifestDir + "/categories"
         guard fileService.directoryExists(at: categoriesDir) else { return [] }
         for entry in try fileService.listDirectory(at: categoriesDir) where entry.hasSuffix(".yaml") {
-            guard let content = try? fileService.readFile(at: categoriesDir + "/" + entry),
+            guard let content = try? readManifestText(at: categoriesDir + "/" + entry),
                   let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                   let name = obj["name"] as? String else {
                 throw ManifestError.corruptManifestFile("categories/" + entry)
@@ -171,7 +178,7 @@ struct ManifestService: ManifestReadWriting {
         let skillsDir = manifestDir + "/skills"
         if fileService.directoryExists(at: skillsDir) {
             for entry in try fileService.listDirectory(at: skillsDir) where entry.hasSuffix(".yaml") {
-                guard let content = try? fileService.readFile(at: skillsDir + "/" + entry),
+                guard let content = try? readManifestText(at: skillsDir + "/" + entry),
                       let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                       let slug = obj["slug"] as? String else {
                     throw ManifestError.corruptManifestFile("skills/" + entry)
@@ -217,7 +224,7 @@ struct ManifestService: ManifestReadWriting {
     private func readProjects(from manifestDir: String) throws -> [ProjectIdentityRecord] {
         let path = manifestDir + "/projects.yaml"
         guard fileService.fileExists(at: path) else { return [] }
-        guard let content = try? fileService.readFile(at: path) else {
+        guard let content = try? readManifestText(at: path) else {
             throw ManifestError.corruptManifestFile("projects.yaml")
         }
         if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }

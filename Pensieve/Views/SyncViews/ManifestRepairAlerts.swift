@@ -8,12 +8,15 @@ struct ManifestRepairAlerts: ViewModifier {
         content
             .alert(ManifestSaveModel.damageTitle, isPresented: Binding(
                 get: { saves?.showsDamageAlert == true },
-                set: { saves?.showsDamageAlert = $0 }
+                set: { shown in
+                    saves?.showsDamageAlert = shown
+                    if !shown, saves?.repairError == ManifestSaveModel.changedRepairMessage { saves?.repairError = nil }
+                }
             )) {
                 Button("OK", role: .cancel) {}.keyboardShortcut(.defaultAction)
                 Button(ManifestSaveModel.repairAction) { saves?.requestRepair() }
             } message: {
-                Text(ManifestSaveModel.damageMessage)
+                Text(saves?.damageAlertMessage ?? ManifestSaveModel.damageMessage)
             }
             .alert(ManifestSaveModel.repairTitle, isPresented: Binding(
                 get: { saves?.showsRepairConfirmation == true },
@@ -27,7 +30,8 @@ struct ManifestRepairAlerts: ViewModifier {
                 Text(ManifestSaveModel.repairMessage)
             }
             .alert("Couldn't repair the library file", isPresented: Binding(
-                get: { saves?.repairError != nil }, set: { if !$0 { saves?.repairError = nil } }
+                get: { saves?.repairError != nil && saves?.repairError != ManifestSaveModel.changedRepairMessage },
+                set: { if !$0 { saves?.repairError = nil } }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {

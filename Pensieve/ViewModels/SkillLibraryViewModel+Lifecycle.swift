@@ -157,6 +157,7 @@ extension SkillLibraryViewModel {
     // MARK: - Library change fence
 
     /// Adds wait for launch ingestion; existing category rules also wait for a readable library.
+    var storeUnreadable: Bool { manifestSaves?.requiresNewerVersion ?? reportedStoreUnreadable }
     var addsFenced: Bool { addFenceReason != nil }
     var categoryEditsFenced: Bool { libraryUnavailable || storeUnreadable }
 
@@ -164,6 +165,7 @@ extension SkillLibraryViewModel {
     var addFenceReason: String? {
         if libraryUnavailable { return Self.libraryUnavailableMessage }
         if storeUnreadable { return Self.storeUnreadableMessage }
+        if manifestSaves?.libraryDamaged == true { return Self.damagedLibraryMessage }
         if launchIngestPending { return Self.launchIngestMessage }
         return nil
     }
@@ -171,6 +173,8 @@ extension SkillLibraryViewModel {
     /// Launch explains disabled controls only on hover, so normal ingestion adds no body text.
     var persistentFenceReason: String? { categoryEditsFenced ? addFenceReason : nil }
 
+    static let damagedLibraryMessage =
+        "Pensieve can't add to this library until the damaged library file is repaired."
     static let launchIngestMessage = "Pensieve is still reading this library."
     static let storeUnreadableMessage =
         "Pensieve can't change this library until it can read it. Update Pensieve, then relaunch."

@@ -9,11 +9,12 @@ enum SyncCycleResult: Equatable {
     case locked
     case failed(String)
     case storeUnreadable(String)
+    case manifestDamaged(String)
 
     var provesGitUsable: Bool {
         switch self {
         // Credential resolution probes git before entering the engine, including its lock and store checks.
-        case .synced, .conflicted, .noRemote, .branchless, .locked, .storeUnreadable: true
+        case .synced, .conflicted, .noRemote, .branchless, .locked, .storeUnreadable, .manifestDamaged: true
         case .failed: false
         }
     }
@@ -32,7 +33,7 @@ enum SyncCycleResult: Equatable {
             return ("skipped", "locked")
         case .failed:
             return ("failed", "syncError")
-        case .storeUnreadable:
+        case .storeUnreadable, .manifestDamaged:
             return ("failed", "storeUnreadable")
         }
     }
@@ -190,15 +191,14 @@ actor SyncCoordinator {
         await completion(result)
     }
 
-    /// The one place a thrown cycle becomes a result: a busy lock is `.locked`; the store refusing to be
-    /// read (the pre-write read or a preflight rebuild) is the typed `.storeUnreadable`, carrying the
-    /// same message `.failed` carried before PLAN-31; everything else is `.failed`.
+    /// Keep repairable damage distinct from the newer-schema fence when a cycle refuses the store.
+    /// Busy locks remain retryable; other errors retain their localized failure.
     private static func cycleFailure(_ error: Error) -> SyncCycleResult {
         switch error {
         case SyncError.syncInProgress:
             return .locked
         case ManifestError.damaged:
-            return .storeUnreadable(ManifestError.damaged.localizedDescription)
+            return .manifestDamaged(ManifestError.damaged.localizedDescription)
         case let SyncError.storeUnreadable(warnings):
             return .storeUnreadable(SyncError.storeUnreadable(warnings).errorDescription ?? "Sync failed.")
         case let error as LocalizedError:

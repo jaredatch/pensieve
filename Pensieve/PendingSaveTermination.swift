@@ -68,7 +68,7 @@ final class PendingSaveTermination {
     func requestQuestion() { askAgain?() }
 
     private static func question(_ saves: ManifestSaveModel?, _ steps: SyncStepModel?) -> Question? {
-        switch ((saves?.pendingCount ?? 0) > 0, (steps?.pendingCount ?? 0) > 0) {
+        switch (saves?.hasActiveSaves == true, (steps?.pendingCount ?? 0) > 0) {
         case (true, true): return .savingAndSyncing
         case (true, false): return .saving
         case (false, true): return .syncing

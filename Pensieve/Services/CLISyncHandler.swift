@@ -26,6 +26,9 @@ struct CLISyncHandler {
                 exit: 1, retryable: true)
         case let .failed(message):
             return .failure("sync_failed", message, hint: "Follow the app's advice and retry Sync Now.", exit: 1)
+        case let .manifestDamaged(message):
+            return .failure("store_unreadable", message,
+                hint: "Open Pensieve to repair the library file.", exit: 1)
         case let .storeUnreadable(message):
             return .failure("store_unreadable", message, hint: "Open Pensieve to check the library.", exit: 1)
         }

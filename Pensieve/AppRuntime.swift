@@ -93,7 +93,7 @@ final class AppRuntime {
                         self.handleGitChange(self.gitState.accept(.usable, order: evidence, model: self.syncModel))
                     }
                     let publishesAfterRead = switch result {
-                    case .failed, .storeUnreadable, .conflicted: true
+                    case .failed, .storeUnreadable, .manifestDamaged, .conflicted: true
                     default: false
                     }
                     if !publishesAfterRead { self.syncModel.apply(result) }
@@ -287,7 +287,7 @@ private extension AppRuntime {
         let outcome = result.outcome
         if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
-        applyLibraryLaunchOutcome(unreadable: outcome.rebuild.storeUnreadable)
+        applyLibraryLaunchOutcome(outcome.rebuild)
         if !outcome.rebuild.storeUnreadable, !outcome.ingestionNeedsRetry {
             if result.backfilled {
                 platformVM.refreshDeployIndex()

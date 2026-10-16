@@ -69,10 +69,10 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
             return .terminateCancel
         }
         guard !questionOpen else { runtime?.isQuitting = wasQuitting; return .terminateCancel }
-        let hasPendingWork = (saves?.pendingCount ?? 0) > 0 || (steps?.pendingCount ?? 0) > 0
+        let hasPendingWork = saves?.hasActiveSaves == true || (steps?.pendingCount ?? 0) > 0
         guard hasUnsavedChanges || hasPendingWork else { return .terminateNow }
         let finish: (Bool) -> Void = { allowed in
-            guard allowed, (saves?.pendingCount ?? 0) > 0 || (steps?.pendingCount ?? 0) > 0 else {
+            guard allowed, saves?.hasActiveSaves == true || (steps?.pendingCount ?? 0) > 0 else {
                 reply(allowed); return
             }
             (saveTermination ?? PendingSaveTermination()).wait(for: saves, steps: steps, reply: reply)

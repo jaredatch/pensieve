@@ -281,7 +281,7 @@ final class SyncModel {
             state = configurationError.map { .error($0) } ?? lastSyncedAt.map { .synced(at: $0) } ?? .idle
         case let .failed(message):
             state = .error(DisplayTextSanitizer.singleLine(message))
-        case let .storeUnreadable(message):
+        case let .manifestDamaged(message), let .storeUnreadable(message):
             state = .error(DisplayTextSanitizer.singleLine(message))
         }
     }

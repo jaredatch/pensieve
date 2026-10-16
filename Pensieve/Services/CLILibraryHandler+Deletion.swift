@@ -39,9 +39,12 @@ extension CLILibraryHandler {
         let remaining = try context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == slug }
         let remainingPaths = preview.plannedRemovals.filter { files.fileExists(at: $0.artifactPath)
             || files.isSymlink(at: $0.artifactPath) }.map(\.artifactPath)
-        if !completed || deletionFailed(presentation.notice) {
+        let waiting = library.manifestSaves?.deletionWaitsForRepair(slug) == true
+        let message = [presentation.notice?.message, waiting ? ManifestSaveModel.waitingForRepairMessage : nil]
+            .compactMap { $0 }.joined(separator: " ")
+        if !completed || deletionFailed(presentation.notice) || waiting {
             var envelope = CLIReply.failure(changed ? "partial" : "deletion_refused",
-                presentation.notice?.message ?? "Deletion did not complete.",
+                message.isEmpty ? "Deletion did not complete." : message,
                 hint: "Inspect the remaining skill and deployments in Pensieve before retrying.", exit: 1).envelope
             envelope.changed = changed
             envelope.data = .object(["plan": data, "skillRetained": .bool(remaining != nil),

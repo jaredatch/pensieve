@@ -55,11 +55,17 @@ extension IngestPreflightTests {
             rebuild: IncompleteIngestRebuild())
         await coordinator.seedLastIngestedHeadStamp(head)
         let result = await coordinator.runCycle()
-        guard case .storeUnreadable(let message) = result else { return XCTFail("Expected damage: \(result)") }
+        guard case .manifestDamaged(let message) = result else { return XCTFail("Expected damage: \(result)") }
+        let library = queuedLibrary(f, context: context)
+        library.applySyncCycleOutcome(result)
+        XCTAssertFalse(library.categoryEditsFenced, "A damage cycle must not fence category edits")
+        XCTAssertTrue(library.addsFenced)
+        XCTAssertEqual(library.addFenceReason,
+            "Pensieve can't add to this library until the damaged library file is repaired.")
         XCTAssertTrue(message.contains("damaged"))
         XCTAssertFalse(message.contains("newer"))
         StoreIngestState.shared(for: context.container).invalidate()
-        guard case .storeUnreadable(let retryMessage) = await coordinator.runCycle() else {
+        guard case .manifestDamaged(let retryMessage) = await coordinator.runCycle() else {
             return XCTFail("Pending ingestion must still report the damaged file")
         }
         XCTAssertTrue(retryMessage.contains("damaged"))
@@ -107,6 +113,8 @@ extension IngestPreflightTests {
         CategoryStore(manifestSaves: saves).rename(category, to: "Waiting", context: context)
         await saves.waitUntilIdle()
         XCTAssertTrue(saves.libraryDamaged)
+        XCTAssertTrue(library.addsFenced)
+        XCTAssertFalse(library.categoryEditsFenced)
         try NativeTestWork.run {
             try f.files.writeFile(at: f.peer + "/manifest/manifest.yaml", content: "schema_version: 5\n")
             try f.changePeer()
@@ -115,6 +123,7 @@ extension IngestPreflightTests {
         await saves.refreshAndRetry()
         await saves.waitUntilIdle()
         XCTAssertFalse(saves.libraryDamaged)
+        XCTAssertFalse(library.addsFenced, "A readable peer file lifts the damage fence")
         XCTAssertEqual(saves.pendingCount, 0)
         XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name), ["Added", "Waiting"])
         XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Waiting"])

@@ -227,32 +227,38 @@ extension ManifestService {
     }
 }
 
-/// The exact tree the user was offered to replace. A failed inventory grants no replacement authority.
-/// Reads go through FileService without following links; digests keep the retained token small.
+/// The observable tree offered for replacement. Readable bytes are hashed; opaque entries retain
+/// their metadata and read failure. Links are observed without following them.
 struct ManifestDamage: Equatable {
     let missing: Bool
     private let entries: [String: Data]
 
     static func capture(root: String, files: FileServiceProtocol) throws -> ManifestDamage {
         var entries: [String: Data] = [:]
-        func walk(_ path: String) throws {
-            switch try files.entryTypeWithoutFollowingLinks(at: root + "/manifest" + path) {
-            case nil: return
-            case .directory:
-                entries[path] = Data()
-                for name in try files.listDirectory(at: root + "/manifest" + path).sorted() {
-                    try walk(path + "/" + name)
+        func walk(_ path: String) {
+            let absolute = root + "/manifest" + path
+            var observation = files.manifestEntryObservation(at: absolute)
+            defer { entries[path] = observation }
+            do {
+                let type = try files.entryTypeWithoutFollowingLinks(at: absolute)
+                observation += Data(":\(String(describing: type)):".utf8)
+                switch type {
+                case nil: break
+                case .directory:
+                    for name in try files.listDirectory(at: absolute).sorted() { walk(path + "/" + name) }
+                case .regular:
+                    let data = try files.readRegularFileData(at: absolute, maximumBytes: Int.max)
+                    observation += Data(SHA256.hash(data: data))
+                case .symlink:
+                    observation += Data(try files.symlinkTarget(at: absolute).utf8)
+                case .other: break
                 }
-            case .regular:
-                let data = try files.readRegularFileData(at: root + "/manifest" + path,
-                                                         maximumBytes: Int.max)
-                entries[path] = Data([1]) + Data(SHA256.hash(data: data))
-            case .symlink:
-                entries[path] = Data([2]) + Data(try files.symlinkTarget(at: root + "/manifest" + path).utf8)
-            default: throw ManifestError.damaged
+            } catch {
+                let failure = error as NSError
+                observation += Data("unreadable:\(failure.domain):\(failure.code)".utf8)
             }
         }
-        try walk("")
+        walk("")
         return ManifestDamage(missing: !files.fileExists(at: root + "/manifest/manifest.yaml"), entries: entries)
     }
 }

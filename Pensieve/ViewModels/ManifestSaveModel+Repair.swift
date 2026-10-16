@@ -2,6 +2,17 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
+    static let waitingForRepairMessage = "The library file is damaged. This change waits for its repair."
+    static let changedRepairMessage = "The library file changed. Review the repair again."
+    var damageAlertMessage: String {
+        repairError == Self.changedRepairMessage ? Self.changedRepairMessage + "\n\n" + Self.damageMessage : Self.damageMessage
+    }
+    func deletionWaitsForRepair(_ slug: String) -> Bool {
+        libraryDamaged && items.contains {
+            if case .deleteSkill(let waiting) = $0.change { return waiting == slug }
+            return false
+        }
+    }
     static let damageTitle = "The synced library file is damaged"
     static let damageMessage = "Your change is kept on this Mac and saves once the file is repaired. "
         + "Replacing the file with this Mac's library repairs it now."
@@ -10,20 +21,23 @@ extension ManifestSaveModel {
     static let repairMessage = "Pensieve rewrites the damaged file from the skills, categories and deployments on this Mac. "
         + "Changes other Macs synced that this Mac hasn't read are lost."
 
+    private enum LibraryRead { case readable, damaged, newer }
+
     /// Launch, cycle completion and the sidebar refresh derive damage from disk, including after relaunch.
     @MainActor
     func refreshDamage() async {
         let root = root, files = files, manifest = manifest
-        let observation = await BlockingWork.run { () -> (Bool, ManifestDamage?) in
+        let observation = await BlockingWork.run { () -> (LibraryRead, ManifestDamage?) in
             do {
                 _ = try manifest.read(fromRoot: root)
-                return (false, nil)
+                return (.readable, nil)
             } catch {
-                if case ManifestError.unsupportedSchema = error { return (false, nil) }
-                return (true, try? ManifestDamage.capture(root: root, files: files))
+                if case ManifestError.unsupportedSchema = error { return (.newer, nil) }
+                return (.damaged, try? ManifestDamage.capture(root: root, files: files))
             }
         }
-        libraryDamaged = observation.0
+        libraryDamaged = observation.0 == .damaged
+        requiresNewerVersion = observation.0 == .newer
         if !showsDamageAlert, !showsRepairConfirmation { damage = observation.1 }
         if !libraryDamaged, !items.isEmpty {
             let pendingMissing = items.contains {
@@ -46,6 +60,7 @@ extension ManifestSaveModel {
 
     @MainActor
     func requestRepair() {
+        repairError = nil
         confirmedDamage = damage
         showsDamageAlert = false
         showsRepairConfirmation = true
@@ -63,9 +78,10 @@ extension ManifestSaveModel {
         cancelRepair()
         repairError = nil
         var held: SyncLock?
-        defer { held?.release(); isWaiting = false }
+        defer { held?.release(); isWaiting = false; if libraryDamaged { pausedForRepair = true } }
         do {
             guard let expected else { throw ManifestError.damaged }
+            pausedForRepair = false
             held = try await takeLock()
             let snapshot = try manifest.snapshot(from: context)
             let captured = Set(items.filter { $0.presentation.context === context }.map(\.id))
@@ -82,6 +98,10 @@ extension ManifestSaveModel {
             }
             held?.release()
             await refreshAndRetry()
+            if !wrote, libraryDamaged {
+                repairError = Self.changedRepairMessage
+                showsDamageAlert = true
+            }
         } catch {
             repairError = error.localizedDescription
             await refreshDamage()

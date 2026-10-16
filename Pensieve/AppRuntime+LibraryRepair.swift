@@ -6,8 +6,9 @@ extension AppRuntime {
         await library.manifestSaves?.refreshAndRetry()
     }
 
-    func applyLibraryLaunchOutcome(unreadable: Bool) {
-        library.setStoreUnreadable(unreadable)
+    func applyLibraryLaunchOutcome(_ rebuild: RebuildResult) {
+        library.setStoreUnreadable(rebuild.storeUnreadable && !rebuild.manifestDamaged)
+        library.manifestSaves?.libraryDamaged = rebuild.manifestDamaged
         Task { @MainActor in await library.manifestSaves?.refreshAndRetry() }
     }
 }
