@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The sidebar's sync line (Route B, 2026-09-11): one plain button — a glyph and a short label,
 /// tertiary at rest, secondary under the pointer, where the label turns into the action ("Sync
-/// now" / "Resolve…"). Absent entirely when sync is unconfigured (`ContentView` mounts it only
-/// when `SyncModel.isConfigured`). The state → line mapping is `SyncFooterPresentation`.
+/// now" / "Resolve…" / "Repair…"). `SyncModel.showsFooter` keeps it absent without sync unless
+/// a save waits or the library is damaged. The state → line mapping is `SyncFooterPresentation`.
 struct SyncStatusView: View {
     @Environment(\.modelContext) private var modelContext
     let model: SyncModel

@@ -83,6 +83,10 @@ final class SyncModel {
         state != .unconfigured
     }
 
+    func showsFooter(saves: ManifestSaveModel?) -> Bool {
+        isConfigured || saves?.isWaiting == true || saves?.libraryDamaged == true
+    }
+
     var isConflicted: Bool {
         if case .conflicted = state { return true }
         return false

@@ -59,7 +59,7 @@ struct ContentView: View {
             )
                 .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 260)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if syncModel.isConfigured || library.manifestSaves?.isWaiting == true {
+                    if syncModel.showsFooter(saves: library.manifestSaves) {
                         SyncStatusView(model: syncModel, saves: library.manifestSaves,
                             onResolve: { showConflictResolution = true })
                     }

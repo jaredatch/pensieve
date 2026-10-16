@@ -186,6 +186,47 @@ extension ManifestSaveTests {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["Waiting"])
     }
 
+    func testDamagedFooterStaysMountedWithoutSyncOrQueuedSaveUntilRepairSucceeds() async throws {
+        let files = RebuildReadFileService()
+        let h = try ManifestSaveFixture(rebuildFiles: files)
+        defer { h.cleanup() }
+        let sync = SyncModel(git: TestPaths.git, root: h.root, initialState: .unconfigured)
+        XCTAssertFalse(sync.showsFooter(saves: h.saves), "No remote or waiting save means no healthy footer")
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged")
+        await h.saves.refreshAndRetry()
+        XCTAssertEqual(h.saves.pendingCount, 0)
+        XCTAssertFalse(h.saves.isWaiting)
+        XCTAssertTrue(sync.showsFooter(saves: h.saves), "Damage must mount repair without sync or a queued save")
+        let line = try XCTUnwrap(SyncFooterPresentation.make(state: sync.state, canResolve: sync.canResolve,
+            hovering: true, now: Date(), libraryDamaged: h.saves.libraryDamaged))
+        XCTAssertEqual(line.label, "Repair…")
+        XCTAssertEqual(line.action, .repair)
+        h.saves.requestRepair()
+        XCTAssertTrue(h.saves.showsRepairConfirmation)
+        h.saves.cancelRepair()
+        XCTAssertTrue(sync.showsFooter(saves: h.saves), "Cancel must keep the repair entry available")
+        files.refuseReplacement = true
+        h.saves.requestRepair()
+        await h.saves.replaceWithThisMac(context: h.context)
+        XCTAssertNotNil(h.saves.repairError)
+        XCTAssertFalse(h.saves.isWaiting)
+        XCTAssertTrue(sync.showsFooter(saves: h.saves), "Failed repair must keep the repair entry available")
+        files.refuseReplacement = false
+        h.saves.requestRepair()
+        await h.saves.replaceWithThisMac(context: h.context)
+        XCTAssertNil(h.saves.repairError)
+        XCTAssertFalse(h.saves.libraryDamaged)
+        XCTAssertFalse(sync.showsFooter(saves: h.saves), "Successful repair restores the absent no-remote footer")
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { lock.release() }
+        h.categories.rename(h.local, to: "Waiting", context: h.context)
+        await TestWait.until(failureMessage: "Save did not wait for the held lock") { h.saves.isWaiting }
+        XCTAssertTrue(sync.showsFooter(saves: h.saves), "A waiting save still mounts the no-remote footer")
+        lock.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertFalse(sync.showsFooter(saves: h.saves))
+    }
+
     func testDamagedFooterOffersSameConfirmationAfterRelaunchRead() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
