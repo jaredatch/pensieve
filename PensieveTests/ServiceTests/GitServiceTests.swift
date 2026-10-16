@@ -1012,7 +1012,8 @@ extension GitServiceTests {
                  "remote: \u{FFFD} Authentication failed\n"),
                 (Data([0xFF]) + Data("Permission denied (publickey).\n".utf8), Data(),
                  "\u{FFFD}Permission denied (publickey).\n")
-            ] {
+            // swiftlint:disable:next large_tuple
+            ] as [(Data, Data, String)] {
                 try writeFailedGit(files: files, executable: executable, stdout: stdout, stderr: stderr)
                 let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
                 let operations: [() throws -> Void] = [
@@ -1064,7 +1065,8 @@ extension GitServiceTests {
             let files = FileService()
             let executable = tempDir + "/failed-output"
             let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
-            let cases = [
+            // swiftlint:disable:next large_tuple
+            let cases: [(Data, Data, String)] = [
                 (Data("progress\n".utf8), Data("fatal: caf".utf8) + Data([0xE9]) + Data(" refused\n".utf8),
                  "fatal: caf\u{FFFD} refused\n"),
                 (Data("progress\n".utf8), Data("fatal: remote rejected\n".utf8), "fatal: remote rejected\n"),
