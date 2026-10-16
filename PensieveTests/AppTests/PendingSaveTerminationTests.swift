@@ -195,6 +195,15 @@ final class PendingSaveTerminationTests: XCTestCase {
         }
     }
 
+    func testNativeQuitResponseKeepsPressedMeaningBeforeDeferredReply() async throws {
+        let questions: [PendingSaveTermination.Question] = [.saving, .syncing, .savingAndSyncing, .waitingForRepair]
+        for question in questions {
+            for choice in ["Escape", "Command-period", "Return", question == .waitingForRepair ? "Cancel" : "Quit Anyway"] {
+                try await assertRecordedQuit(question, choice: choice)
+            }
+        }
+    }
+
     private func assertBothPendingQuestion(choice: String, stray: NSWindow) async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
@@ -255,5 +264,47 @@ final class PendingSaveTerminationTests: XCTestCase {
                 window.animationBehavior = behavior
             }
         }
+    }
+}
+
+extension PendingSaveTerminationTests {
+    private func assertRecordedQuit(_ question: PendingSaveTermination.Question, choice: String) async throws {
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        host.isReleasedWhenClosed = false
+        host.animationBehavior = .none
+        let restoreWindows = isolateQuestionHost(host)
+        defer { host.close(); restoreWindows() }
+        host.makeKeyAndOrderFront(nil)
+        var answers: [Bool] = []
+        let presentation = PendingSaveTermination.present(question) { answers.append($0) }
+        defer { presentation.dismiss() }
+        let sheet = try XCTUnwrap(host.attachedSheet)
+        sheet.animationBehavior = .none
+        let rendered = Self.views(try XCTUnwrap(sheet.contentView))
+        let buttons = rendered.compactMap { $0 as? NSButton }, titles = buttons.map(\.title)
+        assertQuestionText(question, in: rendered)
+        var completions = 0
+        let ended = NotificationCenter.default.addObserver(
+            forName: NSWindow.didEndSheetNotification, object: host, queue: .main
+        ) { _ in
+            completions += 1
+            XCTAssertTrue(answers.isEmpty, "Deliver the update after the native completion and before its deferred reply")
+            XCTAssertNotNil(sheet.sheetParent, "Exercise the still-attached sheet after its response")
+            let changed: PendingSaveTermination.Question = question == .waitingForRepair ? .saving : .waitingForRepair
+            XCTAssertFalse(presentation.update(changed), "A recorded response must refuse later question updates")
+            XCTAssertEqual(buttons.map(\.title), titles, "A recorded response must keep the buttons that were shown")
+            self.assertQuestionText(question, in: rendered)
+        }
+        defer { NotificationCenter.default.removeObserver(ended) }
+        if choice == "Return" { try sendQuitKey(choice, to: sheet) } else {
+            try chooseNativeQuit(choice, sheet: sheet, parent: host, buttons: buttons)
+        }
+        await TestWait.until(failureMessage: "The recorded native Quit response did not arrive") { !answers.isEmpty }
+        _ = try XCTUnwrap(answers.first)
+        XCTAssertEqual(completions, 1, "The update must run at the native completion boundary")
+        XCTAssertEqual(answers, [choice == "Quit Anyway" || (choice == "Return" && question == .waitingForRepair)],
+            "\(question), \(choice): a later update must not reinterpret the pressed button")
+        XCTAssertNil(host.attachedSheet)
     }
 }

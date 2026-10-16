@@ -165,6 +165,7 @@ final class PendingSaveTermination {
 
     static func present(_ question: Question, resolve: @escaping (Bool) -> Void) -> Presentation {
         var current = question
+        var responseRecorded = false
         let alert = NSAlert()
         alert.messageText = question.message
         alert.informativeText = question.detail
@@ -187,16 +188,18 @@ final class PendingSaveTermination {
         }
         let stopKeys = monitorCancelKeys(alert) { current }
         alert.beginSheetModal(for: host) { response in
+            responseRecorded = true
+            let quit = response == (current == .waitingForRepair ? .alertFirstButtonReturn : .alertSecondButtonReturn)
             stopKeys()
             if let willClose { NotificationCenter.default.removeObserver(willClose) }
             DispatchQueue.main.async {
                 if temporary { host.close() }
-                resolve(response == (current == .waitingForRepair ? .alertFirstButtonReturn : .alertSecondButtonReturn))
+                resolve(quit)
             }
         }
         configureKeys(alert, for: question)
         return Presentation(update: { question in
-            guard alert.window.sheetParent != nil else { return false }
+            guard !responseRecorded, alert.window.sheetParent != nil else { return false }
             current = question
             alert.buttons[0].title = question == .waitingForRepair ? "Quit" : "Wait"
             alert.buttons[1].title = question == .waitingForRepair ? "Cancel" : "Quit Anyway"
