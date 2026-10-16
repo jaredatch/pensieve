@@ -69,6 +69,25 @@ extension CLILibraryHandlerTests {
         try await assertPromptFailureCleanup(h)
     }
 
+    func testProjectCanonicalizationAndRegistrationLeaveTheMainActor() async throws {
+        let h = try CLILibraryFixture()
+        defer { h.stop() }
+        try await h.start()
+        let files = CLIProjectFileService()
+        let folder = h.root + "/thread-project"
+        try h.files.createDirectory(at: folder)
+        let handler = CLILibraryHandler(runtime: h.runtime, files: files)
+        let added = try await handler.addProject(folder, options: CLILibraryOptions(name: "~notes"))
+        XCTAssertTrue(added.envelope.ok)
+        let resolver = CLINameResolver(context: h.context, files: files)
+        let project = try await resolver.project(folder, cwd: h.root)
+        XCTAssertEqual(project.name, "~notes")
+        let named = try await resolver.project("~notes", cwd: h.root)
+        XCTAssertEqual(named.id, project.id)
+        XCTAssertGreaterThan(files.probeCounts.total, 0, "The real filesystem boundary must be exercised")
+        XCTAssertEqual(files.probeCounts.main, 0, "Project path work must not block the main actor")
+    }
+
     func testBuiltProjectSaveFailureUsesRealReadOnlyStore() async throws {
         let h = try CLILibraryFixture(readOnly: true)
         defer { h.stop() }

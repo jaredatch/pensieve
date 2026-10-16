@@ -8,6 +8,19 @@ private struct UnreadableSwitchIdentity: MachineIdentityProviding {
 
 @MainActor
 extension DeployIntentModelTests {
+    private func assertSelectionReloadFailureSurfacesAfterSavedIntent() throws {
+        for target in [localID, remoteID] {
+            let identity = ReloadFailingIdentity(id: localID)
+            let h = try makeHarness(reconcile: { _ in identity.fails = true; return BatchResult() }, identity: identity)
+            let skill = try insertSkill(context: h.context)
+            XCTAssertThrowsError(try h.model.setSelected(true, machineID: target, skill: skill,
+                platform: .codex, context: h.context))
+            XCTAssertNotNil(h.model.error, "The picker must report its failed refresh")
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1,
+                "The already saved selection is retained")
+        }
+    }
+
     func testLocalAndProjectSwitchesPersistBeforeDeployAndNudge() async throws {
         var events: [String] = []
         var nudges = 0
@@ -38,13 +51,7 @@ extension DeployIntentModelTests {
         let manifest = try ManifestService(fileService: harness.manifestFileService).read(fromRoot: harness.root)
         XCTAssertEqual(manifest.deployIntents.count, 2)
         try await assertRuntimeDeploymentNudges()
-        let identity = ReloadFailingIdentity(id: localID)
-        let remote = try makeHarness(identity: identity)
-        let remoteSkill = try insertSkill(context: remote.context)
-        XCTAssertNoThrow(try remote.model.setSelected(true, machineID: remoteID, skill: remoteSkill,
-            platform: .codex, context: remote.context), "A saved remote toggle succeeds even if refresh fails")
-        XCTAssertNil(remote.model.error)
-        XCTAssertEqual(try remote.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.machineID), [remoteID])
+        try assertSelectionReloadFailureSurfacesAfterSavedIntent()
     }
 
     func testTurningOffIntentAndManualDeploysAlwaysRemovesArtifactWithoutAdoption() throws {
@@ -109,7 +116,7 @@ extension DeployIntentModelTests {
         XCTAssertNotNil(failedOff.model.error)
     }
 
-    func testUnreadableMachineIDRefusesIntentButKeylessProjectStaysDirect() throws {
+    func testUnreadableMachineIDRefusesIntentButKeylessProjectStaysDirect() async throws {
         let harness = try makeHarness(identity: UnreadableSwitchIdentity())
         let skill = try insertSkill(context: harness.context)
 
@@ -131,7 +138,7 @@ extension DeployIntentModelTests {
         XCTAssertEqual(harness.linkService.linkCalls.map(\.projectPath), [project.path])
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
 
-        let cli = CLIDeployHandler(service: harness.model.service, files: harness.linkService.fileService).handle(
+        let cli = await CLIDeployHandler(service: harness.model.service, files: harness.linkService.fileService).handle(
             CLIRequest(command: "deploy", arguments: [skill.directoryName], deployment: CLIDeployOptions(
                 agents: ["codex"], project: project.name, workingDirectory: harness.root)), context: harness.context)
         XCTAssertTrue(cli.envelope.ok, "The CLI's keyless local path also needs no machine identity")
@@ -197,7 +204,7 @@ extension DeployIntentModelTests {
         XCTAssertEqual(harness.linkService.unlinkCalls.count, 1)
     }
 
-    func testBulkProjectTargetWritesAndRetractsProjectIntents() throws {
+    func testBulkProjectTargetWritesAndRetractsProjectIntents() async throws {
         let harness = try makeHarness()
         let alpha = try insertSkill(context: harness.context)
         let beta = Skill(name: "Beta", directoryName: "beta")
@@ -227,7 +234,7 @@ extension DeployIntentModelTests {
         rows = try harness.context.fetch(FetchDescriptor<MachineDeployIntent>())
         XCTAssertTrue(rows.isEmpty)
         XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path, project.path])
-        try assertDeploymentErrorsStayWithTheirWindow()
+        try await assertDeploymentErrorsStayWithTheirWindow()
     }
 
     func testSwitchRefusesWhileSyncLockIsHeldBeforeChangingAnything() throws {
@@ -268,11 +275,11 @@ extension DeployIntentModelTests {
 
 private final class ReloadFailingIdentity: MachineIdentityProviding {
     let id: String
-    private var reads = 0
+    var fails = false
     init(id: String) { self.id = id }
     func identifier() throws -> String {
-        reads += 1
-        guard reads == 1 else { throw DeployStubFailure() }
+        if fails { throw DeployStubFailure() }
         return id
     }
+    func existingIdentifier() throws -> String? { id }
 }

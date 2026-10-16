@@ -6,24 +6,24 @@ import XCTest
 
 @MainActor
 final class CLIDeployHandlerTests: XCTestCase {
-    func testLocalAndProjectDeployPreviewApplyRepeatAndUndeploy() throws {
+    func testLocalAndProjectDeployPreviewApplyRepeatAndUndeploy() async throws {
         for projectScope in [false, true] {
             let h = try CLIDeployFixture()
             let target: DeployTarget = projectScope ? .project(h.project) : .userWide
             let project = projectScope ? "." : nil
             let request = h.request(agents: ["claude-code"], project: project)
-            try seedUnrelatedIntent(h)
+            try await seedUnrelatedIntent(h)
             let before = try h.tree(), rows = try h.intents()
             var previewRequest = request
             previewRequest.deployment?.dryRun = true
-            let preview = h.handler.handle(previewRequest, context: h.context)
+            let preview = await h.handler.handle(previewRequest, context: h.context)
             XCTAssertTrue(preview.envelope.ok)
             XCTAssertEqual(try h.tree(), before)
             XCTAssertEqual(try h.intents(), rows)
             XCTAssertFalse(h.context.hasChanges)
             let invalidations = Counter()
             withObservationTracking { _ = h.platform.deployIndex } onChange: { invalidations.increment() }
-            let applied = h.handler.handle(request, context: h.context)
+            let applied = await h.handler.handle(request, context: h.context)
             XCTAssertTrue(applied.envelope.ok)
             XCTAssertEqual(applied.envelope.changed, true)
             XCTAssertEqual(invalidations.value, 1)
@@ -37,79 +37,79 @@ final class CLIDeployHandlerTests: XCTestCase {
             XCTAssertEqual(intent?.projectKey, target.project?.identityKey)
             XCTAssertEqual(try h.platform.deployStateStore.read().records.count, 1)
             let stable = try h.tree()
-            let repeated = h.handler.handle(request, context: h.context)
+            let repeated = await h.handler.handle(request, context: h.context)
             XCTAssertTrue(repeated.envelope.ok)
             XCTAssertEqual(repeated.exitCode, 0)
             XCTAssertEqual(repeated.envelope.changed, false)
             XCTAssertEqual(try h.tree(), stable)
-            try assertRemoval(h, project: project, target: target, stable: stable, rows: rows)
+            try await assertRemoval(h, project: project, target: target, stable: stable, rows: rows)
         }
-        try assertUninstalledAndUnseenIntentWithdrawal(wildcard: false)
+        try await assertUninstalledAndUnseenIntentWithdrawal(wildcard: false)
     }
 
     private func assertRemoval(_ h: CLIDeployFixture, project: String?, target: DeployTarget,
-                               stable: [String: Data], rows: Set<String>) throws {
+                               stable: [String: Data], rows: Set<String>) async throws {
         let removal = h.request("undeploy", project: project)
         var dryRemoval = removal
         dryRemoval.deployment?.dryRun = true
-        let removalPreview = h.handler.handle(dryRemoval, context: h.context)
+        let removalPreview = await h.handler.handle(dryRemoval, context: h.context)
         XCTAssertEqual(try h.tree(), stable)
-        let removed = h.handler.handle(removal, context: h.context)
+        let removed = await h.handler.handle(removal, context: h.context)
         XCTAssertTrue(removed.envelope.ok)
         XCTAssertEqual(fields(removalPreview)["changes"], fields(removed)["changes"])
         XCTAssertFalse(h.platform.isDeployed(skill: h.skill, platform: .claudeCode, target: target))
         XCTAssertEqual(try h.intents(), rows)
         XCTAssertTrue(try h.platform.deployStateStore.read().records.isEmpty)
         let empty = try h.tree()
-        let repeated = h.handler.handle(removal, context: h.context)
+        let repeated = await h.handler.handle(removal, context: h.context)
         XCTAssertTrue(repeated.envelope.ok)
         XCTAssertEqual(repeated.exitCode, 0)
         XCTAssertEqual(repeated.envelope.changed, false)
         XCTAssertEqual(try h.tree(), empty)
     }
 
-    private func seedUnrelatedIntent(_ h: CLIDeployFixture) throws {
+    private func seedUnrelatedIntent(_ h: CLIDeployFixture) async throws {
         h.context.insert(MachineDeployIntent(machineID: CLIDeployFixture.localID,
             skillSlug: h.other.directoryName, platformRaw: PlatformTarget.codex.rawValue))
         try h.context.save()
         try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
     }
 
-    func testRemoteAndLocalTargetsPreserveOtherSelections() throws {
+    func testRemoteAndLocalTargetsPreserveOtherSelections() async throws {
         let h = try CLIDeployFixture()
         let window = DeployIntentModel(service: h.service)
         _ = try window.set(true, skill: h.other, platform: .codex, target: .userWide, context: h.context)
         let before = try h.intents()
-        let remote = h.handler.handle(h.request(agents: ["*"], machines: ["Mini"]), context: h.context)
+        let remote = await h.handler.handle(h.request(agents: ["*"], machines: ["Mini"]), context: h.context)
         XCTAssertTrue(remote.envelope.ok)
         XCTAssertEqual(remote.envelope.next, ["pensieve sync"])
         XCTAssertFalse(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
         XCTAssertTrue(try h.intents().isSuperset(of: before))
         XCTAssertEqual(try h.intents().count, 3)
-        let local = h.handler.handle(h.request(machines: [CLIDeployFixture.localID]), context: h.context)
+        let local = await h.handler.handle(h.request(machines: [CLIDeployFixture.localID]), context: h.context)
         XCTAssertTrue(local.envelope.ok)
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
         let remoteRows = try h.intents().filter { $0.hasPrefix(CLIDeployFixture.remoteID) }
         XCTAssertEqual(remoteRows.count, 2)
-        let removed = h.handler.handle(h.request("undeploy", machines: ["Mini"]), context: h.context)
+        let removed = await h.handler.handle(h.request("undeploy", machines: ["Mini"]), context: h.context)
         XCTAssertTrue(removed.envelope.ok)
         XCTAssertTrue(try h.intents().isSuperset(of: before))
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
         XCTAssertEqual(try h.intents().filter { $0.hasPrefix(CLIDeployFixture.remoteID) }.count, 1)
-        let batch = h.handler.handle(h.request(skills: [h.skill.directoryName, h.other.directoryName],
+        let batch = await h.handler.handle(h.request(skills: [h.skill.directoryName, h.other.directoryName],
             agents: ["codex"], machines: ["Mini", CLIDeployFixture.localID]), context: h.context)
         XCTAssertTrue(batch.envelope.ok)
         XCTAssertEqual(try h.intents().count, 5)
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .codex))
-        try assertUninstalledAndUnseenIntentWithdrawal(wildcard: true)
-        try assertListedMachineNamesReachTheirTargets()
+        try await assertUninstalledAndUnseenIntentWithdrawal(wildcard: true)
+        try await assertListedMachineNamesReachTheirTargets()
     }
 
-    func testKeylessProjectsStayLocalAndWildcardListsUnsupportedAgents() throws {
+    func testKeylessProjectsStayLocalAndWildcardListsUnsupportedAgents() async throws {
         let h = try CLIDeployFixture()
         let before = try h.intents()
-        let deploy = h.handler.handle(h.request(agents: ["*"], project: "Local"), context: h.context)
+        let deploy = await h.handler.handle(h.request(agents: ["*"], project: "Local"), context: h.context)
         XCTAssertTrue(deploy.envelope.ok)
         XCTAssertEqual(try h.intents(), before)
         guard case let .array(changes) = fields(deploy)["changes"] else { return XCTFail("Missing changes") }
@@ -121,14 +121,14 @@ final class CLIDeployHandlerTests: XCTestCase {
         XCTAssertEqual(fields(deploy)["skipped"], .array([
             .object(["agent": .string("hermes"), "reason": .string("project_scope_unsupported")])]))
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .codex, target: .project(h.keyless)))
-        let removal = h.handler.handle(h.request("undeploy", agents: ["*"], project: "Local"), context: h.context)
+        let removal = await h.handler.handle(h.request("undeploy", agents: ["*"], project: "Local"), context: h.context)
         XCTAssertTrue(removal.envelope.ok)
         XCTAssertFalse(h.platform.isDeployed(skill: h.skill, platform: .codex, target: .project(h.keyless)))
         XCTAssertEqual(try h.intents(), before)
-        try assertKeylessWildcardIgnoresUserWideIntents()
+        try await assertKeylessWildcardIgnoresUserWideIntents()
     }
 
-    func testRefusedAgentNamesAndAmbiguousProjectsChangeNothing() throws {
+    func testRefusedAgentNamesAndAmbiguousProjectsChangeNothing() async throws {
         let h = try CLIDeployFixture()
         let duplicate = Project(name: "App", path: h.directory.path + "/another")
         h.context.insert(duplicate)
@@ -137,6 +137,10 @@ final class CLIDeployHandlerTests: XCTestCase {
         }
         try h.context.save()
         let cases: [(CLIRequest, (String, Int32))] = [
+            (h.request(skills: [String(repeating: "x", count: 60_000)]), ("usage", 64)),
+            (h.request(agents: [String(repeating: "x", count: 81)]), ("usage", 64)),
+            (h.request(project: String(repeating: "x", count: 81)), ("usage", 64)),
+            (h.request(machines: [String(repeating: "x", count: 120)]), ("usage", 64)),
             (h.request(skills: ["revie"]), ("skill_not_found", 4)),
             (h.request(agents: ["claud"]), ("agent_not_found", 4)),
             (h.request(project: "Ap"), ("project_not_found", 4)),
@@ -151,7 +155,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         let before = try h.tree()
         for (request, expected) in cases {
             let (code, exit) = expected
-            let result = h.handler.handle(request, context: h.context)
+            let result = await h.handler.handle(request, context: h.context)
             XCTAssertEqual(result.exitCode, exit, code)
             XCTAssertEqual(result.envelope.error?.code, code)
             XCTAssertFalse(try XCTUnwrap(result.envelope.error?.hint).isEmpty)
@@ -169,7 +173,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         }
     }
 
-    func testAmbiguousMachinesListIDsAndAnIDDisambiguatesTheTarget() throws {
+    func testAmbiguousMachinesListIDsAndAnIDDisambiguatesTheTarget() async throws {
         let otherID = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
         let states = [CLIDeployFixture.remoteID, otherID].map { machineID in
             MachineState(schemaVersion: 1, machineID: machineID, name: " \nMi\u{200E}ni\t ", appVersion: "fixture",
@@ -179,18 +183,18 @@ final class CLIDeployHandlerTests: XCTestCase {
         let window = DeployIntentModel(service: h.service)
         window.reload(context: h.context)
         XCTAssertEqual(window.machines.filter { !$0.isLocal }.map(\.name), ["Mini", "Mini"])
-        let refusal = h.handler.handle(h.request(machines: ["Mini"]), context: h.context)
+        let refusal = await h.handler.handle(h.request(machines: ["Mini"]), context: h.context)
         XCTAssertEqual(refusal.exitCode, 5)
         XCTAssertEqual(refusal.envelope.error?.code, "ambiguous")
         for state in states { XCTAssertTrue(refusal.envelope.error?.message.contains(state.machineID) == true) }
         XCTAssertTrue(try h.intents().isEmpty)
-        let applied = h.handler.handle(h.request(machines: [otherID]), context: h.context)
+        let applied = await h.handler.handle(h.request(machines: [otherID]), context: h.context)
         XCTAssertTrue(applied.envelope.ok)
         XCTAssertEqual(try h.intents(), [otherID + "|" + h.skill.directoryName + "|claudeCode"])
-        try assertMachineLookupPrecedence()
+        try await assertMachineLookupPrecedence()
     }
 
-    func testSharedWindowAndCommandLockAndSaveRollback() throws {
+    func testSharedWindowAndCommandLockAndSaveRollback() async throws {
         for failsSave in [false, true] {
             let h = try CLIDeployFixture(save: { context in
                 if failsSave { throw DeployStubFailure() }
@@ -201,7 +205,7 @@ final class CLIDeployHandlerTests: XCTestCase {
             let window = DeployIntentModel(service: h.service)
             XCTAssertThrowsError(try window.set(true, skill: h.skill, platform: .claudeCode,
                 target: .userWide, context: h.context))
-            let result = h.handler.handle(h.request(), context: h.context)
+            let result = await h.handler.handle(h.request(), context: h.context)
             XCTAssertEqual(result.exitCode, 1)
             XCTAssertEqual(result.envelope.error?.code, failsSave ? "deploy_failed" : "sync_running")
             XCTAssertEqual(result.envelope.error?.retryable, !failsSave)

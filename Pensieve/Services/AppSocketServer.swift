@@ -8,6 +8,8 @@ protocol AppSocketServing: AnyObject {
 struct SocketTimeouts {
     var request: TimeInterval = 5
     var reply: TimeInterval = 5
+    var readiness: TimeInterval = CLIProtocol.readyTimeout
+    var handler: TimeInterval = CLIProtocol.syncReplyTimeout
 }
 
 /// Transport queues never touch SwiftData. A decoded request crosses to the handler's main actor.
@@ -49,10 +51,15 @@ final class AppSocketServer: AppSocketServing {
                     }
                     return
                 }
-                guard slots.wait(timeout: .now()) == .success else { close(client); continue }
+                guard slots.wait(timeout: .now()) == .success else {
+                    session.refuseBusy(client)
+                    close(client)
+                    continue
+                }
+                let slot = SocketSessionSlot { slots.signal() }
                 clients.async {
-                    defer { close(client); slots.signal() }
-                    session.serve(client)
+                    defer { close(client) }
+                    session.serve(client, slot: slot)
                 }
             }
         }

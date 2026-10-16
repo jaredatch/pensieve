@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 extension CLIDeployHandlerTests {
-    func assertUninstalledAndUnseenIntentWithdrawal(wildcard: Bool) throws {
+    func assertUninstalledAndUnseenIntentWithdrawal(wildcard: Bool) async throws {
         for machineID in [CLIDeployFixture.localID, CLIDeployFixture.remoteID] {
             let h = try CLIDeployFixture(installed: [.claudeCode], states: [])
             for (skill, projectKey) in [(h.skill, nil), (h.other, nil), (h.skill, h.project.identityKey)] {
@@ -19,10 +19,10 @@ extension CLIDeployHandlerTests {
             XCTAssertTrue(window.availablePlatforms.contains(.cursor))
             let before = try h.intents()
             let targets = machineID == CLIDeployFixture.localID ? [] : [machineID]
-            let refused = h.handler.handle(h.request(agents: ["cursor"], machines: targets), context: h.context)
+            let refused = await h.handler.handle(h.request(agents: ["cursor"], machines: targets), context: h.context)
             XCTAssertEqual(refused.envelope.error?.code, "agent_not_installed", "Deploy still requires an installed agent")
             XCTAssertEqual(try h.intents(), before)
-            let removed = h.handler.handle(h.request("undeploy", agents: [wildcard ? "*" : "cursor"], machines: targets),
+            let removed = await h.handler.handle(h.request("undeploy", agents: [wildcard ? "*" : "cursor"], machines: targets),
                 context: h.context)
             XCTAssertEqual(removed.exitCode, 0)
             XCTAssertTrue(removed.envelope.ok)

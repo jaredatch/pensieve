@@ -106,7 +106,8 @@ final class CLILibraryFixture {
 
     func run(_ arguments: [String], exit: Int32 = 0, terminal: Bool = false,
              environment extra: [String: String] = [:], expectsPrompt: Bool? = nil,
-             beforeConfirmation: (() async throws -> Void)? = nil) async throws -> CLIEnvelope {
+             beforeConfirmation: (() async throws -> Void)? = nil,
+             afterProbe: @escaping () throws -> Void = {}) async throws -> CLIEnvelope {
         guard beforeConfirmation == nil || terminal else { throw POSIXError(.EINVAL) }
         let process = Process()
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
@@ -117,8 +118,7 @@ final class CLILibraryFixture {
         environment.merge(extra) { _, new in new }
         process.environment = environment
         let output = Pipe(), errors = Pipe(), input = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
+        process.standardOutput = output; process.standardError = errors
         var controllerFD: Int32 = -1, terminalFD: Int32 = -1
         if terminal {
             guard openpty(&controllerFD, &terminalFD, nil, nil, nil) == 0 else { throw POSIXError(.EIO) }
@@ -131,10 +131,11 @@ final class CLILibraryFixture {
         }
         defer { if controllerFD >= 0 { Darwin.close(controllerFD); Darwin.close(terminalFD) } }
         async let running = BlockingWork.run {
-            try CLIProcessProbe.run(process, timeout: 40, afterLaunch: {
-                errors.fileHandleForWriting.closeFile()
-                output.fileHandleForWriting.closeFile()
+            let result = try CLIProcessProbe.run(process, timeout: 40, afterLaunch: {
+                errors.fileHandleForWriting.closeFile(); output.fileHandleForWriting.closeFile()
             })
+            try afterProbe()
+            return result
         }
         var prefix = Data()
         if let beforeConfirmation {
@@ -144,7 +145,7 @@ final class CLILibraryFixture {
                 _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) }
             } catch {
                 if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                _ = try await running
+                _ = try? await running
                 throw error
             }
         }

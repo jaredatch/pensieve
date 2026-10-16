@@ -9,7 +9,7 @@ struct DeployTargetCatalog {
     var publishedNamesByID: [String: [String]] {
         Dictionary(states.map {
             let visible = PublishedStringSanitizer.name($0.name, fallback: "")
-            return ($0.machineID, visible.isEmpty ? [] : [$0.name, visible])
+            return ($0.machineID, visible.isEmpty ? [] : [visible])
         }, uniquingKeysWith: { first, _ in first })
     }
 }

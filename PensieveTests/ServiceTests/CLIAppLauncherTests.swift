@@ -35,18 +35,19 @@ final class CLIAppLauncherTests: XCTestCase {
 
     @MainActor
     func testProbeLetsItsInnerTimeoutReportBeforeTheOuterDeadline() async throws {
+        let innerTimeout = 0.2, outerTimeout: TimeInterval = 2 // upper-bound: ordered inner/outer watchdogs
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = ["-c", """
         import subprocess, sys
-        try: subprocess.run([sys.executable, '-c', 'import time; time.sleep(90)'], timeout=63)
+        try: subprocess.run([sys.executable, '-c', 'import time; time.sleep(2)'], timeout=\(innerTimeout))
         except subprocess.TimeoutExpired:
             print('inner fixture step timed out', flush=True)
             sys.exit(23)
         """]
         let output = Pipe()
         process.standardOutput = output
-        let result = try await BlockingWork.run { try CLIProcessProbe.run(process) }
+        let result = try await BlockingWork.run { try CLIProcessProbe.run(process, timeout: outerTimeout) }
         XCTAssertFalse(result.timedOut, "the inner timeout must report before the outer watchdog fires")
         XCTAssertEqual(result.status, 23)
         XCTAssertEqual(String(bytes: try output.fileHandleForReading.readToEnd() ?? Data(), encoding: .utf8),

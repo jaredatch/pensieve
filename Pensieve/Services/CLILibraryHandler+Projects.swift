@@ -4,9 +4,16 @@ import SwiftData
 extension CLILibraryHandler {
     func addProject(_ suppliedPath: String, options: CLILibraryOptions) async throws -> CLIReply {
         try requireAddsAllowed()
-        let path = files.realPath(at: URL(fileURLWithPath: suppliedPath,
-            relativeTo: URL(fileURLWithPath: options.workingDirectory)).path)
-        let existing = try context.fetch(FetchDescriptor<Project>()).filter { files.realPath(at: $0.path) == path }
+        let files = files
+        let snapshots = try context.fetch(FetchDescriptor<Project>()).map { (id: $0.id, path: $0.path) }
+        let (path, existingIDs) = await BlockingWork.run {
+            let path = files.realPath(at: URL(fileURLWithPath: suppliedPath,
+                relativeTo: URL(fileURLWithPath: options.workingDirectory)).path)
+            return (path, Set(snapshots.filter { files.realPath(at: $0.path) == path }.map { $0.id }))
+        }
+        try requireAddsAllowed()
+        try requireUnchangedProjects(snapshots)
+        let existing = try context.fetch(FetchDescriptor<Project>()).filter { existingIDs.contains($0.id) }
         if let project = existing.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first {
             return success(projectValue(project), changed: false)
         }
@@ -26,7 +33,11 @@ extension CLILibraryHandler {
                 "createsMarker": .bool(preview == nil)]))
         }
         // The sheet uses the same registration constructor and persistence operation.
-        let project = try ProjectRegistration.makeProject(name: name, path: path, using: identity)
+        let project = try await BlockingWork.run {
+            try ProjectRegistration.makeProject(name: name, path: path, using: identity)
+        }
+        try requireAddsAllowed()
+        try requireUnchangedProjects(snapshots)
         let reconcile = runtime.reconcileIntent
         let notifier = runtime.syncStateNotifier
         let registered = try registerProject(project, context: context,
@@ -34,8 +45,18 @@ extension CLILibraryHandler {
         return success(projectValue(registered), changed: true)
     }
 
-    func removeProject(_ name: String, options: CLILibraryOptions) throws -> CLIReply {
-        let project = try resolver.project(name, cwd: options.workingDirectory)
+    private func requireUnchangedProjects(_ snapshots: [(id: UUID, path: String)]) throws {
+        let current = try context.fetch(FetchDescriptor<Project>())
+        guard current.count == snapshots.count, current.allSatisfy({ project in
+            snapshots.contains { $0.id == project.id && $0.path == project.path }
+        }) else {
+            throw CLICommandRefusal(reply: .failure("project_changed", "Project registrations changed during lookup.",
+                hint: "Run the command again to use the current registrations.", exit: 3, retryable: true))
+        }
+    }
+
+    func removeProject(_ name: String, options: CLILibraryOptions) async throws -> CLIReply {
+        let project = try await resolver.project(name, cwd: options.workingDirectory)
         let plan = try ProjectRemovalPlan.prepare(project: project, platformVM: runtime.platformVM, context: context)
         let preview = plan.preview
         let data = try removalValue(project, plan: plan)

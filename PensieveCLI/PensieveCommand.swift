@@ -24,6 +24,7 @@ struct PensieveCommand: ParsableCommand {
                       ProjectCommand.self, DeploymentCommand.self, DeployedCommand.self, StatusCommand.self,
                       LogCommand.self, DoctorCommand.self, CommandsCommand.self, CompletionCommand.self, VersionCommand.self])
     @OptionGroup var output: OutputOptions
+    @Flag(help: "Print the app version.") var version = false
 }
 
 struct SkillCommand: ParsableCommand {

@@ -76,7 +76,7 @@ extension AppRuntime {
                         return .failure("app_unavailable", "Pensieve is unavailable", hint: "Open Pensieve.", exit: 3)
                     }
                     if ["deploy", "undeploy"].contains(request.command) {
-                        return CLIDeployHandler(service: self.deployMutations, files: files)
+                        return await CLIDeployHandler(service: self.deployMutations, files: files)
                             .handle(request, context: self.container.mainContext)
                     }
                     if request.command == "sync" { return await CLISyncHandler(model: self.syncModel).handle() }

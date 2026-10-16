@@ -95,6 +95,15 @@ final class CLILibraryHandlerTests: XCTestCase {
         let refused = try await h.run(["skill", "update", "foo", "--yes"], exit: 1)
         XCTAssertEqual(refused.error?.code, "local_changes")
         XCTAssertEqual(try h.files.readFile(at: h.paths.skillsDir + "/foo/asset.txt"), "local edit")
+        remote.arm()
+        async let planning = h.run(["skill", "update", "foo", "--yes"], exit: 5)
+        await TestWait.until(failureMessage: "Update planning reaches the remote boundary") { remote.gate.waiterCount == 1 }
+        let skill = try XCTUnwrap(h.context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "foo" })
+        h.runtime.library.noteEditorChanged(skill, body: "draft during planning")
+        remote.gate.open()
+        let draftRefusal = try await planning
+        XCTAssertEqual(draftRefusal.error?.code, "unsaved_draft", "A new draft takes precedence over local drift")
+        h.runtime.library.discardDraft(skill)
         try await assertDriftRefusalBeforeConfirmation(h)
         try await assertChangedUpdateConfirmation(h)
         let updated = try await h.run(["skill", "update", "foo", "--overwrite-local-changes", "--yes"])

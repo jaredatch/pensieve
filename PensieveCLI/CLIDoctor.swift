@@ -25,15 +25,15 @@ struct CLIDoctor {
         }
         do {
             let entry = try files.commandLinkEntry(at: socket)
-            record("socket", entry?.kind == .socket, socket, "Open this Pensieve copy to create its socket.")
+            record("socket", entry?.kind == .socket && entry?.owner == getuid(), socket,
+                   "Open this Pensieve copy to create its socket.")
         } catch { record("socket", false, error.localizedDescription, "Check access to the App Support folder.") }
         do {
             let descriptor = try SocketTransport.connect(to: socket, timeout: 1)
             defer { close(descriptor) }
-            let data = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.requestLimit, timeout: 1)
             let client = CLIClient(appPath: files.realPath(at: app), socketPath: socket, fileService: files,
                                    launcher: CLIAppLauncher(fileService: files), bundleID: "")
-            let handshake = try client.validatedHandshake(data, isWrite: false)
+            let handshake = try checkedHandshake(client, descriptor: descriptor)
             record("app", true, handshake.bundlePath, "This app is reachable.")
         } catch { record("app", false, error.localizedDescription, "Open \(app), then run doctor again.") }
         let directories = searchPath.components(separatedBy: ":").filter { PathSyntax.isAbsolute($0) }
@@ -68,6 +68,12 @@ struct CLIDoctor {
             error: CLIError(code: "doctor_failed", message: "Some setup checks failed.",
                             hint: "Follow the hint for each failed check.", retryable: false)), exitCode: 1)
     }
+    private func checkedHandshake(_ client: CLIClient, descriptor: Int32) throws -> CLIHandshake {
+        try client.validatePeer(descriptor)
+        let data = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.requestLimit, timeout: 1)
+        return try client.validatedHandshake(data, isWrite: false)
+    }
+
     private func checkAgents(directories: [String], record: (String, Bool, String, String) -> Void) {
         let probe = SystemEnvironmentProbe(fileService: files,
             pathEntries: directories)

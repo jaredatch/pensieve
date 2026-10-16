@@ -6,7 +6,7 @@ struct CLIDeployHandler {
     let service: DeployMutationServicing
     let files: FileServiceProtocol
 
-    func handle(_ request: CLIRequest, context: ModelContext) -> CLIReply {
+    func handle(_ request: CLIRequest, context: ModelContext) async -> CLIReply {
         do {
             guard let options = request.deployment, !request.arguments.isEmpty, !options.agents.isEmpty,
                   options.global != (options.project != nil), options.machines.isEmpty || options.global else {
@@ -14,8 +14,11 @@ struct CLIDeployHandler {
                     hint: "Run pensieve \(request.command) --help.", exit: 64)
             }
             let lookup = CLINameResolver(context: context, files: files)
+            let project: Project?
+            if let name = options.project {
+                project = try await lookup.project(name, cwd: options.workingDirectory)
+            } else { project = nil }
             let skills = try Array(Set(request.arguments)).sorted().map(lookup.skill)
-            let project = try options.project.map { try lookup.project($0, cwd: options.workingDirectory) }
             let pairs = try resolvePairs(skills: skills, options: options, project: project, lookup: lookup,
                 context: context, selected: request.command == "deploy")
             let report = try service.change(request.command == "deploy", pairs: pairs.pairs,

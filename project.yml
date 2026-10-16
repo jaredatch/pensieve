@@ -284,6 +284,7 @@ targets:
       - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Services/CLIProtocol.swift
       - path: Pensieve/Services/SocketTransport.swift
+      - path: Pensieve/Services/SocketPeerCredentials.swift
       - path: Pensieve/Services/DaemonCLI.swift
       - path: Pensieve/Services/DaemonCLI+Deployed.swift
       - path: Pensieve/Services/DaemonCycleResult.swift

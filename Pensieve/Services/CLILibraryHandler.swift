@@ -18,7 +18,7 @@ struct CLILibraryHandler {
             case "skill update": return try await update(request.arguments, options: options)
             case "skill delete": return try await delete(request.arguments.first ?? "", options: options)
             case "project add": return try await addProject(request.arguments.first ?? "", options: options)
-            case "project remove": return try removeProject(request.arguments.first ?? "", options: options)
+            case "project remove": return try await removeProject(request.arguments.first ?? "", options: options)
             default: return .failure("usage", "Unknown library command.", hint: "Run pensieve commands.", exit: 64)
             }
         } catch let refusal as CLICommandRefusal { return refusal.reply } catch {

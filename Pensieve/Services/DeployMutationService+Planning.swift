@@ -95,6 +95,7 @@ extension DeployMutationService {
             report.applied = report.applied || !result.successes.isEmpty || result.didRemoveArtifacts
                 || result.outcomes.contains(where: \.artifactApplied)
         }
+        report.results.readFailures += reconciliation.readFailures
         return report
     }
 

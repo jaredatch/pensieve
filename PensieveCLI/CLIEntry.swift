@@ -21,21 +21,16 @@ enum CLIEntry {
         // This only selects the format for parser failures; successful commands use decoded options.
         var json = arguments.prefix { $0 != "--" }.contains("--json")
         do {
-            let command: ParsableCommand
-            let options: OutputOptions
-            if arguments.prefix(while: { $0 != "--" }).contains("--version") {
-                let version = try VersionOptions.parse(arguments)
-                command = VersionCommand()
-                options = version.output
-            } else {
-                command = try PensieveCommand.parseAsRoot(arguments)
-                guard let output = command as? OutputCommand else {
-                    var help = command
-                    try help.run()
-                    return 0
-                }
-                options = output.output
+            let command = try PensieveCommand.parseAsRoot(arguments)
+            if !(command is PensieveCommand), arguments.prefix(while: { $0 != "--" }).contains("--version") {
+                throw ValidationError("--version is a root option. Run pensieve --version.")
             }
+            guard let output = command as? OutputCommand else {
+                var help = command
+                try help.run()
+                return 0
+            }
+            let options = output.output
             json = options.json
             let result = try execute(command, app: app, info: info,
                 paths: (appSupport, home), files: files, invocation: (options, arguments))
@@ -81,7 +76,7 @@ enum CLIEntry {
                 applicationsDirectory: appSupport == defaultAppSupport ? "/Applications" : paths.home + "/Applications",
                 developerDirectory: ProcessInfo.processInfo.environment["DEVELOPER_DIR"]).run(), nil)
         }
-        if command is VersionCommand {
+        if command is VersionCommand || (command as? PensieveCommand)?.version == true {
             return (.success(.object(["version": .string(version)])), "pensieve \(version)\n")
         }
         if command is CommandsCommand {
@@ -181,11 +176,6 @@ enum CLIEntry {
     private static func normalizedLines(_ text: String) -> String {
         text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
     }
-}
-
-private struct VersionOptions: ParsableArguments {
-    @OptionGroup var output: OutputOptions
-    @Flag var version = false
 }
 
 private protocol OutputCommand: ParsableCommand {

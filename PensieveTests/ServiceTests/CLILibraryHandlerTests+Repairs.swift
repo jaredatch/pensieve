@@ -45,6 +45,8 @@ extension CLILibraryHandlerTests {
         XCTAssertEqual(preview.data?["skills"]?.array?.first?["drifted"], .bool(true))
         XCTAssertTrue(String(describing: preview.data?["hint"]).contains("--overwrite-local-changes"),
             "A drifted dry run explains how to apply its plan")
+        let overwrite = try await h.run(["skill", "update", "foo", "--dry-run", "--overwrite-local-changes"])
+        XCTAssertNil(overwrite.data?["hint"], "An authorized overwrite needs no overwrite hint")
         for terminal in [false, true] {
             let refused = try await h.run(["skill", "update", "foo"], exit: 1,
                 terminal: terminal, expectsPrompt: false)
@@ -120,7 +122,8 @@ extension CLILibraryHandlerTests {
         let interrupted = ContinuousClock.now
         do {
             _ = try await h.run(["skill", "delete", "foo"], terminal: true,
-                beforeConfirmation: { throw POSIXError(.ECANCELED) })
+                beforeConfirmation: { throw POSIXError(.ECANCELED) },
+                afterProbe: { throw POSIXError(.EIO) })
             XCTFail("The prompt callback must throw")
         } catch { XCTAssertEqual((error as? POSIXError)?.code, .ECANCELED) }
         XCTAssertLessThan(interrupted.duration(to: .now), .seconds(5), "A failed prompt callback reaps its CLI child")
