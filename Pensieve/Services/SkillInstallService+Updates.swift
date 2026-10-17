@@ -82,7 +82,7 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
 }
 
 extension SkillInstallService {
-    /// Reads both diff sides only after the fresh checkout matches the pinned commit and tree.
+    /// Reads both diff sides only after the supplied or fresh checkout matches the pinned commit and tree.
     /// The operation writes scratch clone data only; it never touches the store, manifest, or flags.
     func previewUpdate(_ update: PinnedSkillUpdate, checkout: String? = nil) throws -> PinnedSkillDiff {
         var upstreamRoot: String?
@@ -122,12 +122,14 @@ extension SkillInstallService {
         } catch {
             if error as? SkillInstallError == .repositoryChanged { throw SkillUpdateFlowError.repositoryChanged }
             throw previewReadError(error, local: storeRoot + "/skills/" + update.existingSlug,
-                                   upstream: upstreamRoot ?? scratchRoot,
-                                   skillPath: upstreamRoot == nil ? update.candidate.path : nil)
+                                   upstream: upstreamRoot ?? checkout ?? scratchRoot,
+                                   skillPath: upstreamRoot == nil ? update.candidate.path : nil,
+                                   checkoutSupplied: checkout != nil)
         }
     }
 
-    private func previewReadError(_ error: Error, local: String, upstream: String, skillPath: String? = nil) -> Error {
+    private func previewReadError(_ error: Error, local: String, upstream: String, skillPath: String? = nil,
+                                  checkoutSupplied: Bool = false) -> Error {
         let failure = error as NSError
         guard let path = failure.userInfo[NSFilePathErrorKey] as? String else {
             if error is CancellationError || error is SkillInstallError || error is SkillUpdateFlowError
@@ -143,7 +145,8 @@ extension SkillInstallService {
         if isUpstream, let skillPath {
             // Scratch/session/repository are implementation paths, not part of the skill.
             let components = PathSyntax.components(relative)
-            relative = components.count > 2 ? components.dropFirst(2).joined(separator: "/") : "."
+            relative = checkoutSupplied ? relative
+                : (components.count > 2 ? components.dropFirst(2).joined(separator: "/") : ".")
             if !skillPath.isEmpty {
                 if PathSyntax.isWithin(skillPath, root: relative) {
                     relative = "."

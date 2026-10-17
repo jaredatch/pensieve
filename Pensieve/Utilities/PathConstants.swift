@@ -86,30 +86,41 @@ enum PathConstants {
 
     static let claudeCodeUserSkillsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/.claude/skills"
+        return agentSkillsDirectory(.claudeCode, home: home)
     }()
     static let grokUserSkillsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/.grok/skills"
+        return agentSkillsDirectory(.grok, home: home)
     }()
     static let codexUserSkillsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/.codex/skills"
+        return agentSkillsDirectory(.codex, home: home)
     }()
     static let openClawUserSkillsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/.openclaw/skills"
+        return agentSkillsDirectory(.openClaw, home: home)
     }()
     static let hermesUserSkillsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/.hermes/skills"
+        return agentSkillsDirectory(.hermes, home: home)
     }()
     /// Default Hermes category for realized skills. Hermes nests skills under skills/{category}/{name}.
     static let hermesDefaultCategory = "pensieve"
     static let cursorUserRulesDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/.cursor/rules"
+        return agentSkillsDirectory(.cursor, home: home)
     }()
+
+    static func agentSkillsDirectory(_ platform: PlatformTarget, home: String) -> String {
+        switch platform {
+        case .claudeCode: return home + "/.claude/skills"
+        case .grok: return home + "/.grok/skills"
+        case .codex: return home + "/.codex/skills"
+        case .openClaw: return home + "/.openclaw/skills"
+        case .hermes: return home + "/.hermes/skills"
+        case .cursor: return home + "/.cursor/rules"
+        }
+    }
 
     // MARK: - Claude Code project-level paths (relative to project root)
 

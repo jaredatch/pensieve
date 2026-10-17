@@ -12,12 +12,15 @@ struct CLIClient {
         let deadline = SocketTransport.deadline(after: CLIProtocol.readyTimeout)
         var waitingForStartup = true
         var mayHaveApplied = false
+        var connected = false
         let networkCommand = ["install", "skill outdated", "skill update"].contains(request.command)
         let replyTimeout = request.command == "sync" || networkCommand
             ? CLIProtocol.syncReplyTimeout : CLIProtocol.commandReplyTimeout
         do {
             let descriptor = try connect(deadline: deadline)
             defer { close(descriptor) }
+            connected = true
+            try validatePeer(descriptor)
             let bytes = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.requestLimit,
                 timeout: max(0, deadline - ProcessInfo.processInfo.systemUptime))
             let handshake = try validatedHandshake(bytes, isWrite: request.isWrite)
@@ -46,12 +49,24 @@ struct CLIClient {
         } catch SocketError.timeout {
             return timeoutReply(request: request, startup: waitingForStartup,
                 networkCommand: networkCommand, replyTimeout: replyTimeout)
+        } catch is DecodingError {
+            return .failure("invalid_response", "Pensieve returned an invalid response.",
+                hint: "Use the command bundled with this app. Check Pensieve before retrying a write.", exit: 3)
+        } catch SocketError.oversized {
+            return .failure("response_too_large", "Pensieve's response exceeded the size limit.",
+                hint: "Narrow the command's selection. Check Pensieve before retrying a write.", exit: 3)
         } catch {
-            return .failure("app_unavailable", "\(socketPath): \(error.localizedDescription)",
-                hint: mayHaveApplied ? "Check Pensieve before running this command again. Its result could not be received."
+            return connectionFailure(error, connected: connected, mayHaveApplied: mayHaveApplied)
+        }
+    }
+
+    private func connectionFailure(_ error: Error, connected: Bool, mayHaveApplied: Bool) -> CLIReply {
+        return .failure(connected ? "connection_lost" : "app_unavailable",
+            "\(socketPath): \(error.localizedDescription)",
+            hint: mayHaveApplied || connected
+                ? "Check Pensieve before running this command again. Its result could not be received."
                     : launcher.launchRefusal(appPath: appPath, bundleID: bundleID)?.envelope.error?.hint
                         ?? "Open \(appPath), then run this command again.", exit: 3, retryable: !mayHaveApplied)
-        }
     }
 
     private func timeoutReply(request: CLIRequest, startup: Bool, networkCommand: Bool,
@@ -74,7 +89,14 @@ struct CLIClient {
                 hint: "Wait a moment, then run this command again.", exit: 3, retryable: true)
     }
 
-    private func validatedHandshake(_ bytes: Data, isWrite: Bool) throws -> CLIHandshake {
+    func validatePeer(_ descriptor: Int32) throws {
+        guard try SocketPeerCredentials().userID(of: descriptor) == getuid() else {
+            throw LaunchRefusal(reply: .failure("wrong_user", "The socket server belongs to another user.",
+                hint: "Check the socket's owner and use this user's Pensieve app.", exit: 3))
+        }
+    }
+
+    func validatedHandshake(_ bytes: Data, isWrite: Bool) throws -> CLIHandshake {
         let handshake = try JSONDecoder().decode(CLIHandshake.self, from: bytes)
         guard handshake.protocolVersion == CLIProtocol.version else {
             throw LaunchRefusal(reply: .failure("protocol_mismatch", "The app uses a different command protocol.",
@@ -87,6 +109,10 @@ struct CLIClient {
         guard !isWrite || handshake.supportsCommit == true else {
             throw LaunchRefusal(reply: .failure("protocol_mismatch", "The app does not support command admission.",
                 hint: "Use the command bundled with this app.", exit: 3))
+        }
+        guard handshake.busy != true else {
+            throw LaunchRefusal(reply: .failure("app_busy", "Pensieve has reached its command capacity.",
+                hint: "Wait for pending commands to finish, then retry.", exit: 3, retryable: true))
         }
         return handshake
     }
@@ -134,6 +160,6 @@ struct CLIClient {
     }
 }
 
-private struct LaunchRefusal: Error {
+struct LaunchRefusal: Error {
     let reply: CLIReply
 }

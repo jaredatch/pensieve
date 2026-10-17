@@ -116,7 +116,7 @@ extension DeployMutationService {
             }
             var reconciliation = persistence.reconciliation
             guard machineID == localID else {
-                try? reload(context: context)
+                try reload(context: context)
                 return nil
             }
             if !persistence.mutated { reconciliation.append(dependencies.reconcile(context)) }
@@ -124,7 +124,7 @@ extension DeployMutationService {
                 selected, skills: [skill], platforms: [platform], target: .userWide,
                 reconciliation: reconciliation, context: context
             )
-            try? reload(context: context)
+            try reload(context: context)
             return result
         }
     }

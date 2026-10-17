@@ -1,6 +1,11 @@
 import Foundation
 import SwiftData
 
+struct UpdateCheckout {
+    let directory: String
+    let sessionDirectory: String
+}
+
 struct SkillUpdatePlan {
     let slug: String
     let origin: InstalledOrigin
@@ -12,10 +17,10 @@ extension UpdateCheckService {
     /// Check the same remote heads and trees as Check Now without persisting check flags or cursors.
     func planUpdates(slugs: Set<String>, context: ModelContext,
                      verify: ([SkillUpdatePlan], [UUID: String]) throws -> Void) throws -> [SkillUpdatePlan] {
-        var checkouts: [UUID: String] = [:]
+        var checkouts: [UUID: UpdateCheckout] = [:]
         defer {
-            for checkout in Set(checkouts.values) {
-                try? fileService.deleteDirectory(at: (checkout as NSString).deletingLastPathComponent)
+            for session in Set(checkouts.values.map(\.sessionDirectory)) {
+                try? fileService.deleteDirectory(at: session)
             }
         }
         let skills = try context.fetch(FetchDescriptor<Skill>()).filter { slugs.contains($0.directoryName) }
@@ -59,7 +64,7 @@ extension UpdateCheckService {
             }
         }
         let sorted = plans.sorted { $0.slug < $1.slug }
-        try verify(sorted, checkouts)
+        try verify(sorted, checkouts.mapValues(\.directory))
         return sorted
     }
 }

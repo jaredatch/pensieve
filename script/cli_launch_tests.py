@@ -46,6 +46,30 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         subprocess.run(['xcrun', 'clang', '-dynamiclib', str(source), '-o', str(cls.home_query)],
                        check=True, capture_output=True, timeout=60)
 
+        configuration_source = Path(cls.compilation.name) / 'configuration.m'
+        configuration_source.write_text(r'''
+#import <AppKit/AppKit.h>
+#import <objc/runtime.h>
+static void (*original)(id, SEL, NSURL *, NSWorkspaceOpenConfiguration *, void (^)(NSRunningApplication *, NSError *));
+static void capture(id workspace, SEL selector, NSURL *url, NSWorkspaceOpenConfiguration *config,
+                    void (^completion)(NSRunningApplication *, NSError *)) {
+    const char *receipt = getenv("CLI_FIXTURE_LAUNCH_CONFIGURATION");
+    if (receipt) {
+        NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"activates": @(config.activates)} options:0 error:nil];
+        [data writeToFile:[NSString stringWithUTF8String:receipt] atomically:YES];
+    }
+    original(workspace, selector, url, config, completion);
+}
+__attribute__((constructor)) static void install(void) {
+    Method method = class_getInstanceMethod([NSWorkspace class], @selector(openApplicationAtURL:configuration:completionHandler:));
+    original = (void *)method_setImplementation(method, (IMP)capture);
+}
+''')
+        cls.configuration_probe = Path(cls.compilation.name) / 'configuration.dylib'
+        subprocess.run(['xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-framework', 'AppKit',
+                        str(configuration_source), '-o', str(cls.configuration_probe)],
+                       check=True, capture_output=True, timeout=60)
+
     @classmethod
     def tearDownClass(cls):
         cls.compilation.cleanup()
@@ -166,6 +190,9 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         stale = socket.socket(socket.AF_UNIX)
         stale.bind(str(self.root / (self.bundle_id + '.sock'))); stale.close()
         frontmost = subprocess.check_output([str(self.fixture), '--frontmost'], text=True).strip()
+        receipt = self.root / 'configuration.json'
+        self.launch_environment['CLI_FIXTURE_LAUNCH_CONFIGURATION'] = str(receipt)
+        self.launch_environment['DYLD_INSERT_LIBRARIES'] += ':' + str(self.configuration_probe)
         requests, finish = self.peer_after_launch()
         try:
             self.assertEqual(self.run_cli('skill', 'list')['data'], ['launched by path'])
@@ -175,9 +202,25 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         self.assertEqual(Path(state['path']).resolve(), self.app.resolve())
         self.assertEqual(state['arguments'][1:], ['--background'])
         self.assertEqual(state['windows'], 0)
-        self.assertFalse(state['active'])
-        self.assertEqual(subprocess.check_output([str(self.fixture), '--frontmost'], text=True).strip(), frontmost)
+        current = subprocess.check_output([str(self.fixture), '--frontmost'], text=True).strip()
+        self.assert_launch_activation(state, frontmost, current, json.loads(receipt.read_text()))
         self.assertEqual([r['command'] for r in requests], ['skill list'])
+
+    def assert_launch_activation(self, state, frontmost, current, configuration):
+        receipt = f'frontmost pid before launch: {frontmost}'
+        self.assertFalse(configuration['activates'], receipt)
+        if int(frontmost) > 0:
+            self.assertFalse(state['active'], receipt)
+            self.assertEqual(current, frontmost, receipt)
+
+    def test_activation_assertions_distinguish_an_empty_desktop(self):
+        self.assert_launch_activation({'active': True}, '-1', '123', {'activates': False})
+        for state, previous, current, configuration in [
+                ({'active': True}, '42', '42', {'activates': False}),
+                ({'active': False}, '42', '43', {'activates': False}),
+                ({'active': False}, '-1', '123', {'activates': True})]:
+            with self.assertRaisesRegex(AssertionError, f'frontmost pid before launch: {previous}'):
+                self.assert_launch_activation(state, previous, current, configuration)
 
     def test_launch_timeout_and_late_wrong_app_are_bounded(self):
         start = time.monotonic()

@@ -45,6 +45,8 @@ protocol FileServiceProtocol {
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws
+    func commandLinkEntry(at path: String) throws -> CommandLinkEntry?
+    func changeCommandLink(_ request: CommandLinkRequest) throws
     func symlinkTarget(at path: String) throws -> String
     func isSymlink(at path: String) -> Bool
     func isRegularFile(at path: String) -> Bool
@@ -65,19 +67,6 @@ protocol FileServiceProtocol {
     func resolveRealPath(at path: String) throws -> String
     func regularFileMetadata(at path: String) -> RegularFileMetadata?
     func touchRegularFile(at path: String, date: Date) throws
-}
-
-enum FileEntryType { case directory, symlink, regular, other }
-
-/// A file's identity on its volume; see `FileServiceProtocol.fileIdentity(at:followingLinks:)`.
-struct FileIdentity: Equatable {
-    let device: dev_t
-    let inode: ino_t
-}
-
-struct RegularFileMetadata: Equatable {
-    let byteCount: Int
-    let modificationDate: Date
 }
 
 // MARK: - Default implementations

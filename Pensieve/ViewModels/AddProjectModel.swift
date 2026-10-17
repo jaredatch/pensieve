@@ -32,7 +32,7 @@ final class AddProjectModel {
     }
 
     private var submissionPath: String {
-        (path.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
+        ProjectRegistration.submissionPath(path)
     }
 
     var isValid: Bool {

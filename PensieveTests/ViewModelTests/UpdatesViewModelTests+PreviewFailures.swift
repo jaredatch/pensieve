@@ -40,6 +40,33 @@ extension UpdatesViewModelTests {
                 assertPreviewFailure(error, step: step, scratch: scratch)
             }
         }
+        try assertReusedCheckoutFailures(fixture: fixture, scratch: scratch)
+    }
+
+    private func assertReusedCheckoutFailures(fixture: RealFixture, scratch: String) throws {
+        let update = try PinnedSkillUpdate(skill: fixture.skill)
+        for step in ["head", "skills", "vendor"] {
+            let spy = ImportBoundedReadSpy()
+            spy.entryFailure = { path in
+                if path.hasSuffix("/" + step) {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES),
+                        userInfo: [NSFilePathErrorKey: path])
+                }
+            }
+            let service = SkillInstallService(gitService: PreviewFailingGit(step: step),
+                credentialStore: InMemoryCredentialStore(), fileService: spy, scratchRoot: scratch,
+                storeRoot: fixture.storeRoot, lockPath: tempDir + "/sync.lock")
+            XCTAssertThrowsError(try NativeTestWork.run {
+                try service.previewUpdate(update, checkout: fixture.repository)
+            }) { error in
+                if step == "head" {
+                    XCTAssertEqual(error.localizedDescription, "Couldn't verify the pinned commit.")
+                } else {
+                    XCTAssertTrue(error.localizedDescription.contains("upstream path .:"), error.localizedDescription)
+                }
+                XCTAssertFalse(error.localizedDescription.contains(self.tempDir))
+            }
+        }
     }
 
     private func assertPreviewFailure(_ error: Error, step: String, scratch: String) {

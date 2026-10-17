@@ -322,7 +322,7 @@ private extension DaemonCLI {
 
     private static func logLines(from text: String?) -> [String] {
         guard let text else { return [] }
-        var components = text
+        var components = text.replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
         if components.last == "" {

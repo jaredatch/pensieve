@@ -42,7 +42,8 @@ extension SkillInstallService {
             return try body(checkoutPath)
         }
         if let checkout {
-            guard try gitService.commitSHA(at: checkout) == source.headCommit else {
+            let commit = try previewOperation(.pinnedCommit) { try gitService.commitSHA(at: checkout) }
+            guard commit == source.headCommit else {
                 throw SkillInstallError.repositoryChanged
             }
             return try verify(checkout)

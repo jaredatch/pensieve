@@ -17,7 +17,8 @@ final class MachineStateDeploymentsAdmissionTests: XCTestCase {
         defer { try? fileService.deleteDirectory(at: root) }
         let service = MachineStateService(
             fileService: fileService,
-            agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+            agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory,
+                applicationsDirectory: TestPaths.homeDirectory + "/Applications"),
             deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
             homeDirectory: TestPaths.homeDirectory
         )
@@ -42,7 +43,8 @@ final class MachineStateDeploymentsAdmissionTests: XCTestCase {
         }
         let service = MachineStateService(
             fileService: fileService,
-            agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+            agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory,
+                applicationsDirectory: TestPaths.homeDirectory + "/Applications"),
             deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
             homeDirectory: TestPaths.homeDirectory
         )

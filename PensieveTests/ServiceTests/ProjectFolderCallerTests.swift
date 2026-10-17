@@ -82,7 +82,7 @@ final class ProjectFolderCallerTests: XCTestCase {
         try await assertCategoryRemovalFromMissingProject(removingSkill: false)
     }
 
-    func testRemovingIntentDeployAndRegisteredMissingProjectCreatesNothing() throws {
+    func testRemovingIntentDeployAndRegisteredMissingProjectCreatesNothing() async throws {
         let harness = try ProjectFolderCallerHarness()
         defer { harness.cleanup() }
         try harness.addIntent()
@@ -91,7 +91,7 @@ final class ProjectFolderCallerTests: XCTestCase {
                                                        projectID: harness.project.id, platform: .cursor))
         let rule = try harness.addCategory()
         let model = harness.model()
-        let cli = CLIDeployHandler(service: model.service, files: harness.mapped).handle(
+        let cli = await CLIDeployHandler(service: model.service, files: harness.mapped).handle(
             CLIRequest(command: "undeploy", arguments: [harness.skill.directoryName], deployment: CLIDeployOptions(
                 agents: ["codex"], project: harness.project.name, workingDirectory: harness.root)), context: harness.context)
         XCTAssertEqual(cli.exitCode, 0, "CLI unselection must withdraw intent while unavailable cleanup waits")

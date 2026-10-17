@@ -10,6 +10,16 @@ struct CLINameResolver {
     let context: ModelContext
     let files: FileServiceProtocol
 
+    static func projectPath(_ argument: String, cwd: String) throws -> String {
+        let supplied = ProjectRegistration.submissionPath(argument)
+        guard !supplied.isEmpty else {
+            throw CLICommandRefusal(reply: .failure("usage", "A project needs a folder.",
+                hint: "Pass a project folder path.", exit: 64))
+        }
+        return PathSyntax.isAbsolute(supplied) ? supplied : URL(fileURLWithPath: supplied,
+            relativeTo: URL(fileURLWithPath: cwd)).path
+    }
+
     func skill(_ slug: String) throws -> Skill {
         let skills = try context.fetch(FetchDescriptor<Skill>())
         guard let skill = skills.first(where: { $0.directoryName == slug }) else {
@@ -27,12 +37,26 @@ struct CLINameResolver {
         throw missing("agent", name, choices: PlatformTarget.allCases.map(\.cliID), hint: "Run pensieve agent list.")
     }
 
-    func project(_ name: String, cwd: String) throws -> Project {
+    func project(_ name: String, cwd: String) async throws -> Project {
+        let pathLike = name == "." || PathSyntax.hasSeparator(name)
+        let lookupPath = try pathLike ? Self.projectPath(name, cwd: cwd)
+            : URL(fileURLWithPath: name, relativeTo: URL(fileURLWithPath: cwd)).path
         let projects = try context.fetch(FetchDescriptor<Project>())
-        let pathLike = name == "." || PathSyntax.hasSeparator(name) || PathSyntax.startsWithTilde(name)
-        let path = files.realPath(at: URL(fileURLWithPath: name, relativeTo: URL(fileURLWithPath: cwd)).path)
-        let matches = projects.filter {
-            (!pathLike && $0.name.caseInsensitiveCompare(name) == .orderedSame) || files.realPath(at: $0.path) == path
+        let snapshots = projects.map { (id: $0.id, name: $0.name, path: $0.path) }
+        let files = files
+        let (path, ids) = await BlockingWork.run {
+            let path = files.realPath(at: lookupPath)
+            let ids = snapshots.filter {
+                (!pathLike && $0.name.caseInsensitiveCompare(name) == .orderedSame) || files.realPath(at: $0.path) == path
+            }.map { $0.id }
+            return (path, Set(ids))
+        }
+        let matches = try context.fetch(FetchDescriptor<Project>()).filter { ids.contains($0.id) }
+        guard matches.allSatisfy({ project in
+            snapshots.contains { $0.id == project.id && $0.name == project.name && $0.path == project.path }
+        }) else {
+            throw CLICommandRefusal(reply: .failure("project_changed", "The project changed during lookup.",
+                hint: "Run the command again with its current name or path.", exit: 3, retryable: true))
         }
         guard matches.count <= 1 else {
             throw ambiguous("project", name, candidates: matches.map {
@@ -78,11 +102,11 @@ struct CLINameResolver {
     }
 
     private func missing(_ kind: String, _ name: String, choices: [String], hint: String) -> CLICommandRefusal {
-        let closest = choices.sorted {
-            let left = Self.distance(name.lowercased(), $0.lowercased())
-            let right = Self.distance(name.lowercased(), $1.lowercased())
-            return left == right ? $0 < $1 : left < right
-        }.prefix(3)
+        let query = name.lowercased()
+        let scored: [(name: String, distance: Int)] = choices.map { ($0, Self.distance(query, $0.lowercased())) }
+        let closest = scored.sorted {
+            $0.distance == $1.distance ? $0.name < $1.name : $0.distance < $1.distance
+        }.prefix(3).map { $0.name }
         let advice = closest.isEmpty ? hint : "Closest names: " + closest.joined(separator: ", ") + ". " + hint
         return CLICommandRefusal(reply: .failure(kind + "_not_found", "No \(kind) named \(name).", hint: advice, exit: 4))
     }

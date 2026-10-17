@@ -5,6 +5,7 @@
     "hermesUserSkillsDir", "cursorUserRulesDir"
   ],
   "nonLocation": [
+    "agentSkillsDirectory",
     "hermesDefaultCategory", "claudeCodeProjectSkillsRel", "grokProjectSkillsRel", "codexAgentsRel",
     "defaultClaudeCodeTokenBudget", "defaultGrokTokenBudget", "defaultCursorTokenBudget",
     "defaultCodexTokenBudget", "defaultSkillSizeTokenBudget", "charsPerToken"

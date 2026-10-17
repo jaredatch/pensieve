@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 extension CLIDeployHandlerTests {
-    func testSavedIntentWithFailedReconcileReportsPartialAsTheWindowDoes() throws {
+    func testSavedIntentWithFailedReconcileReportsPartialAsTheWindowDoes() async throws {
         let h = try CLIDeployFixture(reconcile: { context in
             var result = BatchResult()
             for skill in (try? context.fetch(FetchDescriptor<Skill>())) ?? [] {
@@ -13,7 +13,7 @@ extension CLIDeployHandlerTests {
             }
             return result
         })
-        let result = h.handler.handle(h.request(), context: h.context)
+        let result = await h.handler.handle(h.request(), context: h.context)
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertEqual(result.envelope.error?.code, "partial")
         XCTAssertEqual(result.envelope.changed, true)
@@ -31,16 +31,20 @@ extension CLIDeployHandlerTests {
             result.readFailures = [BatchReadFailure(message: readFailure)]
             return result
         })
-        let reply = multi.handler.handle(multi.request(skills: [multi.skill.directoryName, multi.other.directoryName]),
+        let reply = await multi.handler.handle(multi.request(skills: [multi.skill.directoryName, multi.other.directoryName]),
             context: multi.context)
         XCTAssertEqual(reply.exitCode, 1)
         XCTAssertEqual(fields(reply)["failures"], .array([.string(readFailure)]), "A shared read failure is reported once")
         XCTAssertEqual(reply.envelope.error?.message, readFailure)
+        let remote = await multi.handler.handle(multi.request(machines: ["Mini"]), context: multi.context)
+        XCTAssertEqual(remote.exitCode, 1, "Remote intent still reports shared reconciliation read failures")
+        XCTAssertEqual(remote.envelope.error?.code, "partial")
+        XCTAssertEqual(fields(remote)["failures"], .array([.string(readFailure)]))
     }
 
-    func testKeylessArtifactWrittenBeforeSaveFailureReportsPartial() throws {
+    func testKeylessArtifactWrittenBeforeSaveFailureReportsPartial() async throws {
         let h = try CLIDeployFixture(platformSave: { _ in throw DeployStubFailure() })
-        let result = h.handler.handle(h.request(project: "Local"), context: h.context)
+        let result = await h.handler.handle(h.request(project: "Local"), context: h.context)
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode, target: .project(h.keyless)))
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertEqual(result.envelope.error?.code, "partial")
@@ -54,13 +58,13 @@ extension CLIDeployHandlerTests {
         XCTAssertTrue(try h.intents().isEmpty)
     }
 
-    func testFailedManifestRestoreNamesTheDiskChangeAsPartial() throws {
+    func testFailedManifestRestoreNamesTheDiskChangeAsPartial() async throws {
         var writes = 0
         let h = try CLIDeployFixture(save: { _ in throw DeployStubFailure() }, beforeManifestWrite: {
             writes += 1
             if writes > 1 { throw DeployStubFailure() }
         })
-        let result = h.handler.handle(h.request(), context: h.context)
+        let result = await h.handler.handle(h.request(), context: h.context)
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertEqual(result.envelope.error?.code, "partial")
         XCTAssertEqual(result.envelope.changed, true)

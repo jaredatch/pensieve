@@ -12,7 +12,8 @@ extension CursorOwnershipTests {
             identity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
             stateService: MachineStateService(
                 fileService: mapped,
-                agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+                agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory,
+                    applicationsDirectory: TestPaths.homeDirectory + "/Applications"),
                 deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
                 homeDirectory: TestPaths.homeDirectory
             ), root: root + "/store",

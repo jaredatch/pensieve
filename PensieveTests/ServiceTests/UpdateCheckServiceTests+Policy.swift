@@ -3,6 +3,14 @@ import XCTest
 
 @MainActor
 extension UpdateCheckServiceTests {
+    func testPlanningCleanupDoesNotInferOwnershipFromCheckoutLayout() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let source = try FileService().readFile(at: root.appendingPathComponent("Pensieve/Services/SkillUpdatePlan.swift").path)
+        XCTAssertFalse(source.contains("deletingLastPathComponent"),
+            "Update planning must delete its owned session, never a parent inferred from checkout layout")
+    }
+
     func testInstallCredentialUsedAndSyncCredentialNeverFallsBack() throws {
         let credentials = InMemoryCredentialStore()
         try credentials.store(token: "sync-decoy", username: "sync", forHost: "github.com")

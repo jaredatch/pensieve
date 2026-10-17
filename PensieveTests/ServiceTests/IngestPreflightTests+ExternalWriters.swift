@@ -41,7 +41,7 @@ extension IngestPreflightTests {
                        "Completed ingestion must accept the pulled category despite the refused rename")
         XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name).sorted(), ["Added", "Kept"])
         let following = WriterIngestManifest()
-        try performImmediateWriter(.importSkill, fixture: f, context: context, manifest: following)
+        try await performImmediateWriter(.importSkill, fixture: f, context: context, manifest: following)
         XCTAssertEqual(following.reads, 0, "A following writer must reuse the completed ingest at this HEAD")
         XCTAssertEqual(following.writes, 1)
     }
@@ -50,19 +50,19 @@ extension IngestPreflightTests {
         for writer in ExternalWriter.allCases { try await assertExternalWriter(writer, unreadableHead: true) }
     }
 
-    func testUnchangedHeadSkipsImportAndDeployRebuild() throws {
+    func testUnchangedHeadSkipsImportAndDeployRebuild() async throws {
         for writer in [ExternalWriter.importSkill, .windowDeploy] {
             let f = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/unchanged-\(writer)") }
             let context = try damageContext(f)
             let manifest = WriterIngestManifest()
             XCTAssertFalse(StoreIngestState.shared(for: context.container).needsRebuild)
-            try performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
+            try await performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
             XCTAssertEqual(manifest.reads, 0, "Unchanged HEAD must not scan the manifest for a rebuild: \(writer)")
             XCTAssertEqual(manifest.writes, 1, "The writer must actually publish")
         }
     }
 
-    func testStoresWithoutCommitsSkipImportAndDeployRebuild() throws {
+    func testStoresWithoutCommitsSkipImportAndDeployRebuild() async throws {
         for repository in [false, true] {
             for writer in [ExternalWriter.importSkill, .windowDeploy] {
                 let f = try NativeTestWork.run {
@@ -76,7 +76,7 @@ extension IngestPreflightTests {
                 // A non-sync launch has no commit stamp, even when its library is populated.
                 StoreIngestState.shared(for: context.container).seedHead(nil)
                 let manifest = WriterIngestManifest()
-                try performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
+                try await performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
                 XCTAssertEqual(manifest.reads, 0, "No foreign HEAD exists: repository=\(repository), \(writer)")
                 XCTAssertEqual(manifest.writes, 1)
             }
@@ -123,7 +123,7 @@ extension IngestPreflightTests {
             XCTAssertGreaterThan(manifest.snapshotsBeforeFirstWrite, 0, "Queue ingestion must precede publication")
             XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.first { $0.name == "Kept" }?.skillSlugs, ["item"])
         } else {
-            try performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
+            try await performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
         }
         XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Kept"],
                        "The window must reflect the outside pull when \(writer) finishes")
@@ -137,7 +137,7 @@ extension IngestPreflightTests {
     }
 
     private func performImmediateWriter(_ writer: ExternalWriter, fixture f: IncompleteIngestFixture,
-                                        context: ModelContext, manifest: WriterIngestManifest) throws {
+                                        context: ModelContext, manifest: WriterIngestManifest) async throws {
         switch writer {
         case .importSkill:
             let model = importModel(fixture: f, manifest: manifest)
@@ -156,7 +156,7 @@ extension IngestPreflightTests {
                 try model.setRemote(true, machineID: ProjectIntentHarness.remoteID,
                     projectKey: "github.com/owner/project", skill: skill, platform: .codex, context: context)
             } else {
-                let reply = CLIDeployHandler(service: model.service, files: f.files).handle(CLIRequest(command: "deploy",
+                let reply = await CLIDeployHandler(service: model.service, files: f.files).handle(CLIRequest(command: "deploy",
                     arguments: ["item"], deployment: CLIDeployOptions(agents: ["codex"], global: true,
                         workingDirectory: f.base)), context: context)
                 XCTAssertTrue(reply.envelope.ok, String(describing: reply.envelope.error))

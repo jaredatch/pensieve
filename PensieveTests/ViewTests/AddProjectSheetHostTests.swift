@@ -35,13 +35,14 @@ final class AddProjectSheetHostTests: XCTestCase {
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 0)
         XCTAssertFalse(try files.entryExistsWithoutFollowingLinks(at: root + "/missing"))
 
-        try files.createDirectory(at: root + "/valid")
+        try files.createDirectory(at: root + "/real")
+        try files.createSymlink(at: root + "/link", pointingTo: root + "/real")
         let pathField = try XCTUnwrap(textFields(in: host).first { $0.stringValue == model.path })
-        pathField.stringValue = root + "/valid"
+        pathField.stringValue = "  " + root + "//link/  "
         pathField.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: pathField))
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Editing the sheet's path must update its binding") {
-            model.path == root + "/valid"
+            model.path == "  " + root + "//link/  "
         }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "The same sheet must render its corrected status",
@@ -52,12 +53,12 @@ final class AddProjectSheetHostTests: XCTestCase {
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Add must create the corrected project") { created.count == 1 }
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
-        XCTAssertEqual(created.first?.path, root + "/valid")
+        XCTAssertEqual(created.first?.path, root + "/link")
         XCTAssertTrue(created.first?.modelContext === container.mainContext, "Registration returns the window context model")
-        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.path), [root + "/valid"])
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.path), [root + "/link"])
         let listed = try await h.run(["project", "list"])
-        XCTAssertEqual(listed.data?.array?.first?["path"], .string(root + "/valid"))
-        XCTAssertTrue(files.fileExists(at: root + "/valid/.pensieve-project"))
+        XCTAssertEqual(listed.data?.array?.first?["path"], .string(root + "/link"))
+        XCTAssertTrue(files.fileExists(at: root + "/link/.pensieve-project"))
         XCTAssertFalse(try files.entryExistsWithoutFollowingLinks(at: root + "/missing"))
     }
 

@@ -22,7 +22,8 @@ enum TestPaths {
         codexSkillsDir: root + "/codex", storeRoot: storeRoot)
     static var engine: SyncEngine { SyncEngine(gitService: git, lockPath: syncLockPath) }
     static var stateService: MachineStateService {
-        MachineStateService(agentDetection: AgentDetectionService(homeDirectory: homeDirectory),
+        MachineStateService(agentDetection: AgentDetectionService(homeDirectory: homeDirectory,
+            applicationsDirectory: homeDirectory + "/Applications"),
             deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
             homeDirectory: homeDirectory)
     }

@@ -168,8 +168,8 @@ Running it with no command shows usage and exits 64. Use `pensieve-daemon run` t
 ## Read from a terminal
 
 The app includes `pensieve` at `/Applications/Pensieve.app/Contents/Helpers/pensieve`.
-Homebrew's cask links it onto your PATH. With other installations, use that full path.
-Keep the same app copy open for library reads:
+Homebrew's cask links it onto your PATH. With other installations, choose Install… in Settings › General › Command Line to link it into `/usr/local/bin`, or use that full path.
+Library reads start that app in the background when your user has a desktop session:
 
 ```sh
 pensieve skill list
@@ -184,8 +184,9 @@ contain instructions from its author. `skill ls` and `skills` also list the libr
 
 Over SSH, `pensieve status`, `pensieve log --lines 40` and `pensieve deployment list`
 read recorded state even while the app is closed. `deployed` also lists deployments.
-Missing or unreadable state exits 2. Library reads with the app closed exit 3 and
-ask you to open it. If another copy answers, the command identifies that copy.
+Missing or unreadable state exits 2. Without a desktop session, library reads cannot
+start a closed app: they exit 3 and ask you to open it. If another copy answers,
+the command identifies that copy.
 
 For scripts, pass `--json` to get one result with `schema`, `ok` and `data` or
 `error`. Errors include a stable `code`, a `hint` and `retryable`. Human output
@@ -207,7 +208,7 @@ and `completion fish` generate shell completions.
 No. Skills are plain `SKILL.md` markdown files in `~/.pensieve/skills/`, in the standard Agent Skills format. The manifest is a handful of small YAML files. `cat` them, grep them, commit them, walk away with them.
 
 **What does Pensieve write outside `~/.pensieve`?**
-Only what you deploy: symlinks (or the compiled `.mdc` for Cursor) into the agent directories you chose, plus a small `.pensieve-project` marker if you register a project that has no git remote. App-internal state lives in `~/Library/Application Support/Pensieve`. It never touches anything else.
+Only what you deploy: symlinks (or the compiled `.mdc` for Cursor) into the agent directories you chose, plus a small `.pensieve-project` marker if you register a project that has no git remote. App-internal state lives in `~/Library/Application Support/Pensieve`. If you choose Install… in Settings › General › Command Line, it also links `/usr/local/bin/pensieve`, and afterwards it only repairs or removes that link. It never touches anything else.
 
 **Does it phone home?**
 Pensieve sends no telemetry or analytics and has no server. Sync uses git to reach the remote *you* configured. GitHub installs, upstream History, and skill-update checks also use git. Those checks run weekly by default, or when you ask. Sparkle checks for app updates on GitHub and downloads releases over HTTPS. Previewing a skill makes no network requests.

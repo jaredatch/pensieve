@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 extension CLIDeployHandlerTests {
-    func assertListedMachineNamesReachTheirTargets() throws {
+    func assertListedMachineNamesReachTheirTargets() async throws {
         let rawRemoteName = " \nMi\u{200E}ni\t "
         let states = [(CLIDeployFixture.localID, "kramer"), (CLIDeployFixture.remoteID, rawRemoteName)].map { id, name in
             MachineState(schemaVersion: 1, machineID: id, name: name, appVersion: "fixture", publishedAt: Date(),
@@ -22,25 +22,29 @@ extension CLIDeployHandlerTests {
             return fields["name"]
         }
         XCTAssertEqual(names, [.string("This Mac"), .string("Mini")], "List names must match the window")
+        let raw = await h.handler.handle(h.request(machines: [rawRemoteName]), context: h.context)
+        XCTAssertEqual(raw.envelope.error?.code, "machine_not_found", "Only visible published aliases are accepted")
+        XCTAssertTrue(try h.intents().isEmpty)
         for (name, id) in [("This Mac", CLIDeployFixture.localID), ("kramer", CLIDeployFixture.localID),
-                           ("Mini", CLIDeployFixture.remoteID), (rawRemoteName, CLIDeployFixture.remoteID)] {
-            let reply = h.handler.handle(h.request(machines: [name]), context: h.context)
+                           ("Mini", CLIDeployFixture.remoteID)] {
+            let reply = await h.handler.handle(h.request(machines: [name]), context: h.context)
             XCTAssertEqual(reply.exitCode, 0, name)
             XCTAssertTrue(reply.envelope.ok, name)
             XCTAssertEqual(try h.intents(), [id + "|review|claudeCode"], name)
             XCTAssertEqual(h.platform.isDeployed(skill: h.skill, platform: .claudeCode), id == CLIDeployFixture.localID)
-            XCTAssertTrue(h.handler.handle(h.request("undeploy", machines: [name]), context: h.context).envelope.ok)
+            let removed = await h.handler.handle(h.request("undeploy", machines: [name]), context: h.context)
+            XCTAssertTrue(removed.envelope.ok)
             XCTAssertTrue(try h.intents().isEmpty)
         }
     }
 
-    func assertMachineLookupPrecedence() throws {
+    func assertMachineLookupPrecedence() async throws {
         let states = [CLIDeployFixture.localID, CLIDeployFixture.remoteID].map { id in
             MachineState(schemaVersion: 1, machineID: id, name: "Mini", appVersion: "fixture", publishedAt: Date(),
                 agents: ["claudeCode"], projects: [], userDeploys: [], projectDeploys: [])
         }
         let h = try CLIDeployFixture(states: states)
-        let reply = h.handler.handle(h.request(machines: ["Mini"]), context: h.context)
+        let reply = await h.handler.handle(h.request(machines: ["Mini"]), context: h.context)
         XCTAssertEqual(reply.exitCode, 0, "A listed name wins over this Mac's published alias")
         XCTAssertEqual(try h.intents(), [CLIDeployFixture.remoteID + "|review|claudeCode"])
         let collisionStates = [(CLIDeployFixture.localID, "kramer"),
@@ -49,7 +53,8 @@ extension CLIDeployHandlerTests {
                 agents: ["claudeCode"], projects: [], userDeploys: [], projectDeploys: [])
         }
         let collision = try CLIDeployFixture(states: collisionStates)
-        let byID = collision.handler.handle(collision.request(machines: [CLIDeployFixture.localID]), context: collision.context)
+        let byID = await collision.handler.handle(collision.request(machines: [CLIDeployFixture.localID]),
+            context: collision.context)
         XCTAssertEqual(byID.exitCode, 0, "An exact machine ID wins over another machine's name")
         XCTAssertEqual(try collision.intents(), [CLIDeployFixture.localID + "|review|claudeCode"])
         let listedName = CLIDeployFixture.localID + " (" + CLIDeployFixture.remoteID + ")"
@@ -59,10 +64,10 @@ extension CLIDeployHandlerTests {
             guard case let .object(fields) = row else { return false }
             return fields["id"] == .string(CLIDeployFixture.remoteID) && fields["name"] == .string(listedName)
         }, "A displayed name must not masquerade as another machine's ID")
-        let byListedName = collision.handler.handle(collision.request(machines: [listedName]), context: collision.context)
+        let byListedName = await collision.handler.handle(collision.request(machines: [listedName]), context: collision.context)
         XCTAssertEqual(byListedName.exitCode, 0)
         XCTAssertTrue(try collision.intents().contains(CLIDeployFixture.remoteID + "|review|claudeCode"))
-        let byAlias = collision.handler.handle(collision.request(machines: ["kramer"]), context: collision.context)
+        let byAlias = await collision.handler.handle(collision.request(machines: ["kramer"]), context: collision.context)
         XCTAssertEqual(byAlias.exitCode, 0, "Published names remain a fallback after IDs and listed names")
         for invisible in ["", " \n\u{200E}\t", "\u{2800}", "\u{0301}"] {
             let state = MachineState(schemaVersion: 1, machineID: CLIDeployFixture.localID, name: invisible,
@@ -70,14 +75,14 @@ extension CLIDeployHandlerTests {
                 projects: [], userDeploys: [], projectDeploys: [])
             let empty = try CLIDeployFixture(states: [state])
             for name in [invisible, "Mac"] {
-                let refused = empty.handler.handle(empty.request(machines: [name]), context: empty.context)
+                let refused = await empty.handler.handle(empty.request(machines: [name]), context: empty.context)
                 XCTAssertEqual(refused.exitCode, 4, "Invisible published names cannot create aliases")
                 XCTAssertTrue(try empty.intents().isEmpty)
             }
         }
     }
 
-    func assertKeylessWildcardIgnoresUserWideIntents() throws {
+    func assertKeylessWildcardIgnoresUserWideIntents() async throws {
         let h = try CLIDeployFixture(installed: [.claudeCode])
         for agent in [PlatformTarget.cursor, .hermes] {
             h.context.insert(MachineDeployIntent(machineID: CLIDeployFixture.localID,
@@ -89,7 +94,7 @@ extension CLIDeployHandlerTests {
             target: .project(h.keyless), context: h.context)
         XCTAssertEqual(seeded.successes.count, 1, "Fixture represents an artifact left by an uninstalled agent")
         let before = try h.tree(), intents = try h.intents()
-        let reply = h.handler.handle(h.request("undeploy", agents: ["*"], project: "Local"), context: h.context)
+        let reply = await h.handler.handle(h.request("undeploy", agents: ["*"], project: "Local"), context: h.context)
         XCTAssertTrue(reply.envelope.ok)
         XCTAssertEqual(reply.envelope.changed, false, "User-wide intent does not expand a keyless project's wildcard")
         guard case let .object(fields) = reply.envelope.data else { return XCTFail("Missing withdrawal result") }
