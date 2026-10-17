@@ -3,6 +3,37 @@ import XCTest
 @testable import Pensieve
 
 extension IngestPreflightTests {
+    func testRebuildOwnerReadsHeadExactlyBeforeAndAfterTheScan() throws {
+        let files = RebuildReadFileService()
+        let h = try ManifestSaveFixture(rebuildFiles: files)
+        defer { h.cleanup() }
+        try NativeTestWork.run { try TestPaths.git.initRepository(at: h.root) }
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(fileService: files),
+                                        root: h.root, context: h.context, files: files)
+        XCTAssertEqual(files.headReads.value, 2, "One owner samples HEAD around each rebuild")
+    }
+
+    func testFirstQueuedSaveAfterPullScansSkillsOnce() async throws {
+        let f = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/one-queue-scan") }
+        let context = try damageContext(f)
+        try NativeTestWork.run {
+            try f.changePeer()
+            guard case .fastForwarded = try f.git.fastForwardOnly(at: f.app, credential: nil) else {
+                return XCTFail("Fixture must pull an outside commit")
+            }
+        }
+        let files = RebuildReadFileService()
+        let saves = ManifestSaveModel(manifest: f.manifest, root: f.app, lockPath: f.base + "/sync.lock", files: files)
+        let category = try XCTUnwrap(context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Kept" })
+        CategoryStore(manifestSaves: saves).rename(category, to: "Edited", context: context)
+        await saves.waitUntilIdle()
+        XCTAssertNil(saves.categoryNotice)
+        XCTAssertEqual(files.skillListings.value, 1, "Pre-save ingestion and post-save acceptance share one scan")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["item"],
+                       "Reusing the scan must retain canonical skills without an explicit manifest overlay")
+        XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name).sorted(), ["Added", "Edited"])
+    }
+
     func assertContentFreeWriterIngest() async throws {
         for path in ["import", "intent", "sync"] {
             let fixture = try NativeTestWork.run {

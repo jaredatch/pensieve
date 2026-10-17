@@ -38,8 +38,14 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
             url: URL(fileURLWithPath: h.root + "/removal.sqlite"), allowsSave: false))
         let context = ModelContext(readOnly)
         let project = try XCTUnwrap(context.fetch(FetchDescriptor<Project>()).first { $0.id == h.project.id })
+        var ingestRefusal: Error?
         XCTAssertThrowsError(try StoreIngestState.rebuild(
-            using: StoreRebuildService(manifestService: manifest(h)), root: h.root + "/sync", context: ModelContext(readOnly)))
+            using: StoreRebuildService(manifestService: manifest(h)), root: h.root + "/sync", context: ModelContext(readOnly))) {
+            ingestRefusal = $0
+        }
+        let cause = try XCTUnwrap(ingestRefusal).localizedDescription
+        XCTAssertTrue(cause.hasPrefix("Rebuilding the local store failed: "
+            + "Rebuild computed changes but saving the local store failed:"))
         XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
         var writes = 0
         h.mapped.beforeFileWrite = { path in
@@ -47,8 +53,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         }
         let result = remove(h, project: project, context: context)
         XCTAssertTrue(result.hasFailures)
-        XCTAssertEqual(result.operationFailures,
-            ["Project removal couldn't update this Mac's library. Try removing the project again."])
+        XCTAssertEqual(result.operationFailures, [cause], "Removal must preserve the rebuild's actionable failure cause")
         XCTAssertEqual(writes, 0, "pending ingestion must not repair from the stale window")
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), pulled)
         XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)

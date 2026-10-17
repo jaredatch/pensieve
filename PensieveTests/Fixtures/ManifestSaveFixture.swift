@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class ManifestSaveFixture {
     final class Messages { var lines: [String] = [] }
+    private let directory = TestStoreDirectory(named: "manifest-save")
     let root: String
     let lockPath: String
     let files = FileService()
@@ -23,10 +24,11 @@ final class ManifestSaveFixture {
     let project: Project
 
     init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01, rebuildFiles: FileServiceProtocol? = nil) throws {
-        root = TestTemporaryDirectory.path + "manifest-save-" + UUID().uuidString
+        root = directory.storeRoot
         lockPath = root + "/support/sync.lock"
         context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         recording = RecordingSaveManifest()
+        recording.base = ManifestService(fileService: rebuildFiles ?? files)
         let messages = messages
         saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath,
         waitSeconds: waitSeconds, files: rebuildFiles ?? files, log: { messages.lines.append($0) })
@@ -79,12 +81,14 @@ final class ManifestSaveFixture {
         return result
     }
 
-    func cleanup() { try? files.deleteDirectory(at: root) }
+    func cleanup() { try? files.deleteDirectory(at: directory.root) }
 }
 
 /// Records the real full-snapshot writes, preserving their thread order; it does not implement merging.
 final class RecordingSaveManifest: ManifestSnapshotting {
-    private let base = ManifestService()
+    var base = ManifestService()
+    var afterRead: (() throws -> Void)?
+    var afterReadFailure: (() throws -> Void)?
     private let lock = NSLock()
     private var snapshots: [ManifestSnapshot] = []
     var failingWrites = 0
@@ -113,7 +117,19 @@ final class RecordingSaveManifest: ManifestSnapshotting {
         if !Thread.isMainThread { try afterRebuildSnapshot?() }
         return value
     }
-    func read(fromRoot root: String) throws -> ManifestSnapshot { try base.read(fromRoot: root) }
+    func read(fromRoot root: String) throws -> ManifestSnapshot {
+        do {
+            let value = try base.read(fromRoot: root)
+            try afterRead?()
+            return value
+        } catch {
+            try afterReadFailure?()
+            throw error
+        }
+    }
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try base.repair(snapshot, root: root, replacing: damage)
+    }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         if failingWrites > 0 { failingWrites -= 1; throw CocoaError(.fileWriteNoPermission) }
         try base.write(snapshot, toRoot: root)

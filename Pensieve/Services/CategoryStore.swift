@@ -206,9 +206,11 @@ struct CategoryStore: CategoryStoreProtocol {
     }
 
     private func regenerateManifest(_ edit: CategorySaveEdit, context: ModelContext) {
-        manifestSaves?.submit(edit.change, context: context, categoryEdit: edit,
-            reconcile: undoReconciler.map { reconciler in { reconciler.reconcile(context: context) } }) {
-                manifestSaves?.reportCategoryFailure($0)
-            }
+        let reconcile = undoReconciler.map { reconciler in { reconciler.reconcile(context: context) } }
+        manifestSaves?.submit(
+            edit.change, context: context, categoryEdit: edit, reconcile: reconcile
+        ) { [weak saves = manifestSaves] in
+            saves?.reportCategoryFailure($0)
+        }
     }
 }

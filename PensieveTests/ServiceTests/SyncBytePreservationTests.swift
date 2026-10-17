@@ -2,14 +2,12 @@ import Darwin
 import SwiftData
 import XCTest
 @testable import Pensieve
-
 /// Real sync, install and checkout under two separate user homes. The HTTPS helper accepts only
 /// the rewritten fixture URL and connects to a local bare repository; it never opens the network.
 final class SyncBytePreservationTests: XCTestCase {
     var base: String!
     let files = FileService()
     let remoteURL = "https://github.com/fixture/store.git"
-
     override func setUpWithError() throws {
         try NativeTestWork.run { [self] in
             base = TestTemporaryDirectory.path + "SyncBytes-" + UUID().uuidString
@@ -84,6 +82,8 @@ extension SyncBytePreservationTests {
         let storeA = base + "/storeA"
         try gitA.clone(remote: remoteURL, into: storeA, credential: nil)
         if let rootIgnore { try substituteRootIgnore(rootIgnore, at: storeA) }
+        if try refusesRootLink(rootIgnore, git: gitA, store: storeA) { return }
+
         let contextA = try makeContext()
         if installed {
             try installSkill(git: gitA, store: storeA, remote: remote, context: contextA)
@@ -131,15 +131,24 @@ extension SyncBytePreservationTests {
         try assertRewrittenTransport()
     }
 
+    private func refusesRootLink(_ rootIgnore: String?, git: GitService, store: String) throws -> Bool {
+        guard rootIgnore == "link" || rootIgnore == "dangling" else { return false }
+        // Control-file links are now refused; neither the link nor its target is rewritten.
+        let before = try files.symlinkTarget(at: store + "/.gitignore")
+        XCTAssertThrowsError(try engine(git: git).sync(root: store, message: "refuse link", credential: nil,
+                                          context: makeContext()))
+        XCTAssertEqual(try files.symlinkTarget(at: store + "/.gitignore"), before)
+        if rootIgnore == "link" {
+            XCTAssertEqual(try files.readFile(at: base + "/outside-key"), "outside sentinel")
+        }
+        return true
+    }
+
     private func assertRootIgnoreDidNotReadLink(_ rootIgnore: String?, git: GitService,
                                                 remote: String, store: String) throws {
-        if let rootIgnore {
+        if rootIgnore != nil {
             let ignore = try git.runData(["--git-dir", remote, "show", "main:.gitignore"], in: nil)
             XCTAssertFalse(ignore.stdout.contains(Data("outside sentinel".utf8)), "Link targets must never enter a commit")
-            if rootIgnore == "link" {
-                XCTAssertEqual(try files.readFile(at: base + "/outside-key"), "outside sentinel")
-                XCTAssertFalse(files.isSymlink(at: store + "/.gitignore"))
-            }
         }
     }
 
@@ -219,7 +228,8 @@ extension SyncBytePreservationTests {
         return ModelContext(container)
     }
 
-    func userGit(_ name: String, remote: String, skillRules: Bool) throws -> GitService {
+    func userGit(_ name: String, remote: String, skillRules: Bool,
+                 fileService: FileServiceProtocol = FileService()) throws -> GitService {
         let home = base + "/" + name
         let helpers = home + "/helpers"
         try files.createDirectory(at: home)
@@ -249,7 +259,7 @@ extension SyncBytePreservationTests {
             export GIT_EXEC_PATH='\(helpers)'
             exec /usr/bin/git "$@"
             """ + "\n")
-        let git = GitService(askpassHelperPath: home + "/askpass", executablePath: executable)
+        let git = GitService(fileService: fileService, askpassHelperPath: home + "/askpass", executablePath: executable)
         let config = home + "/.gitconfig"
         for (key, value) in [
             ("url.https://transport.test/.insteadOf", "https://github.com/fixture/"),

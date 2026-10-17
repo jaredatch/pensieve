@@ -28,6 +28,8 @@ extension SyncBytePreservationTests {
                 let local = store + "/skills/old/assets/legacy/local"
                 try files.writeFile(at: local, content: "stays local")
                 let context = try makeContext()
+                // Record the clone's launch ingest before the window adds its unsynced category.
+                _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: store, context: context)
                 context.insert(Pensieve.Category(name: "New receipt category"))
                 try context.save()
                 _ = try engine(git: git).sync(root: store, message: "unsafe receipts", credential: nil, context: context)

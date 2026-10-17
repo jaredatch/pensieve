@@ -130,6 +130,7 @@ private final class DefiniteBornHeadRetryGitService: GitServiceProtocol {
 }
 
 final class LaunchReconcilerHeadRetryTests: XCTestCase {
+    private var directory: TestStoreDirectory!
     private var tempDir: String!
     private var fileService: FileService!
     private var manifest: ManifestService!
@@ -137,7 +138,8 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
 
     override func setUpWithError() throws {
         try NativeTestWork.run { [self] in
-            tempDir = TestTemporaryDirectory.path + "PensieveLaunchHeadRetryTests-\(UUID().uuidString)"
+            directory = TestStoreDirectory(named: "PensieveLaunchHeadRetryTests")
+            tempDir = directory.storeRoot
             try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
             fileService = FileService()
             manifest = ManifestService(fileService: fileService)
@@ -151,8 +153,8 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try NativeTestWork.run { [self] in
-            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-                try FileManager.default.removeItem(atPath: tempDir)
+            if let directory, FileService().directoryExists(at: directory.root) {
+                try FileService().deleteDirectory(at: directory.root)
             }
         }
     }

@@ -11,16 +11,22 @@ extension SyncCoordinatorTests {
         let context = h.container.mainContext
         let local = Pensieve.Category(name: "Local")
         context.insert(local)
+        let skill = Skill(name: "Queued Skill", directoryName: "queued")
+        context.insert(skill)
+        try FileService().writeFile(at: h.clone + "/skills/queued/SKILL.md",
+            content: "---\nname: Queued Skill\ndescription: Queued\n---\nbody\n")
         try context.save()
         try manifest.write(try manifest.snapshot(from: context), toRoot: h.clone)
         let gate = TestWait.Gate(owner: self)
-        defer { gate.open() }
+        let accepted = TestWait.Gate(owner: self)
+        defer { gate.open(); accepted.open() }
         let engine = SyncEngine(gitService: h.allowlistedGit, manifestService: manifest,
-            storeRebuildService: PausedManifestRebuild(gate: gate), lockPath: lockPath)
+            storeRebuildService: PausedManifestRebuild(gate: gate, accepted: accepted), lockPath: lockPath)
         let coordinator = await configuredCoordinator(container: h.container, engine: engine,
             git: h.allowlistedGit, root: h.clone)
         // The first engine rebuild also passes the gate; the next one pauses after the pull.
         gate.open()
+        accepted.open()
         assertSynced(await coordinator.runCycle())
         try publishRemoteCategory(h)
         let saves = ManifestSaveModel(manifest: manifest, root: h.clone, lockPath: lockPath)
@@ -29,13 +35,25 @@ extension SyncCoordinatorTests {
         await TestWait.until(failureMessage: "Sync did not pause between pull and rebuild") { gate.waiterCount == 1 }
         XCTAssertTrue(try manifest.read(fromRoot: h.clone).categories.contains { $0.name == "Remote" })
         store.rename(local, to: "Edited", context: context)
-        XCTAssertEqual(local.name, "Edited")
+        let skillStore = SkillStore(fileService: FileService(), baseDir: h.clone + "/skills", storeRoot: h.clone)
+        let library = SkillLibraryViewModel(skillStore: skillStore,
+            fileWatchService: FileWatchService(rootDir: h.clone + "/skills"), manifestRoot: h.clone, manifestSaves: saves)
+        library.updateMetadata(skill, tags: ["queued"], scope: .project, context: context)
         await Task.yield()
-        XCTAssertFalse(try manifest.read(fromRoot: h.clone).categories.contains { $0.name == "Edited" })
         gate.open()
+        await TestWait.until(failureMessage: "Sync must rebuild before releasing its lock") { accepted.waiterCount == 1 }
+        XCTAssertEqual(saves.pendingCount, 2)
+        let rebuilt = ModelContext(h.container)
+        XCTAssertEqual(try rebuilt.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Edited", "Remote"])
+        XCTAssertEqual(try rebuilt.fetch(FetchDescriptor<Skill>()).first?.tags, ["queued"])
+        XCTAssertEqual(local.name, "Edited")
+        XCTAssertEqual(skill.tags, ["queued"])
+        accepted.open()
         assertSynced(await cycle.value)
         await saves.waitUntilIdle()
+        XCTAssertEqual(try manifest.read(fromRoot: h.clone).skills.first?.tags, ["queued"])
         gate.open()
+        accepted.open()
         assertSynced(await coordinator.runCycle())
         try assertCommittedBoth(h, context: context)
     }
@@ -108,9 +126,12 @@ extension SyncCoordinatorTests {
 
 private struct PausedManifestRebuild: StoreRebuildServiceProtocol {
     let gate: TestWait.Gate
+    let accepted: TestWait.Gate
     func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
         do { try gate.wait() } catch { return RebuildResult(warnings: ["Rebuild gate failed"], storeUnreadable: true) }
-        return StoreRebuildService().rebuild(fromRoot: root, context: context)
+        let result = StoreRebuildService().rebuild(fromRoot: root, context: context)
+        do { try accepted.wait() } catch { return RebuildResult(warnings: ["Acceptance gate failed"], storeUnreadable: true) }
+        return result
     }
 }
 

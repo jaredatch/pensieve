@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The sidebar's sync line (Route B, 2026-09-11): one plain button — a glyph and a short label,
 /// tertiary at rest, secondary under the pointer, where the label turns into the action ("Sync
-/// now" / "Resolve…"). Absent entirely when sync is unconfigured (`ContentView` mounts it only
-/// when `SyncModel.isConfigured`). The state → line mapping is `SyncFooterPresentation`.
+/// now" / "Resolve…" / "Repair…"). `SyncModel.showsFooter` keeps it absent without sync unless
+/// a save waits or the library is damaged. The state → line mapping is `SyncFooterPresentation`.
 struct SyncStatusView: View {
     @Environment(\.modelContext) private var modelContext
     let model: SyncModel
@@ -20,7 +20,7 @@ struct SyncStatusView: View {
                         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
                 }
                 if let line = SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
-                    hovering: isHovering, now: context.date) {
+                    hovering: isHovering, now: context.date, libraryDamaged: saves?.libraryDamaged == true) {
                     Button(action: { perform(line.action) }, label: {
                         HStack(spacing: Spacing.xs) {
                             if line.showsSpinner {
@@ -47,6 +47,7 @@ struct SyncStatusView: View {
                 }
             }
         }
+        .task(id: model.state) { await saves?.refreshAndRetry() }
     }
 
     private func perform(_ action: SyncFooterPresentation.Action) {
@@ -54,6 +55,7 @@ struct SyncStatusView: View {
         case .none: break
         case .sync: model.syncNow(context: modelContext)
         case .resolve: onResolve()
+        case .repair: saves?.requestRepair()
         }
     }
 }

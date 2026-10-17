@@ -76,12 +76,7 @@ extension DeployMutationService {
     func prepareSelection(skills: [Skill], context: ModelContext) throws {
         let selectedIDs = skills.map(\.persistentModelID)
         let rebuild = StoreRebuildService(manifestService: dependencies.manifestService, save: dependencies.saveContext)
-        do {
-            try StoreIngestState.rebuildIfNeeded(using: rebuild, root: dependencies.root, context: context)
-        } catch {
-            if let syncError = error as? SyncError, case .storeUnreadable = syncError { throw error }
-            throw DeployIntentModelError.ingestPending
-        }
+        try StoreIngestState.rebuildIfNeeded(using: rebuild, root: dependencies.root, context: context)
         let selectedRows = FetchDescriptor<Skill>(predicate: #Predicate { selectedIDs.contains($0.persistentModelID) })
         let currentIDs = Set(try context.fetchIdentifiers(selectedRows))
         guard Set(selectedIDs).isSubset(of: currentIDs) else { throw DeployIntentModelError.selectionChanged }

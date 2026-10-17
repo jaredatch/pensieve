@@ -13,10 +13,17 @@ struct RebuildResult: Equatable {
     var deployIntentsUpdated: Int = 0
     var deployIntentsRemoved: Int = 0
     var warnings: [String] = []
+    private(set) var ingestFailureDetails: [String] = []
+
+    mutating func reportIngestFailure(_ message: String) {
+        warnings.append(message)
+        ingestFailureDetails.append(message)
+    }
     /// True when the rebuild BAILED because the manifest was unreadable (a newer/unsupported schema) —
     /// nothing was ingested. Distinct from per-item `warnings`. `SyncEngine` refuses to push over a store
     /// it couldn't read (a downgrade) and surfaces "update Pensieve" instead. (PLAN-08 / 08.4 review)
     var storeUnreadable: Bool = false
+    var manifestDamaged: Bool = false
     /// The rebuild computed changes but its save failed. Unrelated caller edits do not set this flag.
     var saveFailed: Bool = false
     /// The authoritative category reconcile was skipped because its local fetch threw.

@@ -33,9 +33,10 @@ extension SyncEngineTests {
     }
 
     private func insertCategory(name: String, skillSlugs: [String], into context: ModelContext) throws {
-        let category = PensieveCategory(name: name)
+        let category = try context.fetch(FetchDescriptor<PensieveCategory>()).first { $0.name == name }
+            ?? PensieveCategory(name: name)
         category.skillSlugs = skillSlugs
-        context.insert(category)
+        if category.modelContext == nil { context.insert(category) }
         try context.save()
     }
 
@@ -63,6 +64,9 @@ extension SyncEngineTests {
 
             let contextA = try makeContext()
             let contextB = try makeContext()
+            // Model launch ingestion before either window makes its local category edit.
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: cloneA, context: contextA)
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: cloneB, context: contextB)
             try insertCategory(name: "Swift", skillSlugs: ["alpha"], into: contextA)
             try insertCategory(name: "Swift", skillSlugs: ["beta"], into: contextB)
             _ = try engine.sync(root: cloneA, message: "A", credential: nil, context: contextA)
@@ -142,8 +146,10 @@ extension SyncEngineTests {
             // A: fixed createdAt keeps overlays byte-identical; only SKILL.md body differs.
             let cloneA = tempDir + "/rtCloneA"
             try git.clone(remote: remote, into: cloneA, credential: nil)
-            try writeSkillFile(root: cloneA, slug: "greeting", description: "greeting description", body: "Hello")
             let contextA = try makeContext()
+            // The window has ingested this clone before creating its local skill and category.
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: cloneA, context: contextA)
+            try writeSkillFile(root: cloneA, slug: "greeting", description: "greeting description", body: "Hello")
             let skillA = Skill(name: "greeting", skillDescription: "greeting description", tags: [],
                                scope: .user, directoryName: "greeting", cursorConfig: nil, importedFrom: nil)
             skillA.createdAt = Date(timeIntervalSince1970: 1_700_000_000)

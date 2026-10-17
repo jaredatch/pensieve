@@ -3,6 +3,37 @@ import XCTest
 @testable import Pensieve
 
 extension SyncBytePreservationTests {
+    func assertOperationCacheBoundaries() throws {
+        let first = try ExcludedFileCollisionFixture(path: "skills/x/.env", hidden: true, localCommit: false)
+        let second = try ExcludedFileCollisionFixture(path: "skills/x/.env", hidden: true, localCommit: true)
+        defer { try? files.deleteDirectory(at: first.root); try? files.deleteDirectory(at: second.root) }
+        let scoped = try XCTUnwrap(first.git.scopedToStore(first.storeB) as? GitService)
+        _ = try scoped.fetchStoreRevision(at: first.storeB, credential: nil)
+        try files.writeFile(at: second.storeB + "/skills/x/another", content: "second local change")
+        try second.git.stageAllAndCommit(at: second.storeB, message: "another local commit")
+        _ = try scoped.collapseToSingleCommit(at: second.storeB, message: "collapse own history",
+                                             credential: nil, fetchedRevision: nil)
+        let count = try second.git.runOrThrow(["-C", second.storeB, "rev-list", "--count", "origin/main..HEAD"], in: nil)
+        XCTAssertEqual(count.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1",
+                       "Collapse must fetch and use the requested repository's revision")
+        let conflict = try SyncConflictByteFixture(name: "cache.bin", this: Data([1]), other: Data([2]))
+        defer { try? files.deleteDirectory(at: conflict.root) }
+        let operation = try XCTUnwrap(conflict.git.scopedToStore(conflict.storeB) as? GitService)
+        _ = try operation.pullRebase(at: conflict.storeB, credential: nil)
+        XCTAssertTrue(operation.isRebaseInProgress(at: conflict.storeB))
+        let recovered = "skills/conflict/recovered"
+        try files.writeFile(at: conflict.storeB + "/.gitattributes",
+                            content: "# Pensieve retired path: " + Data(recovered.utf8).base64EncodedString() + "\n")
+        _ = try operation.storeOperation(at: conflict.storeB)
+        try operation.abortRebase(at: conflict.storeB)
+        XCTAssertFalse(operation.isRebaseInProgress(at: conflict.storeB))
+        try operation.prepareStoreRules(at: conflict.storeB, files: files)
+        try files.writeFile(at: conflict.storeB + "/" + recovered, content: "ordinary after abort")
+        try operation.stageAllAndCommit(at: conflict.storeB, message: "after abort")
+        let tracked = try conflict.git.runOrThrow(["-C", conflict.storeB, "ls-files", "--", recovered], in: nil)
+        XCTAssertEqual(tracked.stdout, recovered + "\n", "Aborted receipts must not hide later ordinary files")
+    }
+
     func testUnreadableRetirementSourcesStopBeforeWrites() throws {
         try NativeTestWork.run { [self] in
             try files.writeFile(at: base + "/outside", content: "outside bytes")
@@ -32,6 +63,7 @@ extension SyncBytePreservationTests {
             }
             let missing = base + "/missing"
             try files.createDirectory(at: missing)
+            try TestPaths.git.initRepository(at: missing)
             XCTAssertNoThrow(try StoreIgnoreRules.prepare(at: missing, files: files), "Absence means no receipts")
         }
     }
@@ -98,10 +130,9 @@ extension SyncBytePreservationTests {
         try NativeTestWork.run { [self] in
             for source in [".gitattributes", ".pensieve-retired-paths", ".gitignore"] {
                 for arrivesAfterRead in [false, true] {
-                    // Root ignore input is not read; its folder needs just one shape.
-                    if source == ".gitignore" && arrivesAfterRead { continue }
                     let store = base + "/control-folder-" + UUID().uuidString
                     try files.createDirectory(at: store)
+                    try TestPaths.git.initRepository(at: store)
                     let path = store + "/" + source
                     if source == ".gitignore" {
                         let receipt = "# Pensieve retired path: " + Data("skills/x/assets/old".utf8).base64EncodedString() + "\n"
@@ -140,6 +171,13 @@ extension SyncBytePreservationTests {
 /// It does not intercept Git's own metadata writes or pretend to simulate process termination.
 final class RetirementFileService: FileServiceProtocol {
     let wrapped = FileService()
+    var cleanupCalls = 0
+    var cleanupFails = false
+    func cleanStoreIntermediates(at root: String) throws {
+        cleanupCalls += 1
+        if cleanupFails { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM)) }
+        try wrapped.cleanStoreIntermediates(at: root)
+    }
     var readFailure: String?
     var writes: [String] = []
     var afterRead: ((String) throws -> Void)?
@@ -154,11 +192,23 @@ final class RetirementFileService: FileServiceProtocol {
         writes.append(path)
         try wrapped.writeFile(at: path, content: content)
     }
+    func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {
+        writes.append(path)
+        try wrapped.writeStoreFile(at: path, content: content, root: root, control: control)
+    }
+    func writeData(at path: String, data: Data) throws { try wrapped.writeData(at: path, data: data) }
+    func directoryEntryIdentity(at path: String) -> Data? {
+        return wrapped.directoryEntryIdentity(at: path)
+    }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try wrapped.entryExistsWithoutFollowingLinks(at: path)
+    }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         try wrapped.entryTypeWithoutFollowingLinks(at: path)
     }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }

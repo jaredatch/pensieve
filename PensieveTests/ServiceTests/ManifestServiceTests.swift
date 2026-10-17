@@ -230,6 +230,7 @@ final class ManifestServiceTests: XCTestCase {
         try fileService.writeFile(at: swiftCategoryPath, content: raw)
         assertCorruptManifestRead()
 
+        try fileService.deleteDirectory(at: tempDir + "/manifest")
         try service.write(sampleManifestSnapshot(), toRoot: tempDir)
         raw = try fileService.readFile(at: swiftCategoryPath)
         raw = raw.replacingOccurrences(

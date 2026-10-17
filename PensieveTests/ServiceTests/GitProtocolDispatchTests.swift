@@ -55,7 +55,15 @@ final class GitProtocolDispatchTests: XCTestCase {
         ])
     }
 
+    private func assertRefusedFolderForwarding() {
+        let forwarded = GitDispatchOperations()
+        let wrapper: GitServiceProtocol = AllowlistedRemoteGit(wrapping: forwarded)
+        expectCalled("abortRebase(at,refusedFolder)", try wrapper.abortRebase(at: "fixture", refusedFolder: "folder"))
+        XCTAssertEqual(forwarded.calls, ["abortRebase(at,refusedFolder)"])
+    }
+
     func testGitServiceProtocolDispatchesConflictAndHistoryWitnesses() throws {
+        assertRefusedFolderForwarding()
         let operations = GitDispatchOperations()
         let service: GitServiceProtocol = operations
         let entry = ConflictEntry(mode: "100644", objectID: "object", bytes: Data())
@@ -66,6 +74,7 @@ final class GitProtocolDispatchTests: XCTestCase {
             try service.pullRebase(at: "fixture", fetchedRevision: .init(commit: "fetched")))
         expectCalled("push(at,credential)", try service.push(at: "fixture", credential: .sshAgent))
         expectCalled("abortRebase(at)", try service.abortRebase(at: "fixture"))
+        expectCalled("abortRebase(at,refusedFolder)", try service.abortRebase(at: "fixture", refusedFolder: "folder"))
         expectCalled("conflictedFiles(at)", try service.conflictedFiles(at: "fixture"))
         expectCalled("blob(atStage,path,in)", try service.blob(atStage: 1, path: "fixture", in: "fixture"))
         expectCalled("conflictEntry(atStage,path,in)", try service.conflictEntry(atStage: 1, path: "fixture", in: "fixture"))
@@ -87,6 +96,7 @@ final class GitProtocolDispatchTests: XCTestCase {
             "pullRebase(at,fetchedRevision)",
             "push(at,credential)",
             "abortRebase(at)",
+            "abortRebase(at,refusedFolder)",
             "conflictedFiles(at)",
             "blob(atStage,path,in)",
             "conflictEntry(atStage,path,in)",
@@ -108,13 +118,11 @@ final class GitProtocolDispatchTests: XCTestCase {
         let service: FastForwardGitService = operations
         expectCalled("probeUsability()", try service.probeUsability())
         expectCalled("remoteURL(at)", try service.remoteURL(at: "fixture"))
-        XCTAssertTrue(service.isWorktreeClean(at: "fixture"))
         expectCalled("fetch(at,credential)", try service.fetch(at: "fixture", credential: .sshAgent))
         expectCalled("fastForwardOnly(at,credential)", try service.fastForwardOnly(at: "fixture", credential: .sshAgent))
         XCTAssertEqual(operations.calls, [
             "probeUsability()",
             "remoteURL(at)",
-            "isWorktreeClean(at)",
             "fetch(at,credential)",
             "fastForwardOnly(at,credential)"
         ])

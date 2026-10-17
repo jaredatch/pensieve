@@ -12,6 +12,9 @@ enum SyncError: LocalizedError, Equatable {
     case conflictRequiresGitResolution(path: String)
     case protectedGitlinkUnavailable(path: String)
     case conflictFolderMustMove(path: String)
+    case localConflictFolderMustMove(path: String)
+    case incompatibleConflictPicks(path: String)
+    case returnToRestFailed(reason: String, detail: String)
     case rejectedRemote(String)
     case syncInProgress
 
@@ -21,8 +24,8 @@ enum SyncError: LocalizedError, Equatable {
             return "Couldn't read the synced store — it may have been written by a newer version of "
                 + "Pensieve. Update Pensieve, then sync again."
         case .ingestIncomplete:
-            return "Sync stopped because Pensieve couldn't update this Mac's library from the synced changes. "
-                + "It will try again on the next sync."
+            return "The store changed while Pensieve was rebuilding this Mac's library. "
+                + "Wait for the other git operation to finish, then try again."
         case .conflictsChanged:
             return "The conflict changed while you were resolving it — reopen to see the latest."
         case let .conflictSideUnavailable(path):
@@ -32,7 +35,13 @@ enum SyncError: LocalizedError, Equatable {
         case let .protectedGitlinkUnavailable(path):
             return "Pensieve can’t sync the nested repository at \(path). Choose the other version."
         case let .conflictFolderMustMove(path):
-            return "Move the folder at \(path), then choose this version again. You can also choose the other version."
+            return "Pensieve can’t replace the folder at \(path). Choose the other version to finish syncing."
+        case let .localConflictFolderMustMove(path):
+            return "Move the folder at \(path), then choose Other Mac again. You can also keep This Mac."
+        case let .incompatibleConflictPicks(path):
+            return "These picks don’t fit together. Choose the same Mac for \(path) and its contents."
+        case let .returnToRestFailed(reason, detail):
+            return reason + " Pensieve couldn’t return the store to rest. Resolve this problem, then sync again: " + detail
         case .rejectedRemote:
             return "This store's git remote uses an unsupported form. Reconnect with an https:// URL "
                 + "or an ssh remote (git@host:path)."
@@ -94,35 +103,51 @@ struct SyncEngine: SyncEngineProtocol {
         self.lockProvider = lockProvider
     }
 
+    private func scoped(to root: String) -> SyncEngine {
+        SyncEngine(gitService: gitService.scopedToStore(root), manifestService: manifestService,
+            storeRebuildService: storeRebuildService, fileService: fileService,
+            lockPath: lockPath, lockProvider: lockProvider)
+    }
+
+    private var conflictOperation: SyncConflictOperation {
+        SyncConflictOperation(gitService: gitService, fileService: fileService)
+    }
+
     func sync(root: String, message: String, credential: GitCredential?,
               context: ModelContext, prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
+        let operation = scoped(to: root)
+        return try operation.performSync(root: root, message: message, credential: credential, context: context, prepare: prepare)
+    }
+
+    private func performSync(root: String, message: String, credential: GitCredential?,
+                             context: ModelContext, prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
-        // Ask about the remote before any write, so an unconfigured store is never changed.
-        guard try gitService.remoteURL(at: root) != nil else {
+        // Ask about the remote before store writes. Reclaim only abandoned intermediates before returning.
+        let remote = try gitService.remoteURL(at: root)
+        guard remote != nil else {
+            try? fileService.cleanStoreIntermediates(at: root)
             // Repair only this Mac's index. An unconfigured store still gets no writes or sync error.
-            try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+            try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
             return .noRemote
         }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
+        try gitService.abortRebase(at: root)
 
         // Guard BEFORE any write: if the on-disk manifest is newer/unreadable (e.g. a clone of a remote
         // written by a newer Pensieve), refuse. The after-pull storeUnreadable guard CANNOT catch this —
         // step 1 below would already have clobbered the newer manifest with our snapshot, so we'd push a
         // downgrade. Reading it here (before the write) fails fast instead. (PLAN-08 review)
-        do {
-            _ = try manifestService.read(fromRoot: root)
-        } catch {
-            throw SyncError.storeUnreadable([])
-        }
+        try requireReadableManifest(root: root)
 
         let headStamp = GitHeadStamp(fileService: fileService)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
-        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
 
+        let admittedParent = headStamp.read(root: root)
         // 1. SwiftData → manifest files (the portable, mergeable source of truth).
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         // 2. Install the union-merge driver + ignore rules (idempotent) so the pull below auto-merges
@@ -130,12 +155,19 @@ struct SyncEngine: SyncEngineProtocol {
         try ensureSyncAttributes(root: root)
         // 3. Commit (false when nothing changed locally).
         let committed = try gitService.stageAllAndCommit(at: root, message: message)
+        StoreIngestState.shared(for: context.container)
+            .recordLocalCommit(from: admittedParent, to: headStamp.read(root: root))
 
         // 4. Pull with rebase. A body/overlay conflict is NOT ours to resolve here: abort (restoring the
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
         //    NOT push, so the divergence is preserved for a later, resolvable sync (§D).
         let pulled: Bool
-        switch try pullRebase(root: root, credential: credential, incoming: incoming) {
+        let result: PullResult
+        do { result = try pullRebase(root: root, credential: credential, incoming: incoming) } catch {
+            try conflictOperation.abortResolution(after: error, root: root)
+            throw error
+        }
+        switch result {
         case .upToDate: pulled = false
         case .merged: pulled = true
         case let .conflicted(paths):
@@ -144,7 +176,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
 
         // 5. Rebuild the local index from the merged files.
-        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
+        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context, files: fileService)
         // 6. Publish.
         let ingestedHeadStamp = headStamp.read(root: root)
         try gitService.push(at: root, credential: credential)
@@ -157,6 +189,12 @@ struct SyncEngine: SyncEngineProtocol {
 
     func inspectConflicts(root: String, credential: GitCredential?,
                           context: ModelContext) throws -> ConflictInspection {
+        let operation = scoped(to: root)
+        return try operation.performInspectConflicts(root: root, credential: credential, context: context)
+    }
+
+    private func performInspectConflicts(root: String, credential: GitCredential?,
+                                         context: ModelContext) throws -> ConflictInspection {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
@@ -165,17 +203,14 @@ struct SyncEngine: SyncEngineProtocol {
             return .conflicts(ConflictSet(items: []))
         }
         try requireAcceptableRemote(at: root)
-        try GitError.preservingUnusability { try gitService.abortRebase(at: root) }
-        do {
-            _ = try manifestService.read(fromRoot: root)
-        } catch {
-            throw SyncError.storeUnreadable([])
-        }
+        try gitService.abortRebase(at: root)
+        try requireReadableManifest(root: root)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         // Once prepareLocalHead succeeds, pullRebase may START a rebase; if it (or finishSync) then
-        // throws for a non-conflict reason, abort so inspect NEVER leaves a mid-rebase tree at rest
-        // (the safe-resting-state invariant). Mirrors resolveConflicts' outer catch.
+        // throws for a non-conflict reason, attempt abort and report any obstruction to returning
+        // to rest. An abort failure itself must propagate without another attempt.
+        let conflicts: ConflictSet
         do {
             switch try pullRebase(root: root, credential: credential, incoming: incoming) {
             case .upToDate:
@@ -191,29 +226,35 @@ struct SyncEngine: SyncEngineProtocol {
                                         thisUnavailable: this.unavailable, otherUnavailable: other.unavailable,
                                         thisMode: this.mode, otherMode: other.mode)
                 }
-                try gitService.abortRebase(at: root)
-                return .conflicts(ConflictSet(items: items))
+                conflicts = ConflictSet(items: items)
             }
         } catch {
-            try? gitService.abortRebase(at: root)
+            try conflictOperation.abortResolution(after: error, root: root)
             throw error
         }
+        do { try gitService.abortRebase(at: root) } catch {
+            throw SyncError.returnToRestFailed(reason: "Pensieve couldn't finish inspecting conflicts.",
+                                              detail: error.localizedDescription)
+        }
+        return .conflicts(conflicts)
     }
 
     func resolveConflicts(root: String, picks: [String: ResolutionPick],
                           credential: GitCredential?, context: ModelContext) throws -> SyncOutcome {
+        let operation = scoped(to: root)
+        return try operation.performResolveConflicts(root: root, picks: picks, credential: credential, context: context)
+    }
+
+    private func performResolveConflicts(root: String, picks: [String: ResolutionPick],
+                                         credential: GitCredential?, context: ModelContext) throws -> SyncOutcome {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
         guard try gitService.remoteURL(at: root) != nil else { return .noRemote }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
-        try GitError.preservingUnusability { try gitService.abortRebase(at: root) }
-        do {
-            _ = try manifestService.read(fromRoot: root)
-        } catch {
-            throw SyncError.storeUnreadable([])
-        }
+        try gitService.abortRebase(at: root)
+        try requireReadableManifest(root: root)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         do {
@@ -223,14 +264,29 @@ struct SyncEngine: SyncEngineProtocol {
             case .merged:
                 return try finishSync(root: root, credential: credential, context: context, pulled: true)
             case let .conflicted(paths):
-                try resolveConflictedPaths(paths, picks: picks, root: root)
+                try conflictOperation.resolveConflictedPaths(paths, picks: picks, root: root)
                 if case .conflicted = try gitService.continueRebase(at: root) {
                     throw SyncError.conflictsChanged
                 }
                 return try finishSync(root: root, credential: credential, context: context, pulled: true)
             }
         } catch {
-            try? gitService.abortRebase(at: root)
+            let refusedFolder: String?
+            if case let SyncError.conflictFolderMustMove(path) = error {
+                refusedFolder = path
+            } else {
+                refusedFolder = nil
+            }
+            try conflictOperation.abortResolution(after: error, root: root, refusedFolder: refusedFolder)
+            throw error
+        }
+    }
+
+    private func requireReadableManifest(root: String) throws {
+        do {
+            _ = try ManifestService.classifiedRead(using: manifestService, root: root, files: fileService)
+        } catch {
+            if case ManifestError.unsupportedSchema = error { throw SyncError.storeUnreadable([]) }
             throw error
         }
     }
@@ -238,7 +294,7 @@ struct SyncEngine: SyncEngineProtocol {
     /// Install union merge for list-shaped category/project manifests plus ignore rules.
     /// Skill overlays contain scalars: union would produce duplicate keys and corrupt YAML.
     private func ensureSyncAttributes(root: String) throws {
-        try StoreIgnoreRules.prepare(at: root, files: fileService)
+        try gitService.prepareStoreRules(at: root, files: fileService)
     }
 
     private static let resolveMessage = "Pensieve sync (resolve)"
@@ -264,17 +320,22 @@ struct SyncEngine: SyncEngineProtocol {
                                   context: ModelContext, incoming: FetchedStoreRevision?) throws -> Bool {
         // A failed finish requires ingestion in the retry's fresh context. Healthy conflict
         // preparation still publishes saved window edits that have not reached the manifest.
-        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
+        let stamp = GitHeadStamp(fileService: fileService)
+        let admittedParent = stamp.read(root: root)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
-        return try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
-                                                     credential: credential, fetchedRevision: incoming)
+        let committed = try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
+                                                             credential: credential, fetchedRevision: incoming)
+        StoreIngestState.shared(for: context.container)
+            .recordLocalCommit(from: admittedParent, to: stamp.read(root: root))
+        return committed
     }
 
     private func finishSync(root: String, credential: GitCredential?,
                             context: ModelContext, pulled: Bool) throws -> SyncOutcome {
         let pushed = try gitService.hasCommitsToPush(at: root)
-        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
+        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context, files: fileService)
         try gitService.push(at: root, credential: credential)
         let ingestedHeadStamp = GitHeadStamp(fileService: fileService).read(root: root)
         return .synced(
@@ -282,96 +343,6 @@ struct SyncEngine: SyncEngineProtocol {
             warnings: rebuild.warnings,
             ingestedHeadStamp: ingestedHeadStamp, pulled: pulled
         )
-    }
-
-    private func resolveConflictedPaths(_ paths: [String], picks: [String: ResolutionPick],
-                                        root: String) throws {
-        guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
-        for path in paths {
-            let this = try ConflictVersion { try gitService.conflictEntry(atStage: 3, path: path, in: root) }
-            let other = try ConflictVersion { try gitService.conflictEntry(atStage: 2, path: path, in: root) }
-            guard let pick = picks[path],
-                  pick.expectedThis == this.bytes, pick.expectedOther == other.bytes,
-                  pick.expectedThisUnavailable == this.unavailable,
-                  pick.expectedOtherUnavailable == other.unavailable,
-                  pick.expectedThisMode == this.mode, pick.expectedOtherMode == other.mode else {
-                throw SyncError.conflictsChanged
-            }
-            guard let full = validatedWorktreePath(path, root: root) else {
-                throw SyncError.conflictsChanged
-            }
-            let chosen = pick.side == .thisMachine ? this : other
-            let unchosen = pick.side == .thisMachine ? other : this
-            if let error = ConflictItem.selectionError(path: path, chosen: chosen.unavailable,
-                                                      other: unchosen.unavailable) { throw error }
-            let hasGitlink = this.isGitlink || other.isGitlink
-            if StoreIgnoreRules.canRetire(path)
-                && (chosen.unavailable?.canChoose == true || (hasGitlink && chosen.mode == nil)) {
-                try gitService.retireConflictPath(path, at: root)
-                continue
-            }
-            try applyConflictVersion(chosen,
-                                     stage: pick.side == .thisMachine ? 3 : 2, path: path, full: full, root: root)
-        }
-    }
-
-    private func applyConflictVersion(_ chosen: ConflictVersion, stage: Int, path: String,
-                                      full: String, root: String) throws {
-        if try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory {
-            guard chosen.entry == nil else { throw SyncError.conflictFolderMustMove(path: path) }
-            // The folder side removed the old file. Resolve that index entry without staging or
-            // deleting its children; their own conflict picks retain their native stages.
-            try gitService.removeConflictEntryFromIndex(path, at: root)
-            return
-        }
-        if let entry = chosen.entry {
-            if entry.mode == "120000" {
-                guard let target = String(data: entry.bytes, encoding: .utf8),
-                      !target.utf8.contains(0), symlinkTargetIsContained(target, at: full, root: root) else {
-                    throw SyncError.conflictsChanged
-                }
-            }
-            try gitService.restoreConflictEntry(entry, stage: stage, path: path, at: root)
-        } else if try fileService.entryExistsWithoutFollowingLinks(at: full) {
-            try fileService.deleteFile(at: full)
-        }
-        try gitService.stagePath(path, at: root)
-    }
-
-    /// Validate a git-relative path before writing/deleting through it. Reject: empty/absolute paths;
-    /// any `.`/`..`/empty/control-scalar component; any symlink at a directory/non-leaf component; and
-    /// a symlinked leaf whose target resolves outside `root`. Containment is boundary-aware.
-    private func validatedWorktreePath(_ path: String, root: String) -> String? {
-        guard !path.isEmpty, !PathSyntax.isAbsolute(path) else { return nil }
-        let components = PathSyntax.components(path, omittingEmptySubsequences: false)
-        for component in components {
-            if component.isEmpty || component == "." || component == ".." { return nil }
-            if component.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) {
-                return nil
-            }
-        }
-        let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        var current = realRoot
-        for (index, component) in components.enumerated() {
-            current += "/" + component
-            guard fileService.isSymlink(at: current) else { continue }
-            // C7: never write/delete THROUGH a symlinked DIRECTORY component. A symlinked `skills/<slug>`
-            // dir (even one whose target stays inside root) would redirect the atomic SKILL.md write into
-            // the link target. Reject any non-leaf symlink outright; a symlinked leaf is safe because
-            // `writeFile(atomically:)` replaces the link rather than following it (so keep the leaf's
-            // escape-only check below).
-            if index != components.count - 1 { return nil }
-            guard let target = try? fileService.symlinkTarget(at: current) else { return nil }
-            if !symlinkTargetIsContained(target, at: current, root: realRoot) { return nil }
-        }
-        return root + "/" + path
-    }
-
-    private func symlinkTargetIsContained(_ target: String, at path: String, root: String) -> Bool {
-        let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        let base = PathSyntax.isAbsolute(target) ? target : (path as NSString).deletingLastPathComponent + "/" + target
-        let resolved = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
-        return resolved == realRoot || PathSyntax.hasPrefix(resolved, realRoot + "/")
     }
 
 }

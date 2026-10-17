@@ -31,5 +31,6 @@ enum StoreExclusions {
         if isTemplateFile(name) { return false }
         return name.elementsEqual(".env".utf8) || name.starts(with: ".env.".utf8)
             || name.elementsEqual(".DS_Store".utf8)
+            || (components.count == 1 && name.starts(with: ".pensieve-ignore-".utf8))
     }
 }

@@ -18,7 +18,6 @@ final class SyncConflictResolutionTests: XCTestCase {
             }
         }
     }
-
     func testInspectLabelsThisAndOtherAndRestoresCleanRestingState() throws {
         try NativeTestWork.run { [self] in
             let fixture = try makeBodyConflict()
@@ -35,7 +34,6 @@ final class SyncConflictResolutionTests: XCTestCase {
             XCTAssertEqual(try rawGit(["-C", fixture.cloneB, "status", "--porcelain"]), "")
         }
     }
-
     func testResolveOtherMachineAppliesPropagatesAndReportsNoPush() throws {
         try NativeTestWork.run { [self] in
             let fixture = try makeBodyConflict()
@@ -54,7 +52,6 @@ final class SyncConflictResolutionTests: XCTestCase {
             XCTAssertEqual(try readSkill(root: fixture.cloneB), fixture.otherText)
         }
     }
-
     func testResolveThisMachineAppliesAndPropagatesOppositeChoice() throws {
         try NativeTestWork.run { [self] in
             let fixture = try makeBodyConflict()
@@ -174,6 +171,8 @@ final class SyncConflictResolutionTests: XCTestCase {
             // Lexical guards (absolute / .. / . / empty component) — each must reject before any write.
             try assertUnsafePath("../outside/direct.txt", root: root, escapedPath: outside + "/direct.txt")
             try assertUnsafePath("/absolute.txt", root: root, escapedPath: nil)
+            try assertUnsafePath(".git/config", root: root, escapedPath: nil)
+            try assertUnsafePath("skills/.git/config", root: root, escapedPath: nil)
             try assertUnsafePath("skills/./SKILL.md", root: root, escapedPath: root + "/skills/SKILL.md")
             try assertUnsafePath("skills//SKILL.md", root: root, escapedPath: root + "/skills/SKILL.md")
         }
@@ -309,6 +308,11 @@ extension SyncConflictResolutionTests {
         }
 
         func remoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
+        func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+            // This stub reports an initialized store; supply metadata for the real publisher.
+            try files.createDirectory(at: root + "/.git")
+            try StoreIgnoreRules.prepare(at: root, files: files)
+        }
         func initRepository(at path: String) throws {}
         func setRemote(_ url: String, at path: String) throws {}
         func removeRemote(at path: String) throws {}

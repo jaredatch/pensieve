@@ -170,7 +170,12 @@ final class ManifestDeployIntentTests: XCTestCase {
         ManifestService.serializeDeployIntent(slug: slug, platforms: platforms)
     }
 
-    func resetManifest() throws { try service.write(snapshot([]), toRoot: tempDir) }
+    func resetManifest() throws {
+        // Start the next parser case with a fresh fixture; ordinary writes no longer heal damage.
+        let path = tempDir + "/manifest"
+        if fileService.directoryExists(at: path) { try fileService.deleteDirectory(at: path) }
+        try service.write(snapshot([]), toRoot: tempDir)
+    }
 
     func writeRaw(machine: String, file: String, body: String) throws {
         if !fileService.fileExists(at: tempDir + "/manifest/manifest.yaml") { try resetManifest() }

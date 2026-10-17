@@ -116,6 +116,10 @@ final class GitDispatchOperations: GitServiceProtocol, FastForwardGitService,
         throw GitDispatchCalled.operation("push(at,credential)")
     }
 
+    func abortRebase(at path: String, refusedFolder: String) throws {
+        calls.append("abortRebase(at,refusedFolder)")
+        throw GitDispatchCalled.operation("abortRebase(at,refusedFolder)")
+    }
     func abortRebase(at path: String) throws {
         calls.append("abortRebase(at)")
         throw GitDispatchCalled.operation("abortRebase(at)")

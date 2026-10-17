@@ -13,6 +13,7 @@ enum GitProcessProbe {
         let mode = CommandLine.arguments[1]
         let executable = CommandLine.arguments[2]
         let report = CommandLine.arguments[3]
+        if mode.hasPrefix("store-write-") { storeWrite(mode, root: executable) }
         registry = (report as NSString).deletingLastPathComponent + "/children"
         if mode.hasPrefix("import-") { holdImport(mode, root: executable, report: report) }
         if mode == "hold" {

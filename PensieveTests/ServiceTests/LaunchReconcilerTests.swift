@@ -136,6 +136,12 @@ private final class UnlistableDirFileService: FileServiceProtocol {
         return try real.listDirectory(at: path)
     }
     func readFile(at path: String) throws -> String { try real.readFile(at: path) }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try real.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        path.hasSuffix(unlistableSuffix) ? .directory : try real.entryTypeWithoutFollowingLinks(at: path)
+    }
     func writeFile(at path: String, content: String) throws { try real.writeFile(at: path, content: content) }
     func deleteFile(at path: String) throws { try real.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { real.fileExists(at: path) }
@@ -154,6 +160,7 @@ private final class UnlistableDirFileService: FileServiceProtocol {
 /// honestly files-authoritative: a daemon-advanced store is ingested and never clobbered, a newer-schema
 /// store is not downgraded, and the one-time migration runs once, not per launch.
 final class LaunchReconcilerTests: XCTestCase {
+    private var directory: TestStoreDirectory!
     private var tempDir: String!
     private var fileService: FileService!
     private var manifest: ManifestService!
@@ -164,7 +171,8 @@ final class LaunchReconcilerTests: XCTestCase {
 
     override func setUpWithError() throws {
         try NativeTestWork.run { [self] in
-            tempDir = TestTemporaryDirectory.path + "PensieveLaunchReconcilerTests-\(UUID().uuidString)"
+            directory = TestStoreDirectory(named: "PensieveLaunchReconcilerTests")
+            tempDir = directory.storeRoot
             try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
             fileService = FileService()
             manifest = ManifestService(fileService: fileService)
@@ -185,8 +193,8 @@ final class LaunchReconcilerTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try NativeTestWork.run { [self] in
-            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-                try FileManager.default.removeItem(atPath: tempDir)
+            if let directory, FileService().directoryExists(at: directory.root) {
+                try FileService().deleteDirectory(at: directory.root)
             }
         }
     }

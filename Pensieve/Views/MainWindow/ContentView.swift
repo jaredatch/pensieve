@@ -59,7 +59,7 @@ struct ContentView: View {
             )
                 .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 260)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if syncModel.isConfigured || library.manifestSaves?.isWaiting == true {
+                    if syncModel.showsFooter(saves: library.manifestSaves) {
                         SyncStatusView(model: syncModel, saves: library.manifestSaves,
                             onResolve: { showConflictResolution = true })
                     }
@@ -176,7 +176,10 @@ struct ContentView: View {
         }
         let selectionView = appearedView
             .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { runtime.checkForSkillUpdatesIfDue() }
+            if newPhase == .active {
+                runtime.checkForSkillUpdatesIfDue()
+                Task { await runtime.library.manifestSaves?.refreshAndRetry() }
+            }
         }
         .onChange(of: skills.map(\.id)) { _, currentIDs in
             let ids = Set(currentIDs)
@@ -233,6 +236,7 @@ struct ContentView: View {
         } message: {
             Text(library.manifestSaves?.categoryNotice?.message ?? "")
         }
+        .modifier(ManifestRepairAlerts(saves: library.manifestSaves))
         .focusedSceneValue(\.addSkillFromGitHub, presentGitHubInstall)
     }
 }

@@ -83,10 +83,11 @@ extension IngestPreflightTests {
         }
         for _ in 0..<2 {
             XCTAssertTrue(attempt(), "\(importsSkill ? "import" : "intent") must refuse a repeated \(fault) failure")
-            let expected = fault == .save ? (importsSkill
-                ? "Import couldn't update this Mac's library. Try importing again."
-                : "Deployment couldn't update this Mac's library. Try deploying again.")
-                : SyncError.storeUnreadable([]).localizedDescription
+            let expected = fault == .save ? "Rebuilding the local store failed: "
+                + "Rebuild computed changes but saving the local store failed: "
+                + CocoaError(.fileWriteUnknown).localizedDescription
+                : (fault == .read ? ManifestError.damaged.localizedDescription
+                    : SyncError.storeUnreadable([]).localizedDescription)
             XCTAssertEqual(reportedError(), expected)
             XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)
             XCTAssertEqual(manifest.writes, 0, "refused ingestion must not reach the manifest writer")
@@ -112,7 +113,12 @@ extension IngestPreflightTests {
                 projectKey: "github.com/owner/project", skill: skill, platform: .codex, context: context)
             return false
         } catch {
-            if fault != .save {
+            if fault == .read {
+                guard case ManifestError.damaged = error else {
+                    XCTFail("Expected damaged library, got \(error)")
+                    return true
+                }
+            } else if fault != .save {
                 guard case let SyncError.storeUnreadable(warnings) = error else {
                     XCTFail("Expected the unreadable-store explanation, got \(error)")
                     return true
@@ -230,6 +236,9 @@ private enum WriterFault: CaseIterable { case save, read, newerSchema }
 
 /// Real manifest I/O with a controllable read refusal and a count of writes reaching the boundary.
 private final class ControlledWriterManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try manifest.repair(snapshot, root: root, replacing: damage)
+    }
     private let manifest = ManifestService()
     var failsRead = false
     private(set) var writes = 0

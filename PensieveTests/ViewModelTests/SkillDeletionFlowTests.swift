@@ -30,12 +30,12 @@ final class SkillDeletionFlowTests: XCTestCase {
         let store = RecordingDeletionSkillStore()
         store.bodies[slug] = "body"
         store.entries.insert(slug)
-        let manifest = RecordingDeletionManifest()
         let links = DeletionTestLinkService()
         let cursor = DeletionTestCursorCompiler()
         let watcher = RecordingWatcher()
         let counter = DeletionCounter()
         let stateFS = MemoryDeployFileService()
+        let manifest = RecordingDeletionManifest(files: stateFS)
         stateFS.projectDirectories.insert(project.path)
         let stateRoot = TestTemporaryDirectory.path + "PensieveDeletionState-\(UUID().uuidString)"
         let state = DeployStateStore(fileService: stateFS, appSupportDir: stateRoot)

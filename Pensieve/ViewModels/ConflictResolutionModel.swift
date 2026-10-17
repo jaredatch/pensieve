@@ -143,7 +143,7 @@ final class ConflictResolutionModel {
         } catch let error as SyncError {
             switch error {
             case .conflictSideUnavailable, .conflictRequiresGitResolution, .protectedGitlinkUnavailable,
-                 .conflictFolderMustMove:
+                 .conflictFolderMustMove, .localConflictFolderMustMove, .incompatibleConflictPicks:
                 selectionError = error.errorDescription
                 phase = .ready(groups)
             default:

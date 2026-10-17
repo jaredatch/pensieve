@@ -18,6 +18,17 @@ struct UnavailableConflictSide: Error, Equatable {
     var canChoose: Bool { isGitlink && reason == .gitlink }
 }
 
+struct ConflictFolderMustMove: Error {}
+
+struct ConflictAbortBlocked: LocalizedError {
+    let paths: [String]
+    let underlying: Error
+    var errorDescription: String? {
+        underlying.localizedDescription + " Move the folder at " + paths.joined(separator: ", ")
+            + " out of the store, then sync again."
+    }
+}
+
 // Stage mapping during `git pull --rebase origin main` is OPPOSITE a plain merge:
 //   stage 2 (:2:) = origin/main = the OTHER machine
 //   stage 3 (:3:) = the replayed local commit = THIS machine
@@ -35,6 +46,20 @@ extension GitService {
 
     @_disfavoredOverload
     func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+        if let entry = try indexConflictEntry(atStage: stage, path: path, in: workingDir) { return entry }
+        for folder in try relocatedFolderConflicts(at: workingDir) {
+            if path.utf8.elementsEqual(folder.path.utf8) {
+                return stage == folder.fileStage
+                    ? try indexConflictEntry(atStage: stage, path: folder.auxiliary, in: workingDir) : nil
+            }
+            if folder.children.contains(where: { $0.utf8.elementsEqual(path.utf8) }) {
+                return stage == 5 - folder.fileStage ? try indexConflictEntry(atStage: 0, path: path, in: workingDir) : nil
+            }
+        }
+        return nil
+    }
+
+    private func indexConflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
         let indexArgs = ["--literal-pathspecs", "-C", workingDir, "ls-files", "--stage", "-z", "--", path]
         let index = try runData(indexArgs, in: nil)
         guard index.exit == 0 else { throw dataCommandError(index, args: indexArgs) }
@@ -67,16 +92,45 @@ extension GitService {
     /// Git restores the selected entry's link type and executable mode without byte conversions.
     @_disfavoredOverload
     func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+        let folder = try relocatedFolderConflicts(at: root).first { $0.path.utf8.elementsEqual(path.utf8) }
+        if let folder { try requireRelocatedConflict(folder, at: root) }
+        let replacesFolder = try conflictWorktreeType(path, root: root) == .directory
+        if replacesFolder {
+            guard stage == 3 else { throw ConflictFolderMustMove() }
+            try requireIncomingConflictFolder(path, at: root)
+        }
         let store = try storeOperation(at: root)
-        try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index",
-                             "--force", "--stage=\(stage)", "--", path])
+        if let folder {
+            // One index transaction removes the children and auxiliary entry. All admission
+            // checks precede it; abort recovery uses commits even if a later operation fails.
+            if try fileService.entryExistsWithoutFollowingLinks(at: root + "/" + folder.auxiliary) {
+                try fileService.deleteFile(at: root + "/" + folder.auxiliary)
+            }
+            try store.runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--"]
+                + folder.children + [folder.auxiliary])
+        }
+        if replacesFolder { try fileService.deleteDirectory(at: root + "/" + path) }
         try store.runOrThrow(["--literal-pathspecs", "update-index", "--add", "--cacheinfo",
                              entry.mode + "," + entry.objectID + "," + path])
+        try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index", "--force", "--", path])
     }
 
-    /// Remove only the index entry, leaving the worktree path and its children in place.
+    private func conflictWorktreeType(_ path: String, root: String) throws -> FileEntryType? {
+        do {
+            return try fileService.entryTypeWithoutFollowingLinks(at: root + "/" + path)
+        } catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOTDIR) {
+            // checkout-index --force handles a regular file occupying a parent component.
+            return nil
+        }
+    }
+
+    /// Resolve the logical index entry, keeping its worktree path and children. A verified
+    /// relocation also removes Git's auxiliary worktree file beside that path.
     @_disfavoredOverload
     func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+        if let folder = try relocatedFolderConflicts(at: root).first(where: { $0.path.utf8.elementsEqual(path.utf8) }) {
+            try removeRelocatedConflict(folder, at: root)
+        }
         try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
     }
 
@@ -84,13 +138,20 @@ extension GitService {
     /// ignore rules from them; older builds preserve the receipts but do not enforce them.
     @_disfavoredOverload
     func retireConflictPath(_ path: String, at root: String) throws {
-        try StoreIgnoreRules.prepare(at: root, files: fileService, retiring: path)
-        try removeConflictEntryFromIndex(path, at: root)
-        try stagePath(StoreIgnoreRules.receiptFile, at: root)
-        try stagePath(".gitattributes", at: root)
+        var scoped = self
+        scoped.storeState = StoreOperationState(root: root)
+        let receipts = try StoreIgnoreRules.readReceipts(at: root, files: fileService)
+        scoped.storeState?.receipts = try StoreIgnoreRules.publish(receipts, at: root, files: fileService, retiring: path)
+        if storeState?.root == root { storeState?.receipts = scoped.storeState?.receipts }
+        let store = try scoped.storeOperation(at: root)
+        try store.runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
+        try store.stagePath(StoreIgnoreRules.receiptFile)
+        try store.stagePath(".gitattributes")
         if try fileService.entryTypeWithoutFollowingLinks(at: root + "/.gitignore") == .regular {
-            try stagePath(".gitignore", at: root)
-        } else { try removeConflictEntryFromIndex(".gitignore", at: root) }
+            try store.stagePath(".gitignore")
+        } else {
+            try store.runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", ".gitignore"])
+        }
     }
 
     /// True iff a rebase is mid-flight. Git owns `.git`; this structural probe stays inside GitService.
@@ -104,6 +165,7 @@ extension GitService {
     @_disfavoredOverload
     func continueRebase(at path: String) throws -> PullResult {
         let store = try storeOperation(at: path)
+        if storeState?.root == path { storeState?.folderConflicts = nil }
         let args = ["-C", path, "rebase", "--continue"]
         let r = try store.run(Array(args.dropFirst(2)))
         if r.exit == 0 { return .merged }
@@ -141,6 +203,9 @@ extension GitService {
     /// `git add -- <path>` — stage a resolved path. The `--` guards a leading-dash path.
     @_disfavoredOverload
     func stagePath(_ path: String, at root: String) throws {
+        if path == StoreIgnoreRules.receiptFile || path == ".gitattributes", storeState?.root == root {
+            storeState?.receipts = nil
+        }
         try storeOperation(at: root).stagePath(path)
     }
 
@@ -149,7 +214,8 @@ extension GitService {
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool {
         try ensureCommitIdentity(at: root)
-        if fetchedRevision == nil {
+        let state = storeState.flatMap { $0.root == root ? $0 : nil }
+        if fetchedRevision == nil && state?.fetched == nil {
             let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
             if fetch.exit != 0 {
                 let failure = commandError(fetch, args: ["-C", root, "fetch", "origin", "main"],
@@ -157,10 +223,15 @@ extension GitService {
                 if case .authenticationFailed = failure { throw failure }
                 return try stageAllAndCommit(at: root, message: message)
             }
+            if storeState?.root == root {
+                let commit = try runOrThrow(["-C", root, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
+                    .stdout.trimmingCharacters(in: .newlines)
+                storeState?.fetched = FetchedStoreRevision(commit: commit)
+            }
         }
         let store = try storeOperation(at: root)
         try store.stage()
-        let upstream = fetchedRevision?.commit ?? "origin/main"
+        let upstream = fetchedRevision?.commit ?? state?.fetched?.commit ?? "origin/main"
         guard let baseR = try runBestEffort(["-C", root, "merge-base", "HEAD", upstream], in: nil),
               baseR.exit == 0 else {
             return try store.commitStagedChanges(message: message)
@@ -180,5 +251,57 @@ extension GitService {
             return false
         }
         return (Int(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 0
+    }
+}
+
+struct ConflictTreeEntry {
+    let mode: String
+    let object: String
+}
+
+extension GitService {
+    /// During rebase HEAD is the incoming tree. Admit the entire folder before deleting any
+    /// entry. Gitlinks, extra empty folders, changed modes/bytes and unreadable entries refuse.
+    private func requireIncomingConflictFolder(_ path: String, at root: String) throws {
+        let entries = try conflictTree(revision: "HEAD", root: root, path: path)
+        guard entries[Data(path.utf8)]?.mode == "040000" else { throw ConflictFolderMustMove() }
+        do {
+            try requireMatchingConflictEntry(path, root: root, entries: entries)
+        } catch let error as GitError {
+            throw error
+        } catch {
+            throw ConflictFolderMustMove()
+        }
+    }
+
+    private func requireMatchingConflictEntry(_ path: String, root: String,
+                                              entries: [Data: ConflictTreeEntry]) throws {
+        guard let entry = entries[Data(path.utf8)] else { throw ConflictFolderMustMove() }
+        let full = root + "/" + path
+        let type = try fileService.entryTypeWithoutFollowingLinks(at: full)
+        if entry.mode == "040000" {
+            guard type == .directory else { throw ConflictFolderMustMove() }
+            for name in try fileService.listDirectory(at: full) {
+                try requireMatchingConflictEntry(path + "/" + name, root: root, entries: entries)
+            }
+            return
+        }
+        guard ["100644", "100755", "120000"].contains(entry.mode) else { throw ConflictFolderMustMove() }
+        let args = ["-C", root, "cat-file", "blob", entry.object]
+        let blob = try runData(args, in: nil)
+        guard blob.exit == 0 else { throw dataCommandError(blob, args: args) }
+        let bytes: Data
+        if entry.mode == "120000" {
+            guard type == .symlink else { throw ConflictFolderMustMove() }
+            // Compare the link itself; neither its contents nor deletion may follow its target.
+            bytes = Data(try fileService.symlinkTarget(at: full).utf8)
+        } else {
+            guard type == .regular,
+                  fileService.isUserExecutableFile(at: full) == (entry.mode == "100755") else {
+                throw ConflictFolderMustMove()
+            }
+            bytes = try fileService.readRegularFileData(at: full, maximumBytes: blob.stdout.count, containedIn: root)
+        }
+        guard bytes == blob.stdout else { throw ConflictFolderMustMove() }
     }
 }

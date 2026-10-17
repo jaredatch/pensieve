@@ -19,11 +19,11 @@ extension SyncEngineTests {
             XCTAssertThrowsError(try makeEngine(git: git).sync(
                 root: tempDir, message: "m", credential: nil, context: context
             )) { error in
-                guard case SyncError.storeUnreadable = error else {
-                    return XCTFail("expected storeUnreadable, got \(error)")
+                guard case ManifestError.damaged = error else {
+                    return XCTFail("expected damaged library, got \(error)")
                 }
             }
-            XCTAssertTrue(git.calls.isEmpty, "must abort before commit, pull, or push")
+            XCTAssertEqual(git.calls, ["abort"], "Recover a leftover rebase before refusing commit, pull, or push")
             XCTAssertTrue(slugs(in: context).isEmpty, "must not rebuild local SwiftData")
             XCTAssertEqual(try String(contentsOfFile: manifestPath, encoding: .utf8), hostile)
         }

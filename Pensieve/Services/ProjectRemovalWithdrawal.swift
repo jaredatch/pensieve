@@ -85,14 +85,8 @@ struct ProjectRemovalWithdrawal {
                          request: ProjectRemovalWithdrawalRequest) throws {
         guard let manifestService else { return }
         let local = try manifestService.snapshot(from: context)
-        var snapshot: ManifestSnapshot
-        do {
-            snapshot = FileService().fileExists(at: manifestRoot + "/manifest/manifest.yaml")
-                ? try manifestService.read(fromRoot: manifestRoot) : local
-        } catch {
-            if case ManifestError.unsupportedSchema = error { throw error }
-            snapshot = local
-        }
+        let read = try ManifestService.classifiedRead(using: manifestService, root: manifestRoot, files: FileService())
+        var snapshot = read.missing ? local : read.snapshot
         if !request.keepingSharedKey, let key = project.identityKey {
             snapshot.deployIntents.removeAll { $0.machineID == request.localMachineID && $0.projectKey == key }
             snapshot.deployIntents += local.deployIntents.filter {

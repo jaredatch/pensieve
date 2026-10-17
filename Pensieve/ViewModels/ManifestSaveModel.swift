@@ -11,22 +11,36 @@ import SwiftData
 final class ManifestSaveModel {
     static let waitingMessage = "Your change will save when sync finishes."
     private(set) var pendingCount = 0
-    private(set) var isWaiting = false
+    var isWaiting = false
     var categoryNotice: CategorySaveNotice?
     var statusMessage: String? { isWaiting ? Self.waitingMessage : nil }
     @ObservationIgnored var didSave: SyncStateNotifying = SyncStateNotifier.suppressed
     let lockPath: String
-    private let root: String
-    private let manifest: ManifestSnapshotting
-    private let files: FileServiceProtocol
+    let root: String
+    let manifest: ManifestSnapshotting
+    let files: FileServiceProtocol
     private let waitSeconds: TimeInterval
     private let log: (String) -> Void
-    @ObservationIgnored private var items: [Item] = []
-    @ObservationIgnored private var refused: [ManifestRefusedEdit] = []
+    @ObservationIgnored var items: [Item] = []
+    var showsDamageAlert = false
+    var showsRepairConfirmation = false
+    var libraryDamaged = false
+    /// Nil until a disk read or an accepted launch/sync verdict supplies the current state.
+    var requiresNewerVersion: Bool?
+    @ObservationIgnored var damageObservationOrder = 0
+    @ObservationIgnored var damageRefreshOrder: Int?
+    @ObservationIgnored var didReadRepairedLibrary: () async -> Void = {}
+    var repairError: String?
+    @ObservationIgnored var damage: ManifestDamage?
+    @ObservationIgnored var confirmedDamage: ManifestDamage?
+    var pausedForRepair = false
+    var hasActiveSaves: Bool { pendingCount > 0 && !pausedForRepair }
+    @ObservationIgnored var refused: [ManifestRefusedEdit] = []
     @ObservationIgnored private var categoryMessages: [CategorySaveNotice.Entry] = []
-    @ObservationIgnored private var worker: Task<Void, Never>?
+    @ObservationIgnored var stagedRefusals: [UUID: () -> Void] = [:]
+    @ObservationIgnored var worker: Task<Void, Never>?
 
-    private struct Item {
+    struct Item {
         let id = UUID()
         var wasHealed = false
         let change: ManifestChange
@@ -49,17 +63,24 @@ final class ManifestSaveModel {
         self.log = log
     }
 
+    deinit {
+        for item in items { StoreIngestState.shared(for: item.presentation.context.container).finish(item.id) }
+    }
+
     func submit(_ change: ManifestChange, context: ModelContext, categoryEdit: CategorySaveEdit? = nil,
                 reconcile: (() -> BatchResult)? = nil, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
         for edit in refused where edit.context === context { edit.observe(change) }
-        items.append(Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
+        let manifest = manifest, files = files
+        let item = Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context),
-            fallback: { try self.manifest.snapshot(from: context) },
+            fallback: { try manifest.snapshot(from: context) },
             accept: { prepared, snapshot in
-                try StoreRebuildService(fileService: self.files, manifestService: self.manifest)
+                try StoreRebuildService(fileService: files, manifestService: manifest)
                     .accept(prepared, snapshot: snapshot, context: context)
-            }, report: report))
+            }, report: report)
+        items.append(item)
+        StoreIngestState.shared(for: context.container).enqueue(change, id: item.id, categoryWindow: categoryEdit?.windowID)
         pendingCount = items.count
         guard worker == nil else { return }
         worker = Task { @MainActor in await self.drain() }
@@ -71,15 +92,21 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func drain() async {
+    func drain() async {
         var savedAny = false
+        pausedForRepair = false
         while !items.isEmpty {
-            savedAny = await save(items[0]) || savedAny
-            items.removeFirst()
+            let outcome = await save(items[0])
+            if case .retry = outcome { continue }
+            if case .finished(let saved) = outcome { savedAny = saved || savedAny }
+            if pausedForRepair { break }
+            let finished = items.removeFirst()
+            StoreIngestState.shared(for: finished.presentation.context.container).finish(finished.id)
             pendingCount = items.count
             isWaiting = false
         }
         worker = nil
+        isWaiting = false
         if !categoryMessages.isEmpty {
             categoryNotice = CategorySaveNotice(entries: (categoryNotice?.entries ?? []) + categoryMessages)
             categoryMessages = []
@@ -87,22 +114,46 @@ final class ManifestSaveModel {
         if savedAny { didSave() }
     }
 
+    private enum SaveOutcome { case finished(Bool), retry, paused }
+
     @MainActor
-    private func save(_ item: Item) async -> Bool {
+    private func save(_ item: Item) async -> SaveOutcome {
         var disk: ManifestSnapshot?
         var heldLock: SyncLock?
-        defer { heldLock?.release() }
+        defer {
+            finishStagedRefusals()
+            heldLock?.release()
+        }
         do {
             heldLock = try await takeLock()
             disk = try await readCurrentManifest()
+            if disk == nil, StoreIngestState.shared(for: item.presentation.context.container).needsRebuild {
+                throw ManifestError.damaged
+            }
             refreshRefused(durable: disk)
+            let ingest = StoreIngestState.shared(for: item.presentation.context.container)
+            let head = await BlockingWork.run { [files, root] in GitHeadStamp(fileService: files).state(root: root) }
+            var prepared: PreparedStoreRebuild?
+            if ingest.requiresRebuild(at: head) {
+                let outcome = try await ingestBeforeSave(item, disk: disk)
+                switch outcome.verdict {
+                case .ready(let scan): prepared = scan
+                case .refused(let error): throw error
+                }
+            }
             let result = try await publish(item, disk: disk)
-            await rebuild(item, durable: result.snapshot, published: result.published)
-            return result.published
+            await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
+            return .finished(result.published)
         } catch {
+            if case ManifestError.damaged = error {
+                await refreshDamage()
+                pausedForRepair = libraryDamaged
+                showsDamageAlert = libraryDamaged
+                return libraryDamaged ? .paused : .retry
+            }
             if item.categoryEdit != nil {
                 refuseCategory(item, durable: disk, error: error)
-                return false
+                return .finished(false)
             }
             heldLock?.release()
             if !item.wasHealed {
@@ -111,8 +162,10 @@ final class ManifestSaveModel {
                 }
                 refused.append(item.presentation)
             }
-            item.report(item.wasHealed ? nil : error)
-            return false
+            if case ManifestSaveError.rebuildFailed = error { item.report(error) } else {
+                item.report(item.wasHealed ? nil : error)
+            }
+            return .finished(false)
         }
     }
 
@@ -137,38 +190,18 @@ final class ManifestSaveModel {
         }
         let snapshot = saved, manifest = manifest, root = root
         try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
+        let ingest = StoreIngestState.shared(for: item.presentation.context.container)
+        ingest.finish(item.id)
         for index in items.indices where healedItems.contains(items[index].id) {
             items[index].wasHealed = true
+            ingest.finish(items[index].id)
         }
         refused = refused.filter { $0.acknowledge(durable: saved) }
         return (saved, true)
     }
 
     @MainActor
-    private func rebuild(_ item: Item, durable: ManifestSnapshot, published: Bool) async {
-        // FIFO retains sync.lock until this result is accepted. The scan's context never commits;
-        // a later UI save must not be overwritten while this job reads disk.
-        do {
-            let container = item.presentation.context.container, files = files, manifest = manifest, root = root
-            let prepared = try await BlockingWork.run {
-                try StoreRebuildService(fileService: files, manifestService: manifest)
-                    .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
-            }
-            var displayed = prepared.snapshot
-            for edit in refused where edit.context === item.presentation.context { edit.project(onto: &displayed) }
-            // Publication is permanent, even after a peer changes the manifest. Only edits still
-            // awaiting publication and still shown locally need an overlay. An authoritative sync
-            // rebuild already replaced older category edits with saved state.
-            try projectPending(in: item.presentation.context, onto: &displayed)
-            try item.accept(prepared, displayed)
-            item.report(nil)
-        } catch {
-            item.report(ManifestSaveError.rebuildFailed(error.localizedDescription, manifestSaved: published))
-        }
-    }
-
-    @MainActor
-    private func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot) throws {
+    func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot) throws {
         for pending in items.dropFirst() where !pending.wasHealed
             && pending.categoryEdit?.wasRebuilt != true && pending.presentation.context === context
             && items.contains(where: { $0.id == pending.id }) {
@@ -177,8 +210,9 @@ final class ManifestSaveModel {
                 // Reject before accepting two same-named records, which would make name-based
                 // rebuild matching associate our UUID with the peer's rule. This head's snapshot
                 // is not publication evidence for the pending edit.
-                refuseCategory(pending, durable: nil, error: error)
+                stageCategoryRefusal(pending, durable: nil, error: error)
                 items.removeAll { $0.id == pending.id }
+                StoreIngestState.shared(for: context.container).finish(pending.id)
                 pendingCount = items.count
                 continue
             }
@@ -190,13 +224,8 @@ final class ManifestSaveModel {
     private func readCurrentManifest() async throws -> ManifestSnapshot? {
         let manifest = manifest, root = root, files = files
         return try await BlockingWork.run {
-            do {
-                guard files.fileExists(at: root + "/manifest/manifest.yaml") else { return nil }
-                return try manifest.read(fromRoot: root)
-            } catch {
-                if case ManifestError.unsupportedSchema = error { throw error }
-                return nil
-            }
+            let read = try ManifestService.classifiedRead(using: manifest, root: root, files: files)
+            return read.missing ? nil : read.snapshot
         }
     }
 
@@ -218,7 +247,7 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func takeLock() async throws -> SyncLock {
+    func takeLock() async throws -> SyncLock {
         let path = lockPath
         // Start the clock before the first attempt, including native-worker admission time.
         let deadline = ContinuousClock.now.advanced(by: .seconds(waitSeconds))
@@ -255,12 +284,33 @@ extension ManifestSaveModel {
     }
 
     @MainActor
-    private func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
-        guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return }
+    func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
+        let completion = stagedRefusals.removeValue(forKey: item.id)
+            ?? prepareCategoryRefusal(item, durable: durable, error: error)
+        completion()
+    }
+
+    @MainActor
+    func stageCategoryRefusal(_ item: Item, durable: ManifestSnapshot?, error: Error) {
+        guard stagedRefusals[item.id] == nil else { return }
+        stagedRefusals[item.id] = prepareCategoryRefusal(item, durable: durable, error: error)
+    }
+
+    @MainActor
+    func finishStagedRefusals() {
+        let completions = stagedRefusals.values
+        stagedRefusals = [:]
+        for complete in completions { complete() }
+    }
+
+    @MainActor
+    private func prepareCategoryRefusal(_ item: Item, durable: ManifestSnapshot?, error: Error) -> () -> Void {
+        guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return {} }
         if categoryIsSaved(item, durable: durable) {
-            categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
-            item.report(nil)
-            return
+            return {
+                self.categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
+                item.report(nil)
+            }
         }
         var affected = [item]
         var identities: Set<UUID> = [edit.id]
@@ -280,12 +330,17 @@ extension ManifestSaveModel {
             identities.insert(next.id)
             if let name = next.restoredName { restoredNames.insert(name) }
         }
-        for index in dependentIndices.reversed() { items.remove(at: index) }
-        restoreCategories(affected, reason: error)
+        for index in dependentIndices.reversed() {
+            let removed = items.remove(at: index)
+            StoreIngestState.shared(for: removed.presentation.context.container).finish(removed.id)
+        }
+        return restoreCategories(affected, reason: error)
     }
 
     @MainActor
-    private func restoreCategories(_ affected: [Item], reason: Error) {
+    private func restoreCategories(_ affected: [Item], reason: Error) -> () -> Void {
+        var notices: [CategorySaveNotice.Entry] = []
+        var reports: [() -> Void] = []
         for (index, item) in affected.enumerated().reversed() {
             guard let edit = item.categoryEdit else { continue }
             let error = index == 0 ? reason : ManifestSaveError.unsavedTarget
@@ -293,15 +348,15 @@ extension ManifestSaveModel {
             do {
                 let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
-                categoryMessages.append(CategorySaveNotice.entry(edit: edit,
+                notices.append(CategorySaveNotice.entry(edit: edit,
                     error: restored == .saved ? reason : error, outcome: restored))
                 wasKept = restored == .saved
             } catch {
-                categoryMessages.append(CategorySaveNotice.Entry(
+                notices.append(CategorySaveNotice.Entry(
                     text: "Couldn't restore “\(edit.name)”: " + error.localizedDescription, wasKept: false))
                 log("Category undo failed: " + error.localizedDescription)
             }
-            item.report(wasKept ? nil : error)
+            reports.append { item.report(wasKept ? nil : error) }
         }
         if let context = affected.first?.presentation.context {
             do {
@@ -315,9 +370,13 @@ extension ManifestSaveModel {
         }
         // All inverses land before convergence, so a dependent rename never briefly takes a name
         // that its parent is about to restore. A missing folder keeps the existing cleanup ledger.
-        if let reconcile = affected.compactMap(\.reconcile).first {
-            let result = reconcile()
-            if result.hasFailures { log("Restored category deployments need another reconcile.") }
+        return {
+            self.categoryMessages.append(contentsOf: notices)
+            for report in reports { report() }
+            if let reconcile = affected.compactMap(\.reconcile).first {
+                let result = reconcile()
+                if result.hasFailures { self.log("Restored category deployments need another reconcile.") }
+            }
         }
     }
 

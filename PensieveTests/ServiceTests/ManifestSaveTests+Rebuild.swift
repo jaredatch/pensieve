@@ -13,11 +13,17 @@ extension ManifestSaveTests {
             h.recording.failingWrites = 1
             h.library.updateMetadata(h.alpha, tags: ["a"], scope: .user, context: h.context)
             await h.saves.waitUntilIdle()
-            XCTAssertNotNil(h.library.error)
+            if corrupt { XCTAssertTrue(h.saves.showsDamageAlert) } else { XCTAssertNotNil(h.library.error) }
             h.library.updateMetadata(h.alpha, tags: ["b"], scope: .user, context: h.context)
             await h.saves.waitUntilIdle()
+            if corrupt {
+                h.recording.failingWrites = 0
+                h.saves.requestRepair()
+                await h.saves.replaceWithThisMac(context: h.context)
+                await h.saves.waitUntilIdle()
+            }
             XCTAssertNil(h.library.error)
-            XCTAssertEqual(h.recording.writes.count, 1)
+            XCTAssertEqual(h.recording.writes.count, corrupt ? 2 : 1)
             XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["b"])
             XCTAssertEqual(h.alpha.tags, ["b"], "A refused fallback edit must use the current context before publishing")
         }
@@ -41,9 +47,15 @@ extension ManifestSaveTests {
             h.recording.failingWrites = 1
             h.library.regenerateManifest(.retireSkill("alpha"), context: h.context)
             await h.saves.waitUntilIdle()
-            XCTAssertNotNil(h.library.error)
+            if corrupt { XCTAssertTrue(h.saves.showsDamageAlert) } else { XCTAssertNotNil(h.library.error) }
             h.library.updateMetadata(h.beta, tags: ["healed"], scope: .user, context: h.context)
             await h.saves.waitUntilIdle()
+            if corrupt {
+                h.recording.failingWrites = 0
+                h.saves.requestRepair()
+                await h.saves.replaceWithThisMac(context: h.context)
+                await h.saves.waitUntilIdle()
+            }
             XCTAssertNil(h.library.error)
             let healed = try h.manifest.read(fromRoot: h.root)
             XCTAssertFalse(healed.categories.contains { $0.skillSlugs.contains("alpha") })

@@ -11,7 +11,7 @@ extension ConflictResolutionModelTests {
         let rebuild = IncompleteIngestRebuild()
         let engine = fixture.engine(rebuild: rebuild)
         try NativeTestWork.run(container: container) { context in
-            _ = StoreRebuildService().rebuild(fromRoot: fixture.app, context: context)
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: fixture.app, context: context)
             try fixture.changePeer(conflict: true)
             try fixture.files.writeFile(at: fixture.app + "/skills/item/SKILL.md",
                                         content: "---\nname: Item\ndescription: Item\n---\nthis body\n")

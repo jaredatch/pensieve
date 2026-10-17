@@ -98,8 +98,7 @@ final class SkillLibraryViewModel {
     private(set) var pendingRowCleanup: Set<UUID> = []
     /// The Skill rows could not be fetched: nothing is trusted and every write guard refuses.
     private(set) var libraryUnavailable = false
-    /// The last rebuild could not read the manifest (newer schema or corrupt): adds are fenced.
-    private(set) var storeUnreadable = false
+    private(set) var reportedStoreUnreadable = false
     private(set) var launchIngestPending = false
     var deletionNotice: DeletionNotice?
 
@@ -158,7 +157,7 @@ final class SkillLibraryViewModel {
             } else if launchIngestPending {
                 self.error = Self.launchIngestMessage + " Try again when launch finishes."
             } else {
-                self.error = Self.storeUnreadableMessage
+                self.error = addFenceReason
             }
             return nil
         }
@@ -304,13 +303,15 @@ extension SkillLibraryViewModel {
         switch result {
         case .synced, .conflicted: applyFence(false)
         case .storeUnreadable: applyFence(true)
+        case .manifestDamaged: applyFence(false); manifestSaves?.libraryDamaged = true; showCreateSheet = false
         case .noRemote, .branchless, .locked, .failed: break
         }
     }
 
     /// A rising fence closes the create sheet here; the view closes its own sheets on `addsFenced`.
     private func applyFence(_ unreadable: Bool) {
-        storeUnreadable = unreadable
+        reportedStoreUnreadable = unreadable
+        manifestSaves?.acceptLibraryVerdict(newer: unreadable)
         if unreadable { showCreateSheet = false }
     }
 

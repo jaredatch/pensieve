@@ -35,6 +35,7 @@ extension SkillInstallService {
                context: ModelContext) throws -> SkillAdoptResult {
         let lock = try acquireMutationLock()
         defer { lock.release() }
+        try ingestBeforeMutation(context: context)
 
         let existing = try requireExistingSkill(slug: existingSlug, context: context)
         let localDirectory = try safeExistingDirectory(slug: existingSlug)
@@ -103,6 +104,7 @@ extension SkillInstallService {
                         context: ModelContext) throws {
         let lock = try acquireMutationLock()
         defer { lock.release() }
+        try ingestBeforeMutation(context: context)
 
         let existing = try requireExistingSkill(slug: existingSlug, context: context)
         let previousOrigin = try existing.installedOrigin
@@ -166,6 +168,7 @@ extension SkillInstallService {
         try requireInstallable(candidate)
         let lock = try acquireMutationLock()
         defer { lock.release() }
+        try ingestBeforeMutation(context: context)
 
         if let collision = try collision(for: slug, context: context) {
             return .collision(existing: collision)
@@ -306,6 +309,12 @@ extension SkillInstallService {
 // MARK: - Coordinates and existing overlay
 
 extension SkillInstallService {
+    private func ingestBeforeMutation(context: ModelContext) throws {
+        try StoreIngestState.rebuildIfNeeded(
+            using: StoreRebuildService(fileService: fileService, manifestService: manifestService),
+            root: storeRoot, context: context, files: fileService)
+    }
+
     private func acquireMutationLock() throws -> SyncLock {
         guard let lock = SyncLock.tryAcquire(at: lockPath) else {
             throw SkillInstallError.syncInProgress

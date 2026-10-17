@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - Records
@@ -62,11 +63,14 @@ struct ManifestSnapshot: Equatable {
 }
 
 enum ManifestError: LocalizedError, Equatable {
+    case damaged
     case unsupportedSchema(found: Int, supported: Int)
     case corruptManifestFile(String)   // present-but-unparseable → read throws, rebuild bails; never silently dropped
 
     var errorDescription: String? {
         switch self {
+        case .damaged:
+            "The synced library file is damaged"
         case .unsupportedSchema:
             "Another Mac synced with a newer version of Pensieve. Update Pensieve on this Mac to change this library."
         case .corruptManifestFile(let path):
@@ -221,4 +225,62 @@ extension ManifestService {
     private static func parseDateValue(_ value: Any?) -> Date? {
         (value as? String).flatMap(parseDate) ?? value as? Date
     }
+}
+
+/// The observable tree offered for replacement. Readable bytes are hashed; opaque entries retain
+/// their metadata and read failure. Links are observed without following them.
+struct ManifestDamage: Equatable {
+    let missing: Bool
+    private let entries: [String: Data]
+
+    static func capture(root: String, files: FileServiceProtocol) -> ManifestDamage {
+        var entries: [String: Data] = [:]
+        func walk(_ path: String) {
+            let absolute = root + "/manifest" + path
+            let entry = files.manifestEntryObservation(at: absolute)
+            var observation = entry.metadata
+            defer { entries[path] = observation }
+            do {
+                let type = entry.type
+                observation += Data(":\(String(describing: type)):".utf8)
+                switch type {
+                case nil: break
+                case .directory:
+                    for name in try files.listDirectory(at: absolute).sorted() { walk(path + "/" + name) }
+                case .regular:
+                    let data = try files.readRegularFileData(at: absolute, maximumBytes: Int.max)
+                    observation += Data(SHA256.hash(data: data))
+                case .symlink:
+                    observation += Data(try files.symlinkTarget(at: absolute).utf8)
+                case .other: break
+                }
+            } catch {
+                let failure = error as NSError
+                observation += Data("unreadable:\(failure.domain):\(failure.code)".utf8)
+            }
+        }
+        walk("")
+        return ManifestDamage(missing: !files.fileExists(at: root + "/manifest/manifest.yaml"), entries: entries)
+    }
+}
+
+extension ManifestService {
+    struct ClassifiedRead {
+        let snapshot: ManifestSnapshot
+        let missing: Bool
+    }
+
+    /// Every caller shares the damaged/newer distinction; missing-file policy stays with the caller.
+    static func classifiedRead(using manifest: ManifestReadWriting, root: String,
+                               files: FileServiceProtocol) throws -> ClassifiedRead {
+        do {
+            let snapshot = try manifest.read(fromRoot: root)
+            let missing = try files.entryTypeWithoutFollowingLinks(at: root + "/manifest/manifest.yaml") == nil
+            return ClassifiedRead(snapshot: snapshot, missing: missing)
+        } catch {
+            if case ManifestError.unsupportedSchema = error { throw error }
+            throw ManifestError.damaged
+        }
+    }
+
 }

@@ -9,6 +9,7 @@ private struct ThrowingWriteFileService: FileServiceProtocol {
     func writeFile(at path: String, content: String) throws { throw Boom() }
     func deleteFile(at path: String) throws {}
     func fileExists(at path: String) -> Bool { false }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? { nil }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
     func createDirectory(at path: String) throws { throw Boom() }

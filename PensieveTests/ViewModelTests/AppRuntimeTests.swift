@@ -1,10 +1,76 @@
 import AppKit
 import SwiftData
+import SwiftUI
 import XCTest
 @testable import Pensieve
 
 @MainActor
 final class AppRuntimeTests: XCTestCase {
+    func testActiveMainWindowDiscoversDamageWhileUnconfiguredFooterIsAbsent() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let harness = try makeRuntime(manifestSaves: h.saves)
+        harness.context.insert(Skill(name: "Existing", directoryName: "existing"))
+        try harness.context.save()
+        _ = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await h.saves.refreshAndRetry()
+        let window = hostMainWindow(runtime: harness.runtime)
+        defer { window.close(); window.contentView = nil }
+        let host = try XCTUnwrap(window.contentView as? NSHostingView<AnyView>)
+        func content(_ phase: ScenePhase) -> AnyView {
+            AnyView(PensieveApp.makeContentView(runtime: harness.runtime)
+                .environment(harness.runtime).modelContainer(harness.runtime.container).environment(\.scenePhase, phase))
+        }
+        host.rootView = content(.inactive)
+        await TestWait.until(failureMessage: "The main window must render before activation") {
+            !RenderedViewTestSupport.values(in: host).isEmpty
+        }
+        XCTAssertFalse(harness.runtime.syncModel.showsFooter(saves: h.saves))
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged while inactive")
+        host.rootView = content(.active)
+        await TestWait.until(failureMessage: "Activating the window must discover damage without a mounted footer") {
+            h.saves.libraryDamaged
+        }
+        XCTAssertEqual(h.saves.pendingCount, 0)
+    }
+
+    func testDamageRecoveryRunsOnlyDamageDeferredLaunchWorkOnceOffMain() async throws {
+        for recovery in ["healthy launch", "local repair", "sync repair"] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let path = h.root + "/manifest/manifest.yaml"
+            let healthy = try h.files.readFile(at: path)
+            let damagedAtLaunch = recovery != "healthy launch"
+            if damagedAtLaunch { try h.files.writeFile(at: path, content: "damaged") }
+            var result = RebuildResult()
+            result.storeUnreadable = damagedAtLaunch
+            result.manifestDamaged = damagedAtLaunch
+            let count = Counter(), onMain = Counter(), deploy = RecordingDeployReconciler()
+            let harness = try makeRuntime(manifestSaves: h.saves, launchBackfill: { _ in
+                _ = count.increment()
+                if Thread.isMainThread { _ = onMain.increment() }
+            }, launchOutcome: LaunchReconcileOutcome(rebuild: result, migrationRan: false, ingestedHeadStamp: nil),
+            hasRemoteConfigured: { true }, deployReconciler: deploy)
+            _ = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+            await h.saves.refreshDamage()
+            XCTAssertEqual(count.value, 0)
+            if !damagedAtLaunch {
+                try h.files.writeFile(at: path, content: "damaged later")
+                await h.saves.refreshDamage()
+            }
+            try h.files.writeFile(at: path, content: healthy)
+            if recovery == "sync repair" {
+                await harness.runtime.applyLibrarySyncOutcome(.synced(pushed: false, warnings: [],
+                    completedAt: Date(), headAdvanced: true))
+            } else { await h.saves.refreshAndRetry() }
+            XCTAssertEqual(count.value, damagedAtLaunch ? 1 : 0, recovery)
+            XCTAssertEqual(onMain.value, 0, "Backfill must stay off the main actor")
+            XCTAssertEqual(deploy.calls, damagedAtLaunch ? 1 : 0, "Recovery convergence runs once: " + recovery)
+            await h.saves.refreshAndRetry()
+            XCTAssertEqual(count.value, damagedAtLaunch ? 1 : 0, "Recovery is consumed once")
+        }
+    }
+
     func testLaunchWorkRunsOnce() async throws {
         var launchCallCount = 0
         let harness = try makeRuntime {
@@ -240,7 +306,7 @@ extension AppRuntimeTests {
         XCTAssertFalse(harness.runtime.storeQuarantined)
     }
 
-    func testInspectionClearedUpToDateRunsDeployButSkipsLedgerReconcilers() throws {
+    func testInspectionClearedUpToDateRunsDeployButSkipsLedgerReconcilers() async throws {
         let deploy = RecordingDeployReconciler()
         let category = RecordingLedgerReconciler()
         let harness = try makeRuntime(
@@ -255,11 +321,12 @@ extension AppRuntimeTests {
             headAdvanced: false
         ))
 
+        await TestWait.until(failureMessage: "Conflict completion must finish convergence") { deploy.calls > 0 }
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(category.calls, 0)
     }
 
-    func testConflictResolutionHeadAdvanceRunsDeployAndLedgerReconcilers() throws {
+    func testConflictResolutionHeadAdvanceRunsDeployAndLedgerReconcilers() async throws {
         let deploy = RecordingDeployReconciler()
         let category = RecordingLedgerReconciler()
         let harness = try makeRuntime(
@@ -274,6 +341,7 @@ extension AppRuntimeTests {
             headAdvanced: true
         ))
 
+        await TestWait.until(failureMessage: "Conflict completion must finish convergence") { deploy.calls > 0 }
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(category.calls, 1)
     }

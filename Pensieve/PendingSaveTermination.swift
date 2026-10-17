@@ -5,14 +5,24 @@ import Observation
 @MainActor
 final class PendingSaveTermination {
     enum Question: Equatable {
-        case saving, syncing, savingAndSyncing
+        case saving, syncing, savingAndSyncing, waitingForRepair
+
+        var buttons: [(title: String, quits: Bool)] {
+            self == .waitingForRepair ? [("Quit", true), ("Cancel", false)] : [("Wait", false), ("Quit Anyway", true)]
+        }
+
+        func quits(for response: NSApplication.ModalResponse) -> Bool {
+            let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            return buttons.indices.contains(index) && buttons[index].quits
+        }
 
         func covers(_ current: Question) -> Bool {
-            self == .savingAndSyncing || self == current
+            self == current || (self == .savingAndSyncing && current != .waitingForRepair)
         }
 
         var message: String {
             switch self {
+            case .waitingForRepair: return "A change is waiting for the library file to be repaired."
             case .saving: return "Pensieve is still saving a change."
             case .syncing: return "Pensieve is still finishing a sync step."
             case .savingAndSyncing: return "Pensieve is still finishing a sync step and saving a change."
@@ -21,6 +31,9 @@ final class PendingSaveTermination {
 
         var detail: String {
             switch self {
+            case .waitingForRepair:
+                return "It's kept on this Mac and saves when you repair the file here. "
+                    + "If another Mac repairs the file first, its version replaces your change."
             case .saving: return "It's waiting for sync to finish. If you quit now, the change won't be saved."
             case .syncing: return "If you quit now, it stops partway."
             case .savingAndSyncing: return "If you quit now, the sync step stops partway and the change won't be saved."
@@ -68,11 +81,11 @@ final class PendingSaveTermination {
     func requestQuestion() { askAgain?() }
 
     private static func question(_ saves: ManifestSaveModel?, _ steps: SyncStepModel?) -> Question? {
-        switch ((saves?.pendingCount ?? 0) > 0, (steps?.pendingCount ?? 0) > 0) {
+        switch (saves?.hasActiveSaves == true, (steps?.pendingCount ?? 0) > 0) {
         case (true, true): return .savingAndSyncing
         case (true, false): return .saving
         case (false, true): return .syncing
-        case (false, false): return nil
+        case (false, false): return (saves?.pendingCount ?? 0) > 0 ? .waitingForRepair : nil
         }
     }
 
@@ -85,7 +98,9 @@ final class PendingSaveTermination {
             Task { @MainActor in self?.observePending(saves, steps, request: request, reply: reply) }
         }
         guard let question else { finish(true, reply: reply); return }
-        updateQuestion(question)
+        if question == .waitingForRepair, questionID == nil {
+            showQuestion(for: saves, steps: steps, request: request, reply: reply)
+        } else { updateQuestion(question) }
     }
 
     private func updateQuestion(_ question: Question) {
@@ -109,7 +124,14 @@ final class PendingSaveTermination {
                 self.showQuestion(for: saves, steps: steps, request: request, reply: reply)
                 return
             }
-            if quitAnyway { self.finish(true, reply: reply) } else { self.dismissQuestion() }
+            if quitAnyway { self.finish(true, reply: reply) } else if self.shownQuestion == .waitingForRepair {
+                self.finish(false, reply: reply)
+            } else {
+                self.dismissQuestion()
+                if Self.question(saves, steps) == .waitingForRepair {
+                    self.showQuestion(for: saves, steps: steps, request: request, reply: reply)
+                }
+            }
         }
         if generation == request, questionID == id { presented = presentation } else { presentation.dismiss() }
     }
@@ -131,13 +153,22 @@ final class PendingSaveTermination {
         reply(quit)
     }
 
+    private static func configureKeys(_ alert: NSAlert) {
+        for button in alert.buttons {
+            button.keyEquivalent = ""
+            button.keyEquivalentModifierMask = []
+        }
+        alert.buttons[0].keyEquivalent = "\r"
+    }
+
     static func present(_ question: Question, resolve: @escaping (Bool) -> Void) -> Presentation {
+        var current = question
+        var responseRecorded = false
         let alert = NSAlert()
         alert.messageText = question.message
         alert.informativeText = question.detail
         NSApp.activate(ignoringOtherApps: true)
-        alert.addButton(withTitle: "Wait")
-        alert.addButton(withTitle: "Quit Anyway")
+        for button in question.buttons { alert.addButton(withTitle: button.title) }
         // AppKit owns this native quit question; a sheet allows the save's main-actor completion.
         var parent = NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible }
         while let sheet = parent?.attachedSheet { parent = sheet }
@@ -146,29 +177,95 @@ final class PendingSaveTermination {
         let host = parent ?? NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
         if temporary { host.isReleasedWhenClosed = false; host.center() }
         host.makeKeyAndOrderFront(nil)
-        var willClose: NSObjectProtocol?
-        willClose = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification, object: host, queue: .main
-        ) { _ in
-            if host.attachedSheet === alert.window { host.endSheet(alert.window, returnCode: .cancel) }
-        }
-        alert.beginSheetModal(for: host) { response in
-            if let willClose { NotificationCenter.default.removeObserver(willClose) }
+        let lifetime = QuitSheetLifetime(host: host, alert: alert) { current }
+        alert.beginSheetModal(for: host) { [weak host] response in
+            responseRecorded = true
+            let quit = current.quits(for: response)
+            lifetime.stop()
             DispatchQueue.main.async {
-                if temporary { host.close() }
-                resolve(response == .alertSecondButtonReturn)
+                if temporary { host?.close() }
+                resolve(quit)
             }
         }
+        configureKeys(alert)
         return Presentation(update: { question in
-            guard alert.window.sheetParent != nil else { return false }
+            guard !responseRecorded, alert.window.sheetParent != nil else { return false }
+            current = question
+            for (button, choice) in zip(alert.buttons, question.buttons) { button.title = choice.title }
             alert.messageText = question.message
             alert.informativeText = question.detail
             alert.layout()
+            configureKeys(alert)
             return true
-        }, dismiss: {
-            host.endSheet(alert.window)
+        }, dismiss: { [weak host] in
+            lifetime.stop()
+            host?.endSheet(alert.window)
             alert.window.orderOut(nil)
-            if temporary { host.close() }
+            if temporary { host?.close() }
         })
+    }
+}
+
+/// Observers must not retain the host: its teardown can itself be what ends the sheet.
+@MainActor
+private final class QuitSheetLifetime {
+    private let keys: QuitCancelKeyMonitor
+    private var observers: [NSObjectProtocol] = []
+
+    init(host: NSWindow, alert: NSAlert, question: @escaping () -> PendingSaveTermination.Question) {
+        keys = QuitCancelKeyMonitor(alert: alert, question: question)
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: host, queue: .main
+        ) { [weak host, weak alert] _ in
+            guard let alert, host?.attachedSheet === alert.window else { return }
+            host?.endSheet(alert.window, returnCode: .cancel)
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didEndSheetNotification, object: host, queue: .main
+        ) { [weak self] _ in self?.stop() })
+    }
+
+    func stop() {
+        keys.stop()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers = []
+    }
+
+    deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+}
+
+/// The native token cannot retain its owner, and removal is deferred when a key caused completion.
+@MainActor
+private final class QuitCancelKeyMonitor {
+    private var token: Any?
+    private var handling = false
+    private var stopped = false
+
+    init(alert: NSAlert, question: @escaping () -> PendingSaveTermination.Question) {
+        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak alert] event in
+            guard let self, let alert, !self.stopped, event.window === alert.window else { return event }
+            self.handling = true
+            defer { self.handling = false }
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+            let key = event.charactersIgnoringModifiers
+            guard (key == "\u{1b}" && modifiers.isEmpty) || (key == "." && modifiers == .command) else { return event }
+            if let index = question().buttons.firstIndex(where: { !$0.quits }) { alert.buttons[index].performClick(nil) }
+            return nil
+        }
+    }
+
+    func stop() {
+        stopped = true
+        if handling { DispatchQueue.main.async { self.remove() } } else { remove() }
+    }
+
+    private func remove() {
+        if let token { NSEvent.removeMonitor(token); self.token = nil }
+    }
+
+    deinit {
+        if let token { DispatchQueue.main.async { NSEvent.removeMonitor(token) } }
     }
 }

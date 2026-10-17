@@ -295,6 +295,10 @@ private extension ImportViewModel {
         } catch {
             if let syncError = error as? SyncError, case .storeUnreadable = syncError {
                 self.error = error.localizedDescription
+            } else if error is StoreIngestFailure || error as? SyncError == .ingestIncomplete {
+                self.error = error.localizedDescription
+            } else if case ManifestError.damaged = error {
+                self.error = error.localizedDescription
             } else {
                 self.error = "Import couldn't update this Mac's library. Try importing again."
             }

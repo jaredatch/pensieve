@@ -97,8 +97,8 @@ extension CategorySaveUndoTests {
             XCTAssertEqual(try window.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), expected.map(\.name))
         }
         let notice = try XCTUnwrap(h.saves.categoryNotice).message
-        XCTAssertTrue(notice.contains("It now shows what's saved."), "Edit before category fetch: " + notice)
-        XCTAssertFalse(notice.contains("undone"), notice)
+        XCTAssertFalse(notice.contains("It now shows what's saved."), "The rebuild retained the pending edit: " + notice)
+        XCTAssertTrue(notice.contains("undone"), notice)
         XCTAssertFalse(notice.contains("gone"), notice)
     }
 

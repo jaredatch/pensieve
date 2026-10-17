@@ -36,20 +36,24 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         // Read the manifest once. A newer schema or corrupt file must stop reconciliation:
         // an empty fallback would reset skills' scope/tags/cursor/origin and delete categories.
         // Warn and preserve local state until Pensieve can read the store.
-        guard let snapshot = try? manifestService.read(fromRoot: root) else {
+        let snapshot: ManifestSnapshot
+        do { snapshot = try manifestService.read(fromRoot: root) } catch {
             result.storeUnreadable = true
-            result.warnings.append(
-                "Manifest was unreadable (a newer schema version, or corrupt); skipped the rebuild to " +
-                "avoid destroying local metadata. Update Pensieve to read this store.")
-            StoreIngestState.shared(for: context.container).invalidate()
+            if case ManifestError.unsupportedSchema = error {
+                result.warnings.append("Update Pensieve to read this store.")
+            } else {
+                result.manifestDamaged = true
+                result.warnings.append(ManifestError.damaged.localizedDescription)
+            }
             return result
         }
 
-        result = rebuild(snapshot: snapshot, fromRoot: root, context: context)
-        // A successful read is admitted by the caller after its HEAD validation. Launch may
-        // discover that the files moved during this rebuild, so this service cannot clear it.
-        if result.ingestIncomplete { StoreIngestState.shared(for: context.container).invalidate() }
-        if !result.ingestIncomplete, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
+        let displayed = StoreIngestState.shared(for: context.container).projectingEdits(onto: snapshot)
+        result = rebuild(snapshot: displayed.snapshot, fromRoot: root, context: context)
+        if !result.ingestIncomplete, var read = result.categoryRead {
+            read.retainedWindows = displayed.retainedWindows
+            CategorySaveWindow.didRebuild(read)
+        }
         return result
     }
 
@@ -78,7 +82,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             try save(context)
         } catch {
             result.saveFailed = true
-            result.warnings.append(
+            result.reportIngestFailure(
                 "Rebuild computed changes but saving the local store failed: \(error.localizedDescription)")
         }
         return result
@@ -114,7 +118,7 @@ extension StoreRebuildService {
         let existingSkills: [Skill]
         do { existingSkills = try context.fetch(FetchDescriptor<Skill>()) } catch {
             result.skillReadFailed = true
-            result.warnings.append("Couldn't read local skills; skipped the skill reconcile: " + error.localizedDescription)
+            result.reportIngestFailure("Couldn't read local skills; skipped the skill reconcile: " + error.localizedDescription)
             return []
         }
         let existingBySlug = Dictionary(existingSkills.map { ($0.directoryName, $0) },
@@ -178,7 +182,7 @@ extension StoreRebuildService {
         guard fileService.directoryExists(at: skillsDir) else { return [] }
         guard let entries = try? fileService.listDirectory(at: skillsDir) else {
             result.skillListFailed = true
-            result.warnings.append(
+            result.reportIngestFailure(
                 "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows.")
             return nil
         }
@@ -318,7 +322,7 @@ extension StoreRebuildService {
         let read: (rows: [Category], receipt: CategorySaveWindow.ReadReceipt)
         do { read = try CategorySaveWindow.fetchCategories(in: context) } catch {
             result.categoryReadFailed = true
-            result.warnings.append(
+            result.reportIngestFailure(
                 "Couldn't read local categories; skipped the category reconcile: " + error.localizedDescription)
             return nil
         }

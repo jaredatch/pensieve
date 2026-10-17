@@ -39,6 +39,9 @@ private struct BundledManifestFailure: ManifestSnapshotting {
     func read(fromRoot root: String) throws -> ManifestSnapshot { try ManifestService().read(fromRoot: root) }
     func snapshot(from context: ModelContext) throws -> ManifestSnapshot { try ManifestService().snapshot(from: context) }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws { throw CocoaError(.fileWriteNoPermission) }
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw CocoaError(.featureUnsupported)
+    }
 }
 
 /// Keeps the existing real-file forwarding double, adding only the Settings refresh scheduling assertion.

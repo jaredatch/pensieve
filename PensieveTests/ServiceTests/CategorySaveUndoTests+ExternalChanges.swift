@@ -39,16 +39,17 @@ extension CategorySaveUndoTests {
             pulled.skills[0].tags = ["peer"]
             try h.manifest.write(pulled, toRoot: h.root)
             try rebuildPulledState(h)
-            XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == id })
+            XCTAssertTrue(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == id },
+                "The pulled rebuild must retain the queued create until its save is attempted")
             try refuseAfterPull(refusal, h: h)
             let before = try h.manifestBytes()
             lock.release()
             await h.saves.waitUntilIdle()
             let notice = try XCTUnwrap(h.saves.categoryNotice)
             XCTAssertTrue(notice.message.contains("Writing"), refusal)
-            XCTAssertTrue(notice.message.contains("gone"), notice.message)
-            XCTAssertTrue(notice.message.contains("dropped"), notice.message)
-            XCTAssertFalse(notice.message.contains("undone"), notice.message)
+            XCTAssertFalse(notice.message.contains("gone"), notice.message)
+            XCTAssertFalse(notice.message.contains("dropped"), notice.message)
+            XCTAssertTrue(notice.message.contains("undone"), notice.message)
             XCTAssertEqual(notice.title, "Category changes couldn't be saved")
             XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Local", "ZDelete"])
             XCTAssertEqual(try h.manifestBytes(), before)
@@ -169,7 +170,7 @@ extension CategorySaveUndoTests {
             try h.files.deleteFile(at: h.lockPath)
             try h.files.createDirectory(at: h.lockPath)
         default:
-            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
+            try h.files.deleteFile(at: h.root + "/manifest/manifest.yaml")
             h.recording.failingWrites = 1
         }
     }

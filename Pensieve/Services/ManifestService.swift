@@ -24,13 +24,22 @@ struct ManifestService: ManifestReadWriting {
     // MARK: Write (idempotent, prunes stale)
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
+        _ = try publish(snapshot, root: root, replacing: nil)
+    }
+
+    /// Only the confirmed repair calls this, while holding sync.lock.
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try publish(snapshot, root: root, replacing: damage)
+    }
+
+    private func publish(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage?) throws -> Bool {
         let acquired = Self.writeLock.try()
         // Reports contention before waiting; write checkpoints independently prove exclusion.
         writeLockAttempted(acquired)
         if !acquired { Self.writeLock.lock() }
         defer { Self.writeLock.unlock() }
         let manifestDir = root + "/manifest"
-        try refuseNewerExistingManifest(at: manifestDir)
+        guard try admitsWrite(root: root, replacing: damage) else { return false }
         try validateSnapshotForWrite(snapshot)
 
         // Whole tree built in a SIBLING temp OUTSIDE the repo (sync's `git add -A` can't push a partial build;
@@ -71,10 +80,22 @@ struct ManifestService: ManifestReadWriting {
                 try fileService.createDirectory(at: root)
             }
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
+            return true
         } catch {
             try? fileService.deleteDirectory(at: tmpDir)
             throw error
         }
+    }
+
+    private func admitsWrite(root: String, replacing damage: ManifestDamage?) throws -> Bool {
+        if let damage {
+            guard ManifestDamage.capture(root: root, files: fileService) == damage,
+                  damage.missing || (try? read(fromRoot: root)) == nil else { return false }
+            try refuseNewerExistingManifest(at: root + "/manifest")
+        } else {
+            _ = try Self.classifiedRead(using: self, root: root, files: fileService)
+        }
+        return true
     }
 
     private func validateSnapshotForWrite(_ snapshot: ManifestSnapshot) throws {
@@ -86,7 +107,7 @@ struct ManifestService: ManifestReadWriting {
         }
     }
 
-    /// Write-side downgrade guard: refuse iff the tree PARSES newer; absent/unreadable proceeds (heals corrupt).
+    /// A confirmed repair still cannot replace a newer schema.
     private func refuseNewerExistingManifest(at manifestDir: String) throws {
         guard let schema = try? readSchema(from: manifestDir), schema > supportedSchemaVersion else { return }
         throw ManifestError.unsupportedSchema(found: schema, supported: supportedSchemaVersion)
@@ -96,6 +117,7 @@ struct ManifestService: ManifestReadWriting {
 
     func read(fromRoot root: String) throws -> ManifestSnapshot {
         let manifestDir = root + "/manifest"
+        _ = try manifestDirectoryExists(at: manifestDir)
         let schema = try readSchema(from: manifestDir)
         if schema > supportedSchemaVersion {
             throw ManifestError.unsupportedSchema(found: schema, supported: supportedSchemaVersion)
@@ -112,10 +134,22 @@ struct ManifestService: ManifestReadWriting {
         )
     }
 
+    func readManifestText(at path: String) throws -> String {
+        let data = try fileService.readRegularFileData(at: path, maximumBytes: Int.max)
+        guard let text = String(data: data, encoding: .utf8) else { throw ManifestError.damaged }
+        return text
+    }
+
+    private func manifestDirectoryExists(at path: String) throws -> Bool {
+        guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return false }
+        guard type == .directory else { throw ManifestError.damaged }
+        return true
+    }
+
     private func readSchema(from manifestDir: String) throws -> Int {
         let path = manifestDir + "/manifest.yaml"
-        guard fileService.fileExists(at: path) else { return supportedSchemaVersion }
-        guard let top = try? fileService.readFile(at: path),
+        guard try fileService.entryTypeWithoutFollowingLinks(at: path) != nil else { return supportedSchemaVersion }
+        guard let top = try? readManifestText(at: path),
               let obj = (try? CheckedYAMLLoader.load(yaml: top)) as? [String: Any],
               let schema = obj["schema_version"] as? Int else {
             throw ManifestError.corruptManifestFile("manifest.yaml")
@@ -126,9 +160,9 @@ struct ManifestService: ManifestReadWriting {
     private func readCategories(from manifestDir: String) throws -> [CategoryRecord] {
         var categories: [CategoryRecord] = []
         let categoriesDir = manifestDir + "/categories"
-        guard fileService.directoryExists(at: categoriesDir) else { return [] }
+        guard try manifestDirectoryExists(at: categoriesDir) else { return [] }
         for entry in try fileService.listDirectory(at: categoriesDir) where entry.hasSuffix(".yaml") {
-            guard let content = try? fileService.readFile(at: categoriesDir + "/" + entry),
+            guard let content = try? readManifestText(at: categoriesDir + "/" + entry),
                   let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                   let name = obj["name"] as? String else {
                 throw ManifestError.corruptManifestFile("categories/" + entry)
@@ -145,9 +179,9 @@ struct ManifestService: ManifestReadWriting {
     private func readSkills(from manifestDir: String) throws -> [SkillOverlay] {
         var skills: [SkillOverlay] = []
         let skillsDir = manifestDir + "/skills"
-        if fileService.directoryExists(at: skillsDir) {
+        if try manifestDirectoryExists(at: skillsDir) {
             for entry in try fileService.listDirectory(at: skillsDir) where entry.hasSuffix(".yaml") {
-                guard let content = try? fileService.readFile(at: skillsDir + "/" + entry),
+                guard let content = try? readManifestText(at: skillsDir + "/" + entry),
                       let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                       let slug = obj["slug"] as? String else {
                     throw ManifestError.corruptManifestFile("skills/" + entry)
@@ -192,8 +226,8 @@ struct ManifestService: ManifestReadWriting {
 
     private func readProjects(from manifestDir: String) throws -> [ProjectIdentityRecord] {
         let path = manifestDir + "/projects.yaml"
-        guard fileService.fileExists(at: path) else { return [] }
-        guard let content = try? fileService.readFile(at: path) else {
+        guard try fileService.entryTypeWithoutFollowingLinks(at: path) != nil else { return [] }
+        guard let content = try? readManifestText(at: path) else {
             throw ManifestError.corruptManifestFile("projects.yaml")
         }
         if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }

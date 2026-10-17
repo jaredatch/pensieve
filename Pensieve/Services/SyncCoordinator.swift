@@ -9,11 +9,12 @@ enum SyncCycleResult: Equatable {
     case locked
     case failed(String)
     case storeUnreadable(String)
+    case manifestDamaged(String)
 
     var provesGitUsable: Bool {
         switch self {
         // Credential resolution probes git before entering the engine, including its lock and store checks.
-        case .synced, .conflicted, .noRemote, .branchless, .locked, .storeUnreadable: true
+        case .synced, .conflicted, .noRemote, .branchless, .locked, .storeUnreadable, .manifestDamaged: true
         case .failed: false
         }
     }
@@ -32,7 +33,7 @@ enum SyncCycleResult: Equatable {
             return ("skipped", "locked")
         case .failed:
             return ("failed", "syncError")
-        case .storeUnreadable:
+        case .storeUnreadable, .manifestDamaged:
             return ("failed", "storeUnreadable")
         }
     }
@@ -55,8 +56,7 @@ actor SyncCoordinator {
     private var machineIdentity: MachineIdentityProviding?
     private var machineStateService: MachineStateServicing?
     private var now: () -> Date = Date.init
-    private var headStamp: () -> String? = { nil }
-    private var lastIngestedHeadStamp: String?
+    private var headState: () -> GitHeadStamp.State = { .unreadable }
 
     func configure(
         engine: SyncEngineProtocol,
@@ -78,11 +78,12 @@ actor SyncCoordinator {
         self.machineIdentity = machine.identity
         self.machineStateService = machine.stateService
         self.now = now
-        self.headStamp = headStamp ?? { GitHeadStamp().read(root: root) }
+        self.headState = headStamp.map { read in { read().map(GitHeadStamp.State.resolved) ?? .unreadable } }
+            ?? { GitHeadStamp().state(root: root) }
     }
 
     func seedLastIngestedHeadStamp(_ stamp: String?) {
-        lastIngestedHeadStamp = stamp
+        StoreIngestState.shared(for: modelContainer).seedHead(stamp)
     }
 
     func runCycle() -> SyncCycleResult {
@@ -100,8 +101,8 @@ actor SyncCoordinator {
             let outcome = try engine.sync(root: root, message: Self.commitMessage(at: now()),
                                           credential: authentication.credential, context: cycleContext,
                                           prepare: { context in
-                    let currentStamp = self.headStamp()
-                    preparedHeadStamp = currentStamp
+                    let currentStamp = self.headState()
+                    preparedHeadStamp = currentStamp.oid
                     if let rebuild = try self.ingestIfNeeded(context: context, stamp: currentStamp) {
                         preflightWarnings = rebuild.warnings
                         preflightAdvanced = true
@@ -137,12 +138,10 @@ actor SyncCoordinator {
         return result
     }
 
-    private func ingestIfNeeded(context: ModelContext, stamp: String?) throws -> RebuildResult? {
-        guard StoreIngestState.shared(for: modelContainer).needsRebuild
-            || lastIngestedHeadStamp == nil || stamp == nil || stamp != lastIngestedHeadStamp else { return nil }
-        let rebuild = try StoreIngestState.rebuild(using: rebuildService, root: root, context: context)
-        lastIngestedHeadStamp = stamp
-        return rebuild
+    private func ingestIfNeeded(context: ModelContext, stamp: GitHeadStamp.State) throws -> RebuildResult? {
+        guard StoreIngestState.shared(for: modelContainer).requiresRebuild(at: stamp) else { return nil }
+        return try StoreIngestState.rebuild(using: rebuildService, root: root, context: context,
+                                           headStamp: { self.headState().oid })
     }
 
     /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.
@@ -166,9 +165,6 @@ actor SyncCoordinator {
             let engineAdvanced = engineIngestedHeadStamp != nil
                 && preparedHeadStamp != nil
                 && engineIngestedHeadStamp != preparedHeadStamp
-            if let ingestedHeadStamp = engineIngestedHeadStamp ?? preparedHeadStamp {
-                lastIngestedHeadStamp = ingestedHeadStamp
-            }
             return .synced(
                 pushed: pushed,
                 warnings: preflightWarnings + warnings,
@@ -190,13 +186,14 @@ actor SyncCoordinator {
         await completion(result)
     }
 
-    /// The one place a thrown cycle becomes a result: a busy lock is `.locked`; the store refusing to be
-    /// read (the pre-write read or a preflight rebuild) is the typed `.storeUnreadable`, carrying the
-    /// same message `.failed` carried before PLAN-31; everything else is `.failed`.
+    /// Keep repairable damage distinct from the newer-schema fence when a cycle refuses the store.
+    /// Busy locks remain retryable; other errors retain their localized failure.
     private static func cycleFailure(_ error: Error) -> SyncCycleResult {
         switch error {
         case SyncError.syncInProgress:
             return .locked
+        case ManifestError.damaged:
+            return .manifestDamaged(ManifestError.damaged.localizedDescription)
         case let SyncError.storeUnreadable(warnings):
             return .storeUnreadable(SyncError.storeUnreadable(warnings).errorDescription ?? "Sync failed.")
         case let error as LocalizedError:

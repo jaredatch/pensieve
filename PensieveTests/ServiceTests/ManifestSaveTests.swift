@@ -163,14 +163,16 @@ final class ManifestSaveTests: XCTestCase {
             if refusal == "newer schema" {
                 try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
             } else if refusal == "write" { h.recording.failingWrites = 3 } else {
-                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
+                try h.files.deleteDirectory(at: h.root + "/manifest")
                 h.recording.failingSnapshots = .max
             }
-            let before = try h.manifestBytes()
+            let before = refusal == "snapshot" ? [:] : try h.manifestBytes()
             lock.release()
             await h.saves.waitUntilIdle()
             h.recording.failingSnapshots = 0
-            XCTAssertEqual(try h.manifestBytes(), before, refusal)
+            if refusal == "snapshot" {
+                XCTAssertFalse(h.files.directoryExists(at: h.root + "/manifest"))
+            } else { XCTAssertEqual(try h.manifestBytes(), before, refusal) }
             XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == createdID })
             XCTAssertEqual(h.local.name, "Local")
             XCTAssertEqual(h.alpha.tags, ["kept"])
@@ -197,32 +199,6 @@ final class ManifestSaveTests: XCTestCase {
             try await checkRefusedFieldAcknowledgement(h, window: window)
         }
         try await checkPresentationReadFailureAfterDurableWrite()
-    }
-
-    func testCorruptManifestHealsFromCurrentWindowAfterWaiting() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { lock.release() }
-        h.recording.failingSnapshots = 1
-        h.library.updateMetadata(h.alpha, tags: ["readable"], scope: .user, context: h.context)
-        lock.release()
-        await h.saves.waitUntilIdle()
-        XCTAssertNil(h.library.error, "A readable manifest must not fetch the unused fallback")
-        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["readable"])
-        h.recording.failingSnapshots = 0
-        let corruptLock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { corruptLock.release() }
-        h.categories.rename(h.local, to: "Healed", context: h.context)
-        h.library.updateMetadata(h.alpha, tags: ["latest"], scope: .project, context: h.context)
-        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
-        let expected = try h.manifest.snapshot(from: h.context)
-        corruptLock.release()
-        await h.saves.waitUntilIdle()
-        let saved = try h.manifest.read(fromRoot: h.root)
-        XCTAssertEqual(saved.categories, expected.categories.sorted { $0.name < $1.name })
-        XCTAssertEqual(saved.skills, expected.skills.sorted { $0.slug < $1.slug })
-        XCTAssertNil(h.library.error)
     }
 
     func testUnopenableLockReportsImmediatelyWithoutWaitingNotice() async throws {

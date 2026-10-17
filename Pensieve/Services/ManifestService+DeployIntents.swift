@@ -127,7 +127,7 @@ extension ManifestService {
         schemaVersion: Int
     ) throws -> ParsedDeployIntent {
         guard fileService.isRegularFile(at: path),
-              let content = try? fileService.readFile(at: path),
+              let content = try? readManifestText(at: path),
               let object = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
               isAcceptedDeployIntentKeys(Set(object.keys), schemaVersion: schemaVersion),
               let slug = object["slug"] as? String, slug == stem,

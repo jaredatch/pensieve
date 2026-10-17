@@ -34,6 +34,11 @@ final class SyncEngineTests: XCTestCase {
         var hasLocalBranchesResult: Result<Bool, Error> = .success(true)
 
         func remoteURL(at path: String) -> String? { remote }
+        func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+            // This stub reports an initialized store; supply metadata for the real publisher.
+            try files.createDirectory(at: root + "/.git")
+            try StoreIgnoreRules.prepare(at: root, files: files)
+        }
         func initRepository(at path: String) throws {}
         func setRemote(_ url: String, at path: String) throws {}
         func removeRemote(at path: String) throws {}
@@ -114,6 +119,9 @@ final class SyncEngineTests: XCTestCase {
 
     /// ManifestService whose `snapshot` throws, proving sync aborts before any write/git op.
     private struct ThrowingSnapshotManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw CocoaError(.featureUnsupported)
+    }
         func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {}
         func read(fromRoot root: String) throws -> ManifestSnapshot {
             ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: [])
@@ -147,7 +155,7 @@ final class SyncEngineTests: XCTestCase {
             try seedProjectIntent(in: context)
             try seedDiskOnlySkill("alpha")
             let outcome = try makeEngine(git: git).sync(root: tempDir, message: "m", credential: nil, context: context)
-            XCTAssertEqual(git.calls, ["commit", "pull", "push"])
+            XCTAssertEqual(git.calls, ["abort", "commit", "pull", "push"])
             XCTAssertTrue(FileManager.default.fileExists(atPath: tempDir + "/manifest/manifest.yaml"))
             XCTAssertTrue(slugs(in: context).contains("alpha"), "rebuild should import the on-disk skill")
             XCTAssertEqual(
@@ -180,7 +188,7 @@ final class SyncEngineTests: XCTestCase {
             let context = try makeContext()
             try seedDiskOnlySkill("gamma")
             let outcome = try makeEngine(git: git).sync(root: tempDir, message: "m", credential: nil, context: context)
-            XCTAssertEqual(git.calls, ["commit", "pull", "abort"])
+            XCTAssertEqual(git.calls, ["abort", "commit", "pull", "abort"])
             XCTAssertFalse(git.calls.contains("push"), "must NOT push a conflicted pull")
             XCTAssertFalse(slugs(in: context).contains("gamma"), "must NOT rebuild on conflict")
             XCTAssertEqual(outcome, .conflicted(["skills/x/SKILL.md"]))
@@ -211,7 +219,7 @@ final class SyncEngineTests: XCTestCase {
                                                                credential: nil, context: makeContext())) { error in
                 guard case SyncError.storeUnreadable = error else { return XCTFail("expected storeUnreadable") }
             }
-            XCTAssertTrue(git.calls.isEmpty, "must abort before commit/pull/push")
+            XCTAssertEqual(git.calls, ["abort"], "Recover a leftover rebase before refusing manifest writes")
             XCTAssertTrue(try String(contentsOfFile: manifestPath, encoding: .utf8).contains("999"))
         }
     }
@@ -242,7 +250,7 @@ final class SyncEngineTests: XCTestCase {
                                     storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
             let context = try makeContext()
             XCTAssertThrowsError(try engine.sync(root: tempDir, message: "m", credential: nil, context: context))
-            XCTAssertTrue(git.calls.isEmpty, "a fetch failure must abort before commit/pull/push (no destructive write)")
+            XCTAssertEqual(git.calls, ["abort"], "A fetch failure must stop before commit/pull/push")
             XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir + "/manifest/manifest.yaml"))
         }
     }
@@ -251,19 +259,25 @@ final class SyncEngineTests: XCTestCase {
 
     func testUnreadablePulledStoreDoesNotPushOrReportSynced() throws {
         try NativeTestWork.run { [self] in
-            let git = StubGit()
-            git.pullResult = .merged
-            // Simulate the pull delivering a newer-schema manifest this build can't read.
-            git.pullSideEffect = { root in
-                try? "schema_version: 999\n".write(toFile: root + "/manifest/manifest.yaml",
-                                                   atomically: true, encoding: .utf8)
+            for header in ["schema_version: 999\n", "damaged"] {
+                try? FileService().deleteDirectory(at: tempDir + "/manifest")
+                let git = StubGit()
+                git.pullResult = .merged
+                git.pullSideEffect = { root in
+                    try? header.write(toFile: root + "/manifest/manifest.yaml", atomically: true, encoding: .utf8)
+                }
+                let context = try makeContext()
+                XCTAssertThrowsError(try makeEngine(git: git).sync(root: tempDir, message: "m",
+                    credential: nil, context: context)) { error in
+                    if header == "damaged" {
+                        guard case ManifestError.damaged = error else { return XCTFail("Expected damage, got \(error)") }
+                        XCTAssertFalse(error.localizedDescription.contains("newer"))
+                    } else {
+                        guard case SyncError.storeUnreadable = error else { return XCTFail("Expected newer schema") }
+                    }
+                }
+                XCTAssertFalse(git.calls.contains("push"), "Never push over an unreadable pulled store")
             }
-            let context = try makeContext()
-            XCTAssertThrowsError(try makeEngine(git: git).sync(root: tempDir, message: "m",
-                                                               credential: nil, context: context)) { error in
-                guard case SyncError.storeUnreadable = error else { return XCTFail("expected .storeUnreadable") }
-            }
-            XCTAssertFalse(git.calls.contains("push"), "must NOT push our older snapshot over an unreadable store")
         }
     }
 }

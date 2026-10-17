@@ -104,6 +104,7 @@ extension AppRuntimeTests {
     func makeRuntime(
         defaultsLabel: String = "runtime",
         watcher: StubWatcher = StubWatcher(),
+        manifestSaves: ManifestSaveModel? = nil,
         launchCalls: (() -> Void)? = nil,
         launchBackfill: ((ModelContext) -> Void)? = nil,
         launchOutcome: LaunchReconcileOutcome = LaunchReconcileOutcome(
@@ -126,7 +127,7 @@ extension AppRuntimeTests {
         let defaults = try isolatedDefaults(defaultsLabel)
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
-            fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
+            fileWatchService: watcher, manifestRoot: manifestSaves?.root ?? TestPaths.storeRoot, manifestSaves: manifestSaves)
         let platformVM = neutralPlatformVM()
         let launchAttempts = Counter()
         let convergence = PostSyncConvergence(

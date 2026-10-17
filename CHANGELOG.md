@@ -24,6 +24,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- A damaged synced library now keeps your edits waiting and offers an explicit repair. Choose Repair in the sidebar, then confirm replacing the damaged file with this Mac's library. A readable file pulled from another Mac also lets the waiting edits save.
+
 - HTTPS sync ignores git credential helpers and other askpass programs. If you relied on one, add an access token in Settings › Sync. You can replace a refused or expired token there, even while a conflict is open.
 - Pensieve's access token now goes only to your sync remote's own host over HTTPS. A remote that redirects somewhere else gets no token, so Connect now uses `github.com` when you enter `www.github.com`. If your sync remote already starts with `https://www.github.com/`, disconnect and connect again.
 - The app is about half its old size, with crash symbols saved separately for troubleshooting.
@@ -46,6 +48,16 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - When Pensieve can't change your library, the buttons it turns off tell you why when you point at them. While it can't read the library, the empty Projects and Categories lists say so too, and a category's Rename button and switches are off.
 
 ### Fixed
+
+- Importing, deploying, installing or updating skills, removing a project and saving edits now keep category changes pulled by another process, even before the app’s next sync.
+
+- An interrupted conflict resolution preserves untracked files that block a later abort and explains how to move the folder before retrying. Conflicted parents and children must choose the same Mac.
+
+- File/folder conflicts use the original filenames on both sides. Incompatible parent and child choices now explain the mismatch, and failed recovery keeps the original refusal visible.
+- Sync protects excluded files created during preparation, even when there is nothing to commit. Skill saves preserve file permissions, and cleanup failures no longer block saves or sync.
+- Temporary files left by an interrupted skill save or sync no longer enter the next sync. Sync also preserves folders placed at its control-file paths and refuses existing links there.
+- Sync avoids duplicate staging work and unnecessary Git commands, and leaves unchanged rule files alone. It rechecks excluded files immediately before pulling.
+- Keeping This Mac during a sync conflict can now replace the other Mac's folder with your file or link when the folder holds only unchanged synced entries.
 
 - If sync can't update this Mac's library, it now stops before pushing and retries from the pulled files, so stale local categories can't undo another Mac's additions or deletions. Import, deploy and project removal catch the library up first, and ask you to try again if they can't.
 - Old sync settings can no longer hide new skills, a skill’s `SKILL.md`, or Pensieve’s own files. The next sync drops those settings and keeps the ones that stay inside a skill’s folder. If a nested repository conflicts at a skill root, the sheet explains which version you can choose or names the path to resolve in git.

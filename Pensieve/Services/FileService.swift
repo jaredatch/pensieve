@@ -1,8 +1,6 @@
 import Darwin
 import Foundation
-
 // MARK: - Protocol
-
 protocol FileServiceProtocol {
     func makeSocketListener(at path: String) throws -> SocketListener
     func readFile(at path: String) throws -> String
@@ -18,6 +16,8 @@ protocol FileServiceProtocol {
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
+    func cleanStoreIntermediates(at root: String) throws
+    func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws

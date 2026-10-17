@@ -3,6 +3,164 @@ import XCTest
 @testable import Pensieve
 
 extension PendingSaveTerminationTests {
+    func fixtureAfterCategoryRefusal() async throws -> ManifestSaveFixture {
+        let h = try ManifestSaveFixture(waitSeconds: 5)
+        h.recording.failingWrites = 1
+        h.categories.rename(h.local, to: "Refused", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.local.name, "Local")
+        return h
+    }
+
+    func pressDefault(in sheet: NSWindow) throws {
+        let button = try XCTUnwrap(sheet.defaultButtonCell?.controlView as? NSButton)
+        XCTAssertEqual(button.title, "Quit")
+        button.performClick(nil)
+    }
+
+    func assertQuestionText(_ question: PendingSaveTermination.Question, in rendered: [NSView]) {
+        let expected: [String]
+        switch question {
+        case .saving:
+            expected = ["Pensieve is still saving a change.",
+                "It's waiting for sync to finish. If you quit now, the change won't be saved."]
+        case .syncing:
+            expected = ["Pensieve is still finishing a sync step.", "If you quit now, it stops partway."]
+        case .savingAndSyncing:
+            expected = ["Pensieve is still finishing a sync step and saving a change.",
+                "If you quit now, the sync step stops partway and the change won't be saved."]
+        case .waitingForRepair:
+            expected = ["A change is waiting for the library file to be repaired.",
+                "It's kept on this Mac and saves when you repair the file here. "
+                    + "If another Mac repairs the file first, its version replaces your change."]
+        }
+        let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
+        for text in expected { XCTAssertTrue(strings.contains(text), "Missing native alert text: \(text)") }
+    }
+
+    func assertQuitKeyboardBindings(_ question: PendingSaveTermination.Question, in sheet: NSWindow) throws {
+        let buttons = Self.views(try XCTUnwrap(sheet.contentView)).compactMap { $0 as? NSButton }
+        let firstTitle = question == .waitingForRepair ? "Quit" : "Wait"
+        let secondTitle = question == .waitingForRepair ? "Cancel" : "Quit Anyway"
+        let first = try XCTUnwrap(buttons.first { $0.title == firstTitle })
+        let second = try XCTUnwrap(buttons.first { $0.title == secondTitle })
+        XCTAssertEqual(sheet.defaultButtonCell?.title, firstTitle, "Return must choose the current default")
+        XCTAssertEqual(first.keyEquivalent, "\r", "The default button keeps Return")
+        XCTAssertEqual(second.keyEquivalent, "", "The local monitor is the single Escape binding")
+        XCTAssertTrue(first.keyEquivalentModifierMask.isEmpty)
+        XCTAssertTrue(second.keyEquivalentModifierMask.isEmpty)
+    }
+
+    func testCancelMonitorIsRemovedOnlyAfterItsHandlerReturns() async throws {
+        let host = makeQuestionWindow()
+        let restoreWindows = isolateQuestionHost(host)
+        host.makeKeyAndOrderFront(nil)
+        defer { host.close(); host.contentView = nil; restoreWindows() }
+        let monitor = try QuitMonitorRemovalProbe()
+        defer { monitor.stop() }
+        var answers: [Bool] = []
+        let presentation = PendingSaveTermination.present(.saving) { answers.append($0) }
+        defer { presentation.dismiss() }
+        let sheet = try XCTUnwrap(host.attachedSheet)
+        sheet.animationBehavior = .none
+        try sendQuitKey("Escape", to: sheet)
+        XCTAssertTrue(monitor.sawKeyHandler)
+        XCTAssertEqual(monitor.reentrantRemovals, 0, "A local event monitor cannot be removed in its own handler")
+        await TestWait.until(failureMessage: "Ended sheet must remove its key monitor") { monitor.removals > 0 }
+        await TestWait.until(failureMessage: "Escape must retain its decision at the press") { answers == [false] }
+        XCTAssertNil(host.attachedSheet)
+    }
+
+    func testSheetEndRemovesMonitorBeforeCompletionWithoutHostClose() async throws {
+        let host = makeQuestionWindow()
+        let restoreWindows = isolateQuestionHost(host)
+        host.makeKeyAndOrderFront(nil)
+        defer { host.close(); host.contentView = nil; restoreWindows() }
+        let monitor = try QuitMonitorRemovalProbe()
+        defer { monitor.stop() }
+        let completion = try QuitSheetCompletionGate(host: host)
+        defer { completion.deliver(.cancel); completion.stop() }
+        var answers: [Bool] = []
+        let presentation = PendingSaveTermination.present(.saving) { answers.append($0) }
+        defer { presentation.dismiss() }
+        let sheet = try XCTUnwrap(host.attachedSheet)
+        sheet.animationBehavior = .none
+        XCTAssertTrue(completion.isHoldingCompletion)
+        host.endSheet(sheet, returnCode: .cancel)
+        await TestWait.until(failureMessage: "The native sheet must end before host teardown") { host.attachedSheet == nil }
+        await TestWait.until(failureMessage: "An ended sheet must remove its monitor before the completion arrives") {
+            monitor.removals > 0
+        }
+        XCTAssertTrue(answers.isEmpty, "The completion remains held independently of native sheet teardown")
+        completion.deliver(.cancel)
+        await TestWait.until(failureMessage: "Deferred native completion must still reply once") { answers == [false] }
+    }
+
+    func testNativeQuitKeyboardChoicesFollowRetitledQuestions() async throws {
+        let questions: [PendingSaveTermination.Question] = [.saving, .syncing, .savingAndSyncing, .waitingForRepair]
+        for initial in questions {
+            for updated in questions {
+                for key in ["Escape", "Command-period", "Return"] {
+                    try await assertRetitledQuit(initial, updated: updated, key: key)
+                }
+            }
+        }
+    }
+
+    func testNativeCancelKeysIgnoreNonShortcutModifiers() async throws {
+        for key in ["Shift-Keypad-Function-Escape", "Shift-Keypad-Function-Command-period"] {
+            try await assertRetitledQuit(.waitingForRepair, updated: .saving, key: key)
+        }
+    }
+
+    private func assertRetitledQuit(_ initial: PendingSaveTermination.Question,
+                                    updated: PendingSaveTermination.Question, key: String) async throws {
+        let host = makeQuestionWindow()
+        let restoreWindows = isolateQuestionHost(host)
+        host.makeKeyAndOrderFront(nil)
+        defer { host.close(); host.contentView = nil; restoreWindows() }
+        var answers: [Bool] = []
+        let presentation = PendingSaveTermination.present(initial) { answers.append($0) }
+        defer { presentation.dismiss() }
+        let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
+        let sheet = try XCTUnwrap(parent.attachedSheet)
+        sheet.animationBehavior = .none
+        XCTAssertTrue(presentation.update(updated))
+        sheet.contentView?.layoutSubtreeIfNeeded()
+        try assertQuitKeyboardBindings(updated, in: sheet)
+        assertQuestionText(updated, in: Self.views(try XCTUnwrap(sheet.contentView)))
+        try sendQuitKey(key, to: sheet)
+        await TestWait.until(failureMessage: "Native \(key) choice did not resolve") { !answers.isEmpty }
+        _ = try XCTUnwrap(answers.first, "Native key routing must deliver a response")
+        XCTAssertEqual(answers, [key == "Return" && updated == .waitingForRepair],
+            "\(initial) → \(updated): \(key) must answer the button now shown")
+        XCTAssertNil(parent.attachedSheet)
+    }
+
+    func chooseNativeQuit(_ choice: String, sheet: NSWindow, parent: NSWindow, buttons: [NSButton]) throws {
+        switch choice {
+        case "Escape", "Command-period": try sendQuitKey(choice, to: sheet)
+        case "Close host": parent.close()
+        case "Default": try pressDefault(in: sheet)
+        default: try XCTUnwrap(buttons.first { $0.title == choice }).performClick(nil)
+        }
+    }
+
+    func sendQuitKey(_ key: String, to sheet: NSWindow) throws {
+        let escape = key.contains("Escape")
+        let characters = escape ? "\u{1b}" : key == "Return" ? "\r" : "."
+        var modifiers: NSEvent.ModifierFlags = key.contains("Command-period") ? .command : []
+        if key.contains("Shift") { modifiers.insert(.shift) }
+        if key.contains("Keypad") { modifiers.insert(.numericPad) }
+        if key.contains("Function") { modifiers.insert(.function) }
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: modifiers, timestamp: 0,
+            windowNumber: sheet.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false,
+            keyCode: escape ? 53 : key == "Return" ? 36 : 47))
+        NSApp.sendEvent(event)
+    }
+
     func testShownQuitQuestionTracksPendingSaveAndSyncStep() async throws {
         for startsWithStep in [true, false] {
             let h = try ManifestSaveFixture()
@@ -12,10 +170,7 @@ extension PendingSaveTerminationTests {
             let steps = SyncStepModel(), quit = PendingSaveTermination(delay: 0)
             var step = startsWithStep ? steps.begin() : nil
             defer { if let step { steps.finish(step) } }
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
-                styleMask: [.titled], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.animationBehavior = .none
+            let window = makeQuestionWindow()
             window.orderFront(nil)
             defer { window.close() }
             var answers: [Bool] = []
@@ -61,6 +216,8 @@ extension PendingSaveTerminationTests {
         sheet.contentView?.layoutSubtreeIfNeeded()
         let strings = sheet.contentView.map { views($0).compactMap { ($0 as? NSTextField)?.stringValue } } ?? []
         switch question {
+        case .waitingForRepair:
+            return strings.contains("A change is waiting for the library file to be repaired.")
         case .saving:
             return strings.contains("Pensieve is still saving a change.") && strings.contains(
                 "It's waiting for sync to finish. If you quit now, the change won't be saved.")

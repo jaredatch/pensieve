@@ -9,7 +9,8 @@ extension StoreRebuildService {
         let existing: [MachineDeployIntent]
         do { existing = try context.fetch(FetchDescriptor<MachineDeployIntent>()) } catch {
             result.deployIntentReadFailed = true
-            result.warnings.append("Couldn't read local deploy intents; skipped their reconcile: " + error.localizedDescription)
+            result.reportIngestFailure(
+                "Couldn't read local deploy intents; skipped their reconcile: " + error.localizedDescription)
             return
         }
         var existingByKey = Dictionary(existing.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })

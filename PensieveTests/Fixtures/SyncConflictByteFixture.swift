@@ -10,6 +10,7 @@ struct SyncConflictByteFixture {
         case symlink(String)
         case gitlink(String)
         case folder
+        case folderWith([String: Entry])
         case deleted
     }
 
@@ -44,13 +45,17 @@ struct SyncConflictByteFixture {
                       this: this.map(Entry.file) ?? .deleted, other: other.map(Entry.file) ?? .deleted)
     }
 
-    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false, skillRoot: Bool = false) throws {
+    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false,
+         skillRoot: Bool = false, rootPath: Bool = false) throws {
         root = TestTemporaryDirectory.path + "ConflictBytes-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
         storeB = root + "/B"
-        path = skillRoot ? "skills/" + name : "skills/conflict/assets/" + name
+        path = rootPath ? name : (skillRoot ? "skills/" + name : "skills/conflict/assets/" + name)
         switch (this, other) {
+        case let (_, .folderWith(entries)), let (.folderWith(entries), _):
+            let parent = path
+            expectedPaths = ([parent] + entries.keys.map { parent + "/" + $0 }).sorted()
         case (.folder, _), (_, .folder): expectedPaths = [path, path + "/keep"]
         default: expectedPaths = [path]
         }
@@ -134,39 +139,6 @@ struct SyncConflictByteFixture {
 
     func change(_ bytes: Data?, at store: String) throws {
         try change(bytes.map(Entry.file) ?? .deleted, at: store)
-    }
-
-    func change(_ entry: Entry, at store: String) throws {
-        let full = store + "/" + path
-        switch entry {
-        case let .file(bytes):
-            try removeFolder(at: full)
-            try files.writeData(at: full, data: bytes)
-        case let .executable(bytes):
-            try files.writeExecutableFile(at: full, content: XCTUnwrap(String(bytes: bytes, encoding: .utf8)))
-        case let .symlink(target):
-            try removeEntry(at: full)
-            try files.createSymlink(at: full, pointingTo: target)
-        case let .gitlink(object):
-            if try files.entryTypeWithoutFollowingLinks(at: full) == .regular { try files.deleteFile(at: full) }
-            try files.createDirectory(at: full)
-            try git.runOrThrow(["-C", store, "update-index", "--add", "--cacheinfo", "160000," + object + "," + path], in: nil)
-        case .folder:
-            if try files.entryExistsWithoutFollowingLinks(at: full) { try files.deleteFile(at: full) }
-            try files.writeFile(at: full + "/keep", content: "chosen folder bytes")
-        case .deleted:
-            if files.directoryExists(at: full) { try files.deleteDirectory(at: full) } else { try files.deleteFile(at: full) }
-        }
-    }
-
-    private func removeFolder(at path: String) throws {
-        if try files.entryTypeWithoutFollowingLinks(at: path) == .directory { try files.deleteDirectory(at: path) }
-    }
-
-    private func removeEntry(at path: String) throws {
-        if try files.entryTypeWithoutFollowingLinks(at: path) == .directory {
-            try files.deleteDirectory(at: path)
-        } else if try files.entryExistsWithoutFollowingLinks(at: path) { try files.deleteFile(at: path) }
     }
 
     static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil,

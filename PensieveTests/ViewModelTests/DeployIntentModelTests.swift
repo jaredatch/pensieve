@@ -245,9 +245,10 @@ final class DeployIntentModelTests: XCTestCase {
     }
 
     func testExistingStoreOpensUnderExtendedSchema() throws {
-        let directory = TestTemporaryDirectory.path + "PensieveSchemaMigration-" + UUID().uuidString
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let fixture = TestStoreDirectory(named: "PensieveSchemaMigration")
+        let directory = fixture.storeRoot
+        try FileService().createDirectory(at: directory)
+        defer { try? FileService().deleteDirectory(at: fixture.root) }
         let url = URL(fileURLWithPath: directory + "/default.store")
         let oldSchema = Schema([
             Skill.self, Project.self, SkillProjectAssignment.self,
@@ -311,14 +312,15 @@ extension DeployIntentModelTests {
             agentDetection: DeployStubDetection(installed: [.codex]),
             deployStateStore: DeployStateStore.memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
-        let root = TestTemporaryDirectory.path + "PensieveDeployIntent-" + UUID().uuidString
+        let directory = TestStoreDirectory(named: "PensieveDeployIntent")
+        let root = directory.storeRoot
         let manifestFileService = FileService()
         let manifestService = ManifestService(fileService: manifestFileService)
         let resolvedWriteManifest = writeManifest ?? { context in
             onWriteManifest?()
             try manifestService.write(try manifestService.snapshot(from: context), toRoot: root)
         }
-        registerCleanup(root: root, fileService: manifestFileService)
+        registerCleanup(root: directory.root, fileService: manifestFileService)
         let dependencies = DeployIntentDependencies(
             identity: identity ?? DeployIntentIdentityStub(id: localID),
             stateService: DeployIntentStateStub(states: states ?? [defaultRemoteState()]),

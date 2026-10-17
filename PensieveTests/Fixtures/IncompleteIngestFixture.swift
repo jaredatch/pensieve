@@ -26,8 +26,9 @@ final class IncompleteIngestRebuild: StoreRebuildServiceProtocol {
 }
 
 struct IncompleteIngestFixture {
-    static let message = "Sync stopped because Pensieve couldn't update this Mac's library from the synced changes. "
-        + "It will try again on the next sync."
+    static let message = "Rebuilding the local store failed: "
+        + "Rebuild computed changes but saving the local store failed: " + CocoaError(.fileWriteUnknown).localizedDescription
+    static let categoryMessage = "Rebuilding the local store failed: Couldn't read this Mac's categories."
     let base: String
     let app: String
     let peer: String
@@ -100,6 +101,9 @@ struct IncompleteIngestFixture {
 
 /// Captures the real window snapshot at the write boundary while retaining native manifest I/O.
 final class IncompleteSnapshotManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try manifest.repair(snapshot, root: root, replacing: damage)
+    }
     private let manifest = ManifestService()
     private(set) var categoriesAtSnapshot: [[String]] = []
     func read(fromRoot root: String) throws -> ManifestSnapshot { try manifest.read(fromRoot: root) }
