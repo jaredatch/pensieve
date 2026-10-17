@@ -136,7 +136,6 @@ final class ManifestSaveModel {
             var prepared: PreparedStoreRebuild?
             if ingest.requiresRebuild(at: head) {
                 let outcome = try await ingestBeforeSave(item, disk: disk)
-                disk = outcome.durable
                 switch outcome.verdict {
                 case .ready(let scan): prepared = scan
                 case .refused(let error): throw error
@@ -222,7 +221,7 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    func readCurrentManifest() async throws -> ManifestSnapshot? {
+    private func readCurrentManifest() async throws -> ManifestSnapshot? {
         let manifest = manifest, root = root, files = files
         return try await BlockingWork.run {
             let read = try ManifestService.classifiedRead(using: manifest, root: root, files: files)

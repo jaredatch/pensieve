@@ -4,7 +4,6 @@ import SwiftData
 extension ManifestSaveModel {
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
     struct PreSaveIngest {
-        let durable: ManifestSnapshot
         let verdict: HeadEditVerdict
     }
 
@@ -35,20 +34,13 @@ extension ManifestSaveModel {
     @MainActor
     func ingestBeforeSave(_ item: Item, disk: ManifestSnapshot?) async throws -> PreSaveIngest {
         do {
-            var durable = try disk ?? item.fallback()
-            for attempt in 0..<3 {
-                let observation = try await prepareRebuild(item, durable: durable)
-                if observation.stable {
-                    let verdict = try acceptRebuild(item, prepared: observation.value,
-                                                    durable: observation.value.snapshot, includingHeadEdit: true)
-                    StoreIngestState.shared(for: item.presentation.context.container).accept(observation, result: RebuildResult())
-                    return PreSaveIngest(durable: durable, verdict: verdict)
-                }
-                guard attempt < 2 else { throw SyncError.ingestIncomplete }
-                guard let current = try await readCurrentManifest() else { throw ManifestError.damaged }
-                durable = current
-            }
-            throw SyncError.ingestIncomplete
+            let durable = try disk ?? item.fallback()
+            let observation = try await prepareRebuild(item, durable: durable)
+            guard observation.stable else { throw SyncError.ingestIncomplete }
+            let verdict = try acceptRebuild(item, prepared: observation.value,
+                                            durable: observation.value.snapshot, includingHeadEdit: true)
+            StoreIngestState.shared(for: item.presentation.context.container).accept(observation, result: RebuildResult())
+            return PreSaveIngest(verdict: verdict)
         } catch {
             StoreIngestState.shared(for: item.presentation.context.container).invalidate()
             if case ManifestError.damaged = error { throw error }
