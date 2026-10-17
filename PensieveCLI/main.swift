@@ -18,7 +18,8 @@ guard _NSGetExecutablePath(&executablePath, &executableSize) == 0 else {
 }
 Thread {
     exit(CLIEntry.run(arguments: Array(CommandLine.arguments.dropFirst()),
-        appSupport: PathConstants.pensieveAppSupportDir, executable: String(cString: executablePath)))
+        appSupport: PathConstants.pensieveAppSupportDir, executable: String(cString: executablePath),
+        home: PathConstants.homeDirectory))
 }.start()
 // NSWorkspace delivers launch callbacks while the CLI worker waits for readiness.
 dispatchMain()

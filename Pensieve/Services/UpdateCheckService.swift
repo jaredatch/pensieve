@@ -249,7 +249,8 @@ extension UpdateCheckService {
 
     func readMovedHead(key: BatchKey, head: String, snapshots: [Snapshot], credential: GitCredential?,
                        diagnostics: UpdateBatchDiagnostics,
-                       retainingCheckout: ((String) -> Void)? = nil) throws -> (Date, [(Snapshot, Result<String, Error>)]) {
+                       retainingCheckout: ((UpdateCheckout) -> Void)? = nil) throws
+        -> (Date, [(Snapshot, Result<String, Error>)]) {
         try prepareScratchRoot()
         let sessionRoot = scratchRoot + "/" + UUID().uuidString
         try fileService.createDirectory(at: sessionRoot)
@@ -273,7 +274,10 @@ extension UpdateCheckService {
             }
             return (snapshot, tree)
         }
-        if let retainingCheckout { retainingCheckout(checkout); retained = true }
+        if let retainingCheckout {
+            retainingCheckout(UpdateCheckout(directory: checkout, sessionDirectory: sessionRoot))
+            retained = true
+        }
         return (commitDate, trees)
     }
 

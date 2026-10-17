@@ -4,6 +4,69 @@ import XCTest
 @testable import Pensieve
 
 extension CLILibraryHandlerTests {
+    func assertProjectPathSpellings() async throws {
+        let h = try CLILibraryFixture(diskBacked: true)
+        defer { h.stop() }
+        try await h.start()
+        let real = h.root + "/real", link = h.root + "/link"
+        try h.files.createDirectory(at: real)
+        try h.files.createSymlink(at: link, pointingTo: real)
+        _ = try await h.run(["install", h.sourceURL, "--yes"])
+        for (supplied, first, second) in [(link, link, real), (real, real, link),
+                                           (link + "/", link, real), (h.root + "//link", link, real)] {
+            let preview = try await h.run(["project", "add", supplied, "--dry-run"])
+            XCTAssertEqual(preview.data?["path"], .string(first), "Preview retains supplied spelling")
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
+            let added = try await h.run(["project", "add", supplied])
+            XCTAssertEqual(added.data?["path"], .string(first), "Registration retains supplied spelling")
+            XCTAssertEqual(try ModelContext(h.context.container).fetch(FetchDescriptor<Project>()).map(\.path), [first])
+            let listed = try await h.run(["project", "list"])
+            XCTAssertEqual(listed.data?.array?.first?["path"], .string(first))
+            let repeated = try await h.run(["project", "add", second])
+            XCTAssertEqual(repeated.changed, false, "Both alias orders reuse the first registration")
+            XCTAssertEqual(repeated.data?["id"], added.data?["id"])
+            XCTAssertEqual(repeated.data?["path"], .string(first))
+            let model = AddProjectModel(fileService: h.files, previewDelay: {})
+            model.name = "Sheet"
+            model.path = supplied
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                 failureMessage: "Sheet path preview") { !model.isCheckingIdentity }
+            let sheetProject = try XCTUnwrap(model.makeProject())
+            XCTAssertEqual(sheetProject.path, first)
+            XCTAssertEqual(added.data?["path"], .string(sheetProject.path))
+            for spelling in [first, second, "  " + link + "/  ", "~/../link"] {
+                _ = try await h.run(["deploy", "foo", "-a", "claude", "-p", spelling])
+                let removal = try await h.run(["project", "remove", spelling, "--dry-run"])
+                XCTAssertEqual(removal.data?["project"]?["id"], added.data?["id"])
+            }
+            _ = try await h.run(["project", "remove", second, "--yes"])
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
+        }
+        let handler = CLILibraryHandler(runtime: h.runtime, files: h.files)
+        for supplied in ["link", "  " + link + "  "] {
+            let preview = try await handler.addProject(supplied,
+                options: CLILibraryOptions(dryRun: true, workingDirectory: h.root))
+            XCTAssertEqual(preview.envelope.data?["path"], .string(link), "Joined path gets the sheet's treatment")
+            let added = try await handler.addProject(supplied, options: CLILibraryOptions(workingDirectory: h.root))
+            XCTAssertEqual(added.envelope.data?["path"], .string(link))
+            XCTAssertEqual(try ModelContext(h.context.container).fetch(FetchDescriptor<Project>()).map(\.path), [link])
+            let removed = try await h.run(["project", "remove", real, "--yes"])
+            XCTAssertEqual(removed.changed, true, "Removal must reset the relative-path fixture")
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
+        }
+        try await assertEmptyProjectPaths(h)
+    }
+
+    private func assertEmptyProjectPaths(_ h: CLILibraryFixture) async throws {
+        for supplied in ["", "   "] {
+            let refused = try await h.run(["project", "add", supplied], exit: 64)
+            XCTAssertEqual(refused.error?.code, "usage")
+            XCTAssertTrue(refused.error?.message.contains("needs a folder") == true)
+            XCTAssertFalse(h.files.fileExists(at: h.root + "/.pensieve-project"), "Empty path writes no marker in cwd")
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
+        }
+    }
+
     func assertChangedInstallConfirmation(_ h: CLILibraryFixture) async throws {
         let shown = try await h.run(["install", h.sourceURL], exit: 5)
         try h.files.writeFile(at: h.repository + "/skills/foo/asset.txt", content: "changed after confirmation")
@@ -45,6 +108,8 @@ extension CLILibraryHandlerTests {
         XCTAssertEqual(preview.data?["skills"]?.array?.first?["drifted"], .bool(true))
         XCTAssertTrue(String(describing: preview.data?["hint"]).contains("--overwrite-local-changes"),
             "A drifted dry run explains how to apply its plan")
+        let overwrite = try await h.run(["skill", "update", "foo", "--dry-run", "--overwrite-local-changes"])
+        XCTAssertNil(overwrite.data?["hint"], "An authorized overwrite needs no overwrite hint")
         for terminal in [false, true] {
             let refused = try await h.run(["skill", "update", "foo"], exit: 1,
                 terminal: terminal, expectsPrompt: false)
@@ -120,7 +185,8 @@ extension CLILibraryHandlerTests {
         let interrupted = ContinuousClock.now
         do {
             _ = try await h.run(["skill", "delete", "foo"], terminal: true,
-                beforeConfirmation: { throw POSIXError(.ECANCELED) })
+                beforeConfirmation: { throw POSIXError(.ECANCELED) },
+                afterProbe: { throw POSIXError(.EIO) })
             XCTFail("The prompt callback must throw")
         } catch { XCTAssertEqual((error as? POSIXError)?.code, .ECANCELED) }
         XCTAssertLessThan(interrupted.duration(to: .now), .seconds(5), "A failed prompt callback reaps its CLI child")

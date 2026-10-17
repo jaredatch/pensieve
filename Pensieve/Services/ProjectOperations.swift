@@ -13,9 +13,9 @@ func registerProject(_ project: Project,
     let registrationContext = ModelContext(context.container)
     registrationContext.insert(project)
     try registrationContext.save()
-    // This identifier came from the Project just saved in the same container.
-    // swiftlint:disable:next force_cast
-    let registered = context.model(for: project.persistentModelID) as! Project
+    guard let registered = context.model(for: project.persistentModelID) as? Project else {
+        throw CocoaError(.persistentStoreOperation)
+    }
     _ = intentReconciler?(context)
     notifier()
     return registered

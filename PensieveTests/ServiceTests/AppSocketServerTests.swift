@@ -75,12 +75,11 @@ final class AppSocketServerTests: XCTestCase {
                 default: break
                 }
                 if kind == "silent" || kind == "trickle" {
-                    XCTAssertThrowsError(try SocketTransport.readFrame(client, limit: 4_096,
-                        timeout: TestWait.hostedActionTimeoutSeconds)) { error in
-                        guard case SocketError.disconnected = error else {
-                            return XCTFail("A transport timeout must close without a usage frame: \(error)")
-                        }
-                    }
+                    let bytes = try SocketTransport.readFrame(client, limit: 4_096,
+                        timeout: TestWait.hostedActionTimeoutSeconds)
+                    let reply = try JSONDecoder().decode(CLIReply.self, from: bytes)
+                    XCTAssertEqual(reply.envelope.error?.code, "request_timeout")
+                    XCTAssertEqual(reply.envelope.error?.retryable, true)
                     XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - started, 1.5, kind)
                     return
                 }
@@ -99,9 +98,13 @@ final class AppSocketServerTests: XCTestCase {
     func testUnreadReplyTimesOutWhileAnotherClientIsServed() async throws {
         let directory = try SocketTestDirectory()
         let path = directory.path + "/s"
-        let server = try server(at: path) { request in
+        let finished = expectation(description: "large reply transport finished")
+        let server = try server(at: path, admit: { request in
+            if request.command == "large" { return .init(finish: { finished.fulfill() }) }
+            return .init()
+        }, handler: { request in
             .success(.string(request.command == "large" ? String(repeating: "x", count: 8 * 1_024 * 1_024) : "answered"))
-        }
+        })
         defer { server.stop() }
         let client = try SocketTransport.connect(to: path)
         defer { close(client) }
@@ -113,9 +116,8 @@ final class AppSocketServerTests: XCTestCase {
         }
         let next = try await exchange(path)
         XCTAssertTrue(next.envelope.ok)
+        await fulfillment(of: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
         try await BlockingWork.run {
-            // Drain after the reply deadline, while the former catch-all could still append its error frame.
-            Thread.sleep(forTimeInterval: 0.3)
             var received = Data()
             var bytes = [UInt8](repeating: 0, count: 16_384)
             let deadline = SocketTransport.deadline(after: TestWait.hostedActionTimeoutSeconds)
@@ -131,6 +133,51 @@ final class AppSocketServerTests: XCTestCase {
             XCTAssertFalse(received.contains(10), "A partial reply must not acquire another frame's terminator")
             let text = try XCTUnwrap(String(data: received, encoding: .utf8))
             XCTAssertFalse(text.contains("invalid_request"))
+        }
+    }
+
+    func testTimedOutTransportsKeepQueuedAndAcceptedWorkBounded() async throws {
+        for beforeAdmission in [true, false] {
+            let directory = try SocketTestDirectory()
+            let path = directory.path + "/s"
+            let gate = TestWait.Gate(owner: self)
+            defer { for _ in 0..<32 { gate.open() } }
+            var finished = 0
+            let wait: @MainActor () async -> Void = {
+                await BlockingWork.run { try? gate.wait() }
+                finished += 1
+            }
+            let server = try AppSocketServer(path: path,
+                handshake: CLIHandshake(bundlePath: "/fixture/Pensieve.app", appVersion: "1"),
+                fileService: directory.files,
+                timeouts: .init(request: 0.2, reply: 0.2, readiness: 0.1, handler: 0.1),
+                readiness: { if beforeAdmission { await wait() }; return nil },
+                handler: { _ in if !beforeAdmission { await wait() }; return .success(.null) })
+            defer { server.stop() }
+            for _ in 0..<32 {
+                let response = try await BlockingWork.run {
+                    let client = try SocketTransport.connect(to: path)
+                    defer { close(client) }
+                    _ = try SocketTransport.readFrame(client, limit: 4_096, timeout: TestWait.hostedActionTimeoutSeconds)
+                    try SocketTransport.writeFrame(CLIRequest(command: "skill list"), to: client,
+                        timeout: TestWait.hostedActionTimeoutSeconds)
+                    // upper-bound: a parked worker must return before the deliberately held work finishes.
+                    return try JSONDecoder().decode(CLIReply.self,
+                        from: SocketTransport.readFrame(client, limit: 4_096, timeout: 2)) // upper-bound: parked slot
+                }
+                XCTAssertEqual(response.envelope.error?.code, beforeAdmission ? "app_busy" : "command_still_running")
+                XCTAssertEqual(response.envelope.error?.retryable, beforeAdmission)
+            }
+            let refused = try await BlockingWork.run {
+                let client = try SocketTransport.connect(to: path)
+                defer { close(client) }
+                return try JSONSerialization.jsonObject(with: SocketTransport.readFrame(client, limit: 4_096,
+                    timeout: TestWait.hostedActionTimeoutSeconds)) as? [String: Any]
+            }
+            XCTAssertEqual(refused?["busy"] as? Bool, true, "Timed-out transports cannot free queued-handler capacity")
+            XCTAssertEqual(finished, 0)
+            for _ in 0..<32 { gate.open() }
+            await TestWait.until(failureMessage: "Accepted work must finish after its transport ends") { finished == 32 }
         }
     }
 
@@ -194,10 +241,12 @@ final class AppSocketServerTests: XCTestCase {
     }
 
     private func server(at path: String, credentials: SocketPeerCredentialReading = SocketPeerCredentials(),
+                        admit: AppSocketServer.Admit? = nil,
                         handler: @escaping AppSocketServer.Handler = { _ in .success(.string("answered")) }
     ) throws -> AppSocketServer {
         try AppSocketServer(path: path, handshake: CLIHandshake(bundlePath: "/fixture/Pensieve.app", appVersion: "1.2.3"),
-            fileService: FileService(), timeouts: .init(request: 0.2, reply: 0.2), credentials: credentials, handler: handler)
+            fileService: FileService(), timeouts: .init(request: 0.2, reply: 0.2), credentials: credentials, admit: admit,
+            handler: handler)
     }
 
     private func exchange(_ path: String) async throws -> CLIReply {

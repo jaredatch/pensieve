@@ -34,6 +34,9 @@ targets:
         SUPublicEDKey: HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=
     sources:
       - path: Pensieve
+      - path: skills/pensieve
+        type: folder
+        buildPhase: resources
     postBuildScripts:
       - name: Generate About credits
         script: |
@@ -138,6 +141,8 @@ targets:
       - path: Pensieve/Services/GitServiceHistory.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+CommandLink.swift
+      - path: Pensieve/Services/FileService+Types.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/FileService+Publication.swift
@@ -154,6 +159,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
+      - path: Pensieve/Models/PlatformTarget.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
@@ -174,6 +180,8 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+CommandLink.swift
+      - path: Pensieve/Services/FileService+Types.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/FileService+Publication.swift
@@ -253,9 +261,12 @@ targets:
     platform: macOS
     sources:
       - path: PensieveCLI
+      - path: Pensieve/Services/AgentDetectionService.swift
       - path: Pensieve/Services/CLIAppLauncher.swift
       - path: Pensieve/Services/CLIDesktopSession.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+CommandLink.swift
+      - path: Pensieve/Services/FileService+Types.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/FileService+Publication.swift
       - path: Pensieve/Services/VendorTemporaryDirectory.swift
@@ -273,6 +284,7 @@ targets:
       - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Services/CLIProtocol.swift
       - path: Pensieve/Services/SocketTransport.swift
+      - path: Pensieve/Services/SocketPeerCredentials.swift
       - path: Pensieve/Services/DaemonCLI.swift
       - path: Pensieve/Services/DaemonCLI+Deployed.swift
       - path: Pensieve/Services/DaemonCycleResult.swift

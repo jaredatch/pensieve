@@ -30,7 +30,8 @@ struct DeployOptions: ParsableArguments {
             if scope == "g" { global = true } else { project = scope }
         }
         return CLIRequest(command: command, arguments: skills, deployment: CLIDeployOptions(
-            agents: agent, global: global, project: project.map { ($0 as NSString).expandingTildeInPath },
+            agents: agent, global: global,
+            project: project.map { PathSyntax.hasSeparator($0) ? ($0 as NSString).expandingTildeInPath : $0 },
             machines: machine, dryRun: dryRun,
             workingDirectory: FileService().realPath(at: ".")))
     }

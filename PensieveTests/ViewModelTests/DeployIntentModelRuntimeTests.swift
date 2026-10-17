@@ -21,7 +21,8 @@ extension DeployIntentModelTests {
                 _ = try window.set(command == "window deploy", skill: h.skill, platform: .claudeCode,
                     target: .userWide, context: h.context)
             } else {
-                XCTAssertTrue(cli.handle(h.request(command), context: h.context).envelope.ok)
+                let reply = await cli.handle(h.request(command), context: h.context)
+                XCTAssertTrue(reply.envelope.ok)
             }
             await TestWait.until(timeout: .seconds(2), // upper-bound: zero-debounce scheduler callback, no network work
                 failureMessage: "Runtime did not nudge sync after \(command)") { drains == index + 2 && !scheduler.isSyncing }
@@ -29,7 +30,7 @@ extension DeployIntentModelTests {
         }
     }
 
-    func assertDeploymentErrorsStayWithTheirWindow() throws {
+    func assertDeploymentErrorsStayWithTheirWindow() async throws {
         let h = try CLIDeployFixture(reconcile: { context in
             var result = BatchResult()
             let projects = (try? context.fetch(FetchDescriptor<Project>())) ?? []
@@ -43,7 +44,8 @@ extension DeployIntentModelTests {
             return result
         })
         let tab = DeployIntentModel(service: h.service), bulk = DeployIntentModel(service: h.service)
-        XCTAssertEqual(h.handler.handle(h.request(), context: h.context).envelope.error?.code, "partial")
+        let failed = await h.handler.handle(h.request(), context: h.context)
+        XCTAssertEqual(failed.envelope.error?.code, "partial")
         XCTAssertNil(tab.error, "CLI failures belong only to the reply")
         XCTAssertNil(bulk.error)
         _ = try tab.set(true, skill: h.skill, platform: .claudeCode, target: .userWide, context: h.context)
@@ -54,7 +56,8 @@ extension DeployIntentModelTests {
         XCTAssertNotNil(bulk.error)
         bulk.error = nil
         XCTAssertEqual(tab.error, tabError, "Dismissing the bulk alert must not dismiss the tab's alert")
-        XCTAssertTrue(h.handler.handle(h.request(project: "Local"), context: h.context).envelope.ok)
+        let succeeded = await h.handler.handle(h.request(project: "Local"), context: h.context)
+        XCTAssertTrue(succeeded.envelope.ok)
         XCTAssertEqual(tab.error, tabError, "A successful CLI command must not clear a window's alert")
         bulk.reload(context: h.context)
         XCTAssertEqual(tab.error, tabError, "Refreshing another window must not clear this alert")

@@ -44,7 +44,7 @@ extension CLILibraryHandler {
                 slugs: Set(slugs), context: ModelContext(container)) { plans, checkouts in
                 if !options.dryRun, !options.overwriteLocalChanges,
                    plans.contains(where: { $0.update != nil && $0.drifted }) {
-                    throw SkillUpdateFlowError.localEditsRequireConfirmation
+                    return
                 }
                 for plan in plans {
                     if let update = plan.update {
@@ -54,12 +54,16 @@ extension CLILibraryHandler {
             }
         }
         for skill in skills { try requireSavedDraft(skill) }
+        if !options.dryRun, !options.overwriteLocalChanges,
+           plans.contains(where: { $0.update != nil && $0.drifted }) {
+            throw SkillUpdateFlowError.localEditsRequireConfirmation
+        }
         var fields: [String: CLIValue] = ["skills": .array(plans.map { plan in
             .object(["slug": .string(plan.slug), "action": .string(plan.update == nil ? "unchanged" : "update"),
                 "commit": plan.update.map { .string($0.source.headCommit) } ?? .null,
                 "drifted": .bool(plan.drifted), "installedCommit": .string(plan.origin.installedCommit)])
         })]
-        if plans.contains(where: { $0.update != nil && $0.drifted }) {
+        if !options.overwriteLocalChanges, plans.contains(where: { $0.update != nil && $0.drifted }) {
             fields["hint"] = .string("Review the edits, then pass --overwrite-local-changes to replace them.")
         }
         let data = CLIValue.object(fields)

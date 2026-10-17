@@ -20,12 +20,14 @@ final class AgentDetectionServiceTests: XCTestCase {
 
     func testOnlyOpenClawAndHermesPresent() {
         let probe = StubProbe(presentDirectories: [home + "/.openclaw", home + "/.hermes"])
-        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory)
+        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory,
+            applicationsDirectory: home + "/Applications")
         XCTAssertEqual(service.installedPlatforms(), [.openClaw, .hermes])
     }
 
     func testNonePresentReturnsEmpty() {
-        let service = AgentDetectionService(probe: StubProbe(), homeDirectory: TestPaths.homeDirectory)
+        let service = AgentDetectionService(probe: StubProbe(), homeDirectory: TestPaths.homeDirectory,
+            applicationsDirectory: home + "/Applications")
         XCTAssertEqual(service.installedPlatforms(), [])
     }
 
@@ -34,14 +36,16 @@ final class AgentDetectionServiceTests: XCTestCase {
             home + "/.claude", home + "/.grok", home + "/.cursor", home + "/.codex",
             home + "/.openclaw", home + "/.hermes"
         ])
-        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory)
+        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory,
+            applicationsDirectory: home + "/Applications")
         XCTAssertEqual(service.installedPlatforms(), PlatformTarget.allCases)
     }
 
     func testCLIOnlyCounts() {
         // Config dir absent, executable on PATH present → installed.
         let probe = StubProbe(presentExecutables: ["codex"])
-        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory)
+        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory,
+            applicationsDirectory: home + "/Applications")
         XCTAssertTrue(service.isInstalled(.codex))
         XCTAssertEqual(service.installedPlatforms(), [.codex])
     }
@@ -49,7 +53,7 @@ final class AgentDetectionServiceTests: XCTestCase {
     func testGrokDetectedByDirectory() {
         let service = AgentDetectionService(
             probe: StubProbe(presentDirectories: [home + "/.grok"]),
-            homeDirectory: TestPaths.homeDirectory
+            homeDirectory: TestPaths.homeDirectory, applicationsDirectory: home + "/Applications"
         )
         XCTAssertTrue(service.isInstalled(.grok))
         XCTAssertEqual(service.installedPlatforms(), [.grok])
@@ -58,20 +62,22 @@ final class AgentDetectionServiceTests: XCTestCase {
     func testGrokDetectedByExecutable() {
         let service = AgentDetectionService(
             probe: StubProbe(presentExecutables: ["grok"]),
-            homeDirectory: TestPaths.homeDirectory
+            homeDirectory: TestPaths.homeDirectory, applicationsDirectory: home + "/Applications"
         )
         XCTAssertTrue(service.isInstalled(.grok))
         XCTAssertEqual(service.installedPlatforms(), [.grok])
     }
 
     func testGrokAbsentWhenNoSignal() {
-        let service = AgentDetectionService(probe: StubProbe(), homeDirectory: TestPaths.homeDirectory)
+        let service = AgentDetectionService(probe: StubProbe(), homeDirectory: TestPaths.homeDirectory,
+            applicationsDirectory: home + "/Applications")
         XCTAssertFalse(service.isInstalled(.grok))
     }
 
     func testCursorDetectedViaAppBundle() {
-        let probe = StubProbe(presentDirectories: ["/Applications/Cursor.app"])
-        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory)
+        let probe = StubProbe(presentDirectories: [home + "/Applications/Cursor.app"])
+        let service = AgentDetectionService(probe: probe, homeDirectory: TestPaths.homeDirectory,
+            applicationsDirectory: home + "/Applications")
         XCTAssertTrue(service.isInstalled(.cursor))
         XCTAssertEqual(service.installedPlatforms(), [.cursor])
     }

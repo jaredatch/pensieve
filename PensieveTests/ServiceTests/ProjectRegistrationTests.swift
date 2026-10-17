@@ -2,6 +2,13 @@ import XCTest
 @testable import Pensieve
 
 final class ProjectRegistrationTests: XCTestCase {
+    func testRegistrationDoesNotForceCastSavedModels() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let source = try FileService().readFile(at: root.appendingPathComponent("Pensieve/Services/ProjectOperations.swift").path)
+        XCTAssertFalse(source.contains("as!"), "Registration must report a failed model cast instead of trapping")
+    }
+
     func testMakeProjectStoresRemoteIdentity() throws {
         let project = try ProjectRegistration.makeProject(
             name: "Pensieve",

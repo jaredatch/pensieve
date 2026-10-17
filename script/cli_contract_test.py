@@ -66,7 +66,7 @@ class CLIContractTests(unittest.TestCase):
         return envelope
 
     def peer(self, *, reply=None, bundle=None, protocol=1, commit=False, drop_reply=False,
-             reply_delay=0, release_reply=None):
+             reply_delay=0, release_reply=None, raw_reply=None, busy=False, allow_disconnect=False):
         listener = socket.socket(socket.AF_UNIX)
         self.addCleanup(listener.close)
         listener.bind(str(self.endpoint))
@@ -81,7 +81,7 @@ class CLIContractTests(unittest.TestCase):
                     connection.settimeout(10)
                     connection.sendall(json.dumps({"bundlePath": str(bundle or self.app),
                         "protocolVersion": protocol, "appVersion": self.info["CFBundleShortVersionString"],
-                        "supportsReadiness": commit, "supportsCommit": commit}).encode() + b"\n")
+                        "supportsReadiness": commit, "supportsCommit": commit, "busy": busy}).encode() + b"\n")
                     reader = connection.makefile("rb")
                     line = reader.readline(65537)
                     if line:
@@ -99,9 +99,9 @@ class CLIContractTests(unittest.TestCase):
                             time.sleep(reply_delay)
                         response = reply or {"envelope": {"schema": 1, "ok": True, "changed": False,
                             "data": [{"slug": "review", "name": "Review"}], "next": []}, "exitCode": 0}
-                        connection.sendall(json.dumps(response).encode() + b"\n")
+                        connection.sendall(raw_reply if raw_reply is not None else json.dumps(response).encode() + b"\n")
             except (BrokenPipeError, ConnectionResetError) as error:
-                if not reply_delay:
+                if not reply_delay and not allow_disconnect:
                     failures.append(error)
             except Exception as error:
                 failures.append(error)
@@ -131,6 +131,9 @@ class CLIContractTests(unittest.TestCase):
         output = subprocess.check_output(["/usr/bin/otool", "-L", str(BINARY)], text=True, timeout=30)
         self.assertNotIn("SwiftData", output)
         self.assertNotIn("SwiftUI", output)
+        if not self.info["CFBundleIdentifier"].endswith(".debug"):
+            sections = subprocess.check_output(["/usr/bin/otool", "-l", str(BINARY)], text=True, timeout=30)
+            self.assertNotIn("__llvm_prf", sections, "The packaged Release CLI must not write coverage profiles")
 
     def test_app_requests_and_aliases_carry_exact_commands_and_content_opt_in(self):
         # A failed stub must release its endpoint before another subtest starts.
@@ -191,6 +194,14 @@ class CLIContractTests(unittest.TestCase):
                     else:
                         self.assertEqual(targets["project"], ".")
                         self.assertTrue(targets["dryRun"])
+
+        for name in ("~notes", "~root"):
+            observed, finish = self.peer(commit=True)
+            try:
+                self.run_cli("deploy", "review", "-a", "claude", "-p", name)
+                self.assertEqual(observed[0]["deployment"]["project"], name)
+            finally:
+                finish()
 
         for prompted in (False, True):
             with self.subTest(project="tilde", prompted=prompted):
@@ -448,6 +459,68 @@ interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire
                     finish()
                 self.assertEqual(len(observed), 1)
 
+    def test_foreign_socket_peer_is_refused_before_handshake_is_trusted(self):
+        source = self.root / "peer.c"
+        source.write_text(r'''
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+static int foreign_peer(int fd, uid_t *user, gid_t *group) {
+    int result = getpeereid(fd, user, group);
+    if (!result) *user = getuid() + 1;
+    return result;
+}
+static int foreign_owner(const char *path, struct stat *info) {
+    int result = lstat(path, info);
+    if (!result && S_ISSOCK(info->st_mode)) info->st_uid = getuid() + 1;
+    return result;
+}
+__attribute__((used, section("__DATA,__interpose"))) static struct {
+    const void *replacement; const void *original;
+} replacements[] = {{foreign_peer, getpeereid}, {foreign_owner, lstat}};
+''')
+        library = self.root / "peer.dylib"
+        subprocess.run(["xcrun", "clang", "-dynamiclib", str(source), "-o", str(library)],
+                       check=True, capture_output=True, timeout=30)
+        self.environment["DYLD_INSERT_LIBRARIES"] = str(library)
+        for command in [("skill", "list"), ("doctor",)]:
+            observed, finish = self.peer(allow_disconnect=True)
+            try:
+                reply = self.run_cli(*command, code=1 if command == ("doctor",) else 3)
+                if command == ("doctor",):
+                    checks = {row["check"]: row for row in reply["data"]["checks"]}
+                    self.assertFalse(checks["socket"]["ok"], "A foreign socket owner fails doctor")
+                    self.assertFalse(checks["app"]["ok"], "A foreign peer cannot establish app identity")
+                else:
+                    self.assertEqual(reply["error"]["code"], "wrong_user")
+                self.assertEqual(observed, [], "No command may be sent to a foreign peer")
+            finally:
+                finish()
+
+    def test_busy_server_refuses_before_a_command_is_sent(self):
+        observed, finish = self.peer(busy=True, allow_disconnect=True)
+        try:
+            reply = self.run_cli("skill", "list", code=3)
+            self.assertEqual(reply["error"]["code"], "app_busy")
+            self.assertTrue(reply["error"]["retryable"])
+            self.assertEqual(observed, [])
+        finally:
+            finish()
+
+    def test_invalid_app_replies_have_protocol_advice(self):
+        for raw, expected in [(b"not-json\n", "invalid_response"),
+                              (b"x" * (16 * 1024 * 1024 + 1) + b"\n", "response_too_large")]:
+            with self.subTest(expected=expected):
+                observed, finish = self.peer(raw_reply=raw, reply_delay=.001)
+                try:
+                    error = self.run_cli("skill", "list", code=3)["error"]
+                    self.assertEqual(error["code"], expected)
+                    self.assertNotIn("isolated", error["hint"])
+                    self.assertNotIn("Open ", error["hint"])
+                finally:
+                    finish()
+
     def test_unavailable_stale_and_overlong_endpoints_are_never_removed(self):
         self.assertEqual(self.run_cli("skill", "list", "--no-input", code=3)["error"]["code"], "app_unavailable")
         stale = socket.socket(socket.AF_UNIX)
@@ -476,6 +549,8 @@ interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire
             "recorded_at": "2026-10-13T10:00:00Z"}]}))
         self.assertEqual(self.run_cli("status")["data"]["result"], "synced")
         self.assertEqual(self.run_cli("log", "--lines", "2")["data"]["lines"], ["first", "second"])
+        (self.root / "daemon.log").write_bytes(b"first\r\nsecond\r\nthird\r\n")
+        self.assertEqual(self.run_cli("log", "--lines", "2")["data"]["lines"], ["second", "third"])
         (self.root / "daemon.log").write_text("first\n\nsecond\n\n")
         self.assertEqual(self.run_cli("log", "--lines", "4")["data"]["lines"], ["first", "", "second", ""])
         human = self.run_cli("log", "--lines", "4", json_output=False).stdout
@@ -494,7 +569,7 @@ interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire
         root = self.run_cli("commands")["data"]["command"]
         commands = {command["commandName"]: command for command in root["subcommands"]}
         expected = {"skill", "skills", "agent", "machine", "project", "deployment", "deployed", "status", "log",
-                    "commands", "completion", "version", "help", "deploy", "undeploy", "sync", "install"}
+                    "commands", "completion", "version", "help", "deploy", "undeploy", "sync", "install", "doctor"}
         self.assertEqual(set(commands), expected)
         skill_commands = {command["commandName"]: command for command in commands["skill"]["subcommands"]}
         self.assertIn("ls", skill_commands["list"]["aliases"])
@@ -513,7 +588,39 @@ interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire
                      ("skill", "list", "--app-support"), ("--app-support", "--version")]:
             with self.subTest(arguments=args):
                 self.assertEqual(self.run_cli(*args, code=64, app_support=False)["error"]["code"], "usage")
+        for args in [("status", "--version"), ("--version", "--bogus")]:
+            error = self.run_cli(*args, code=64)["error"]
+            self.assertIn("pensieve", error["message"])
+            self.assertNotIn("version-options", error["message"])
         self.assertEqual(self.run_cli("--json", "--version")["data"]["version"], self.info["CFBundleShortVersionString"])
+
+    def test_every_catalog_command_accepts_output_options(self):
+        root = self.run_cli("commands")["data"]["command"]
+        def visit(command, path):
+            arguments = list(path)
+            for argument in command.get("arguments", []):
+                if argument["kind"] == "positional" and not argument["isOptional"]:
+                    choices = argument.get("allValues", [])
+                    arguments.append(choices[0] if choices else {
+                        "shell": "bash", "url": "https://github.com/fixture/skills", "path": str(self.root)
+                    }.get(argument["valueName"], "fixture"))
+            names = {name["name"] for argument in command.get("arguments", [])
+                     for name in argument.get("names", [])}
+            if "agent" in names and "global" in names:
+                arguments += ["--agent", "claude", "--global"]
+            with self.subTest(command=path):
+                result = subprocess.run([str(BINARY), *arguments, "--json", "--no-input", "--app-support", str(self.root)],
+                    env=self.environment, cwd=self.root, input="", text=True, capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 64, result.stdout + result.stderr)
+                envelope = json.loads(result.stdout)
+                self.assertEqual(envelope["schema"], 1, "Every command must honor --json")
+                if not command.get("subcommands") and path not in (["commands"], ["help"]):
+                    data = envelope.get("data")
+                    self.assertFalse(isinstance(data, dict) and ("serializationVersion" in data or "help" in data),
+                        "A leaf command must execute instead of falling back to help")
+            for child in command.get("subcommands", []):
+                visit(child, path + [child["commandName"]])
+        visit(root, [])
 
     def test_piped_human_output_stays_human_and_untruncated(self):
         rows = [{"slug": "skill-" + str(index), "name": "Full skill " + str(index)} for index in range(200)]
@@ -608,4 +715,6 @@ if __name__ == "__main__":
     BINARY = args.binary.resolve(strict=True)
     from cli_launch_tests import CLILaunchTests
     CLILaunchTests.binary = BINARY
+    from cli_skill_tests import CLISkillTests
+    CLISkillTests.binary = BINARY
     unittest.main(argv=[__file__, *remaining])

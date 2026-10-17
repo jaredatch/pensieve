@@ -50,10 +50,13 @@ protocol AgentDetectionServiceProtocol {
 struct AgentDetectionService: AgentDetectionServiceProtocol {
     private let probe: EnvironmentProbe
     private let home: String
+    private let applications: String
 
-    init(probe: EnvironmentProbe = SystemEnvironmentProbe(), homeDirectory: String) {
+    init(probe: EnvironmentProbe = SystemEnvironmentProbe(), homeDirectory: String,
+         applicationsDirectory: String = "/Applications") {
         self.probe = probe
         self.home = homeDirectory
+        self.applications = applicationsDirectory
     }
 
     func isInstalled(_ platform: PlatformTarget) -> Bool {
@@ -75,7 +78,7 @@ struct AgentDetectionService: AgentDetectionServiceProtocol {
                 || probe.executableExists(named: "hermes")
         case .cursor:
             return probe.directoryExists(at: home + "/.cursor")
-                || probe.directoryExists(at: "/Applications/Cursor.app")
+                || probe.directoryExists(at: applications + "/Cursor.app")
                 || probe.executableExists(named: "cursor")
         }
     }

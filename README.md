@@ -28,6 +28,17 @@ Pensieve needs macOS 26 or later and runs on Apple silicon and Intel. Every rele
 
 Pensieve isn't sandboxed, and that's on purpose. It writes symlinks and files into folders like `~/.claude` and `~/.cursor`, which the App Store sandbox doesn't allow. It's also beta software that writes to real agent folders, so keep a backup of any skills you care about. If you sync more than one Mac, update them all together: a new version can move the library to a format older versions won't open.
 
+## Command line
+
+`pensieve` lets you list, install, update and deploy skills, manage projects, and sync from a terminal or an agent. Homebrew installs the command for you. For a downloaded app, open Settings › General › Command Line and click Install…. macOS asks for your password to link the command into `/usr/local/bin`.
+
+```sh
+pensieve skill list --json
+pensieve doctor --json
+```
+
+Use `pensieve <command> --help` for options. Settings also offers a `pensieve` skill that teaches agents how to use the command. Add it to your library, then deploy it to your agents as you would any other skill.
+
 ## Build from source
 
 You'll need a Mac with Apple silicon, Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The Xcode project is generated from `project.yml`, so edit that file, not the project.

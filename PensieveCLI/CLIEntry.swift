@@ -12,7 +12,7 @@ enum CLIEntry {
             json: arguments.prefix { $0 != "--" }.contains("--json"))
     }
 
-    static func run(arguments: [String], appSupport: String, executable: String) -> Int32 {
+    static func run(arguments: [String], appSupport: String, executable: String, home: String) -> Int32 {
         let files = FileService()
         let app = URL(fileURLWithPath: files.realPath(at: executable))
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
@@ -21,24 +21,19 @@ enum CLIEntry {
         // This only selects the format for parser failures; successful commands use decoded options.
         var json = arguments.prefix { $0 != "--" }.contains("--json")
         do {
-            let command: ParsableCommand
-            let options: OutputOptions
-            if arguments.prefix(while: { $0 != "--" }).contains("--version") {
-                let version = try VersionOptions.parse(arguments)
-                command = VersionCommand()
-                options = version.output
-            } else {
-                command = try PensieveCommand.parseAsRoot(arguments)
-                guard let output = command as? OutputCommand else {
-                    var help = command
-                    try help.run()
-                    return 0
-                }
-                options = output.output
+            let command = try PensieveCommand.parseAsRoot(arguments)
+            if !(command is PensieveCommand), arguments.prefix(while: { $0 != "--" }).contains("--version") {
+                throw ValidationError("--version is a root option. Run pensieve --version.")
             }
+            guard let output = command as? OutputCommand else {
+                var help = command
+                try help.run()
+                return 0
+            }
+            let options = output.output
             json = options.json
             let result = try execute(command, app: app, info: info,
-                defaultAppSupport: appSupport, files: files, invocation: (options, arguments))
+                paths: (appSupport, home), files: files, invocation: (options, arguments))
             return printReply(result.reply, json: json, human: result.human)
         } catch {
             if PensieveCommand.exitCode(for: error).rawValue == 0 {
@@ -52,9 +47,10 @@ enum CLIEntry {
     }
 
     private static func execute(_ command: ParsableCommand, app: String, info: [String: Any],
-                                defaultAppSupport: String, files: FileServiceProtocol,
+                                paths: (appSupport: String, home: String), files: FileServiceProtocol,
                                 invocation: (OutputOptions, [String])) throws -> (reply: CLIReply, human: String?) {
         let (options, arguments) = invocation
+        let defaultAppSupport = paths.appSupport
         let appSupport = options.appSupport ?? defaultAppSupport
         let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
         let bundleID = info["CFBundleIdentifier"] as? String ?? "com.jaredatch.Pensieve"
@@ -72,7 +68,16 @@ enum CLIEntry {
                 bundleID: bundleID)
             return (CLIConfirmation.send(request, client: client, options: options, arguments: arguments), nil)
         }
-        if command is VersionCommand {
+        if command is DoctorCommand {
+            return (CLIDoctor(files: files, app: app,
+                socket: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID, fileService: files),
+                home: paths.home,
+                searchPath: ProcessInfo.processInfo.environment["PATH"] ?? "",
+                applicationsDirectory: files.realPath(at: appSupport) == files.realPath(at: defaultAppSupport)
+                    ? "/Applications" : paths.home + "/Applications",
+                developerDirectory: ProcessInfo.processInfo.environment["DEVELOPER_DIR"]).run(), nil)
+        }
+        if command is VersionCommand || (command as? PensieveCommand)?.version == true {
             return (.success(.object(["version": .string(version)])), "pensieve \(version)\n")
         }
         if command is CommandsCommand {
@@ -174,11 +179,6 @@ enum CLIEntry {
     }
 }
 
-private struct VersionOptions: ParsableArguments {
-    @OptionGroup var output: OutputOptions
-    @Flag var version = false
-}
-
 private protocol OutputCommand: ParsableCommand {
     var output: OutputOptions { get }
 }
@@ -213,3 +213,5 @@ extension SkillUpdateCommand: OutputCommand {}
 extension SkillDeleteCommand: OutputCommand {}
 extension ProjectAddCommand: OutputCommand {}
 extension ProjectRemoveCommand: OutputCommand {}
+
+extension DoctorCommand: OutputCommand {}

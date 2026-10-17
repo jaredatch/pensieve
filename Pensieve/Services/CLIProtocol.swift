@@ -97,6 +97,7 @@ struct CLIHandshake: Codable {
     let appVersion: String
     var supportsReadiness: Bool?
     var supportsCommit: Bool?
+    var busy: Bool?
 }
 
 struct CLIReadinessAcknowledgement: Codable {

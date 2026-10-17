@@ -14,6 +14,11 @@ final class CLILibraryHandlerTests: XCTestCase {
         try h.files.writeFile(at: h.repository + "/skills/bar/SKILL.md", content: CLILibraryFixture.document("bar"))
         try await h.commit()
         let before = try h.tree(h.paths.storeRoot)
+        let unknown = try await h.run(["install", h.sourceURL, "--skill", "unknown", "--dry-run"], exit: 1)
+        XCTAssertEqual(unknown.error?.message, "A selected skill was not found. Preview the repository without --skill.")
+        XCTAssertNil(unknown.data, "An unknown selection does not enumerate candidate slugs")
+        let catalog = try await h.run(["install", h.sourceURL, "--dry-run"])
+        XCTAssertEqual(catalog.data?["skills"]?.array?.map { $0["slug"] }, [.string("bar"), .string("foo")])
         let preview = try await h.run(["install", h.sourceURL, "--skill", "foo", "--dry-run"])
         XCTAssertEqual(preview.data?["skills"]?.array?.count, 1)
         XCTAssertEqual(preview.data?["skills"]?.array?.first?["slug"], .string("foo"))
@@ -95,6 +100,15 @@ final class CLILibraryHandlerTests: XCTestCase {
         let refused = try await h.run(["skill", "update", "foo", "--yes"], exit: 1)
         XCTAssertEqual(refused.error?.code, "local_changes")
         XCTAssertEqual(try h.files.readFile(at: h.paths.skillsDir + "/foo/asset.txt"), "local edit")
+        remote.arm()
+        async let planning = h.run(["skill", "update", "foo", "--yes"], exit: 5)
+        await TestWait.until(failureMessage: "Update planning reaches the remote boundary") { remote.gate.waiterCount == 1 }
+        let skill = try XCTUnwrap(h.context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "foo" })
+        h.runtime.library.noteEditorChanged(skill, body: "draft during planning")
+        remote.gate.open()
+        let draftRefusal = try await planning
+        XCTAssertEqual(draftRefusal.error?.code, "unsaved_draft", "A new draft takes precedence over local drift")
+        h.runtime.library.discardDraft(skill)
         try await assertDriftRefusalBeforeConfirmation(h)
         try await assertChangedUpdateConfirmation(h)
         let updated = try await h.run(["skill", "update", "foo", "--overwrite-local-changes", "--yes"])
@@ -128,7 +142,30 @@ final class CLILibraryHandlerTests: XCTestCase {
         XCTAssertTrue(h.runtime.library.hasUnsavedChanges(for: skill))
     }
 
+    private func assertLongSlugResolvesForDeleteAndDeployPreviews() async throws {
+        let h = try CLILibraryFixture()
+        defer { h.stop() }
+        try await h.start()
+        let slug = String(repeating: "a", count: 70)
+        let skill = try XCTUnwrap(h.runtime.library.createSkill(name: slug, description: "Long name",
+            body: "Instructions", tags: [], context: h.context))
+        XCTAssertEqual(skill.directoryName, slug)
+        await h.runtime.library.manifestSaves?.waitUntilIdle()
+        let folder = h.root + "/local-project"
+        try h.files.createDirectory(at: folder)
+        h.context.insert(Project(name: "Local", path: folder))
+        try h.context.save()
+        let before = try h.tree(h.paths.storeRoot)
+        let deletion = try await h.run(["skill", "delete", slug, "--dry-run"])
+        XCTAssertTrue(deletion.ok, "A real 70-character slug must resolve for delete")
+        let deployment = try await h.run(["deploy", slug, "-a", "claude", "-p", folder, "--dry-run"])
+        XCTAssertTrue(deployment.ok, "A real 70-character slug must resolve for deploy")
+        XCTAssertEqual(try h.tree(h.paths.storeRoot), before)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Skill>()), 1)
+    }
+
     func testBuiltDeletePreviewRemovesDeploysAndWaitsForManifest() async throws {
+        try await assertLongSlugResolvesForDeleteAndDeployPreviews()
         let h = try CLILibraryFixture(diskBacked: true)
         defer { h.stop() }
         try await h.start()
@@ -169,6 +206,7 @@ final class CLILibraryHandlerTests: XCTestCase {
     }
 
     func testBuiltProjectPreviewRegistrationRepeatAndRemoval() async throws {
+        try await assertProjectPathSpellings()
         let h = try CLILibraryFixture()
         defer { h.stop() }
         try await h.start()

@@ -46,7 +46,7 @@ final class CLILibraryFixture {
                 skillStore: SkillStore(fileService: files, baseDir: paths.skillsDir, storeRoot: paths.storeRoot),
                 userRulesDirectory: deployPaths.cursorUserRulesDirectory),
             agentDetection: AgentDetectionService(probe: SystemEnvironmentProbe(fileService: files, pathEntries: []),
-                homeDirectory: root + "/home"),
+                homeDirectory: root + "/home", applicationsDirectory: root + "/home/Applications"),
             deployStateStore: DeployStateStore(fileService: files, appSupportDir: endpoint.path),
             skillsDirectory: paths.skillsDir)
         let defaults = try paths.makeDefaults()
@@ -106,19 +106,12 @@ final class CLILibraryFixture {
 
     func run(_ arguments: [String], exit: Int32 = 0, terminal: Bool = false,
              environment extra: [String: String] = [:], expectsPrompt: Bool? = nil,
-             beforeConfirmation: (() async throws -> Void)? = nil) async throws -> CLIEnvelope {
+             beforeConfirmation: (() async throws -> Void)? = nil,
+             afterProbe: @escaping () throws -> Void = {}) async throws -> CLIEnvelope {
         guard beforeConfirmation == nil || terminal else { throw POSIXError(.EINVAL) }
-        let process = Process()
-        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
-        process.arguments = arguments + ["--json", "--app-support", paths.appSupportDir]
-        var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = root + "/home"
-        environment["CFFIXED_USER_HOME"] = root + "/home"
-        environment.merge(extra) { _, new in new }
-        process.environment = environment
+        let process = makeProcess(arguments, environment: extra)
         let output = Pipe(), errors = Pipe(), input = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
+        process.standardOutput = output; process.standardError = errors
         var controllerFD: Int32 = -1, terminalFD: Int32 = -1
         if terminal {
             guard openpty(&controllerFD, &terminalFD, nil, nil, nil) == 0 else { throw POSIXError(.EIO) }
@@ -131,10 +124,11 @@ final class CLILibraryFixture {
         }
         defer { if controllerFD >= 0 { Darwin.close(controllerFD); Darwin.close(terminalFD) } }
         async let running = BlockingWork.run {
-            try CLIProcessProbe.run(process, timeout: 40, afterLaunch: {
-                errors.fileHandleForWriting.closeFile()
-                output.fileHandleForWriting.closeFile()
+            let result = try CLIProcessProbe.run(process, timeout: 40, afterLaunch: {
+                errors.fileHandleForWriting.closeFile(); output.fileHandleForWriting.closeFile()
             })
+            try afterProbe()
+            return result
         }
         var prefix = Data()
         if let beforeConfirmation {
@@ -144,7 +138,7 @@ final class CLILibraryFixture {
                 _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) }
             } catch {
                 if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                _ = try await running
+                _ = try? await running
                 throw error
             }
         }
@@ -157,6 +151,19 @@ final class CLILibraryFixture {
             XCTAssertTrue((String(data: diagnostics, encoding: .utf8) ?? "").contains("Apply this plan?"))
         } else { XCTAssertFalse((String(data: diagnostics, encoding: .utf8) ?? "").contains("Apply this plan?")) }
         return try JSONDecoder().decode(CLIEnvelope.self, from: bytes)
+    }
+
+    private func makeProcess(_ arguments: [String], environment extra: [String: String]) -> Process {
+        let process = Process()
+        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
+        process.arguments = arguments + ["--json", "--app-support", paths.appSupportDir]
+        process.currentDirectoryURL = URL(fileURLWithPath: root)
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = root + "/home"
+        environment["CFFIXED_USER_HOME"] = root + "/home"
+        environment.merge(extra) { _, new in new }
+        process.environment = environment
+        return process
     }
 
     func skill(_ slug: String = "foo") throws -> Skill {

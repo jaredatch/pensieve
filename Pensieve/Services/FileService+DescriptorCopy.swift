@@ -6,7 +6,7 @@ extension FileService {
     /// The caller owns the returned descriptor and preserves its operation and path in errors.
     static func openDirectory(at path: String, relativeTo directoryDescriptor: Int32 = AT_FDCWD,
                               reportingPath: String? = nil, operation: String = "open") throws -> Int32 {
-        let descriptor = openat(directoryDescriptor, path, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_NONBLOCK)
+        let descriptor = openat(directoryDescriptor, path, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else {
             throw DescriptorFileCopy.error(operation, path: reportingPath ?? path, code: errno)
         }

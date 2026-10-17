@@ -31,13 +31,13 @@ final class IntentEndToEndTests: XCTestCase {
         if !tempDir.isEmpty { try? FileManager.default.removeItem(atPath: tempDir) }
     }
 
-    func testIntentMaterializesOnTargetClone() throws {
+    func testIntentMaterializesOnTargetClone() async throws {
         let harness = try makeHarness()
         let managed = try skill("managed", context: harness.contextA)
 
         let request = CLIRequest(command: "deploy", arguments: [managed.directoryName],
             deployment: CLIDeployOptions(agents: ["claude", "codex"], global: true, machines: [machineB]))
-        let outcome = CLIDeployHandler(service: harness.modelA.service, files: FileService())
+        let outcome = await CLIDeployHandler(service: harness.modelA.service, files: FileService())
             .handle(request, context: harness.contextA)
         XCTAssertTrue(outcome.envelope.ok)
         XCTAssertEqual(outcome.envelope.next, ["pensieve sync"])

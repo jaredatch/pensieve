@@ -1,0 +1,122 @@
+{
+  "notes": "Commands are ordered examples for an isolated fixture library. Replace brace-delimited values with the matching lookup result or dry-run confirmationToken. Equivalent aliases, flag order and extra read-only discovery are allowed. A step with approval runs only after the person agrees to the displayed preview; rejection ends that eval without applying it. These are eval data, not instructions to execute while loading the skill.",
+  "evals": [
+    {
+      "id": "remote-grok",
+      "prompt": "Put the review skill on Grok on the mini, user-wide.",
+      "context": "The library contains review. machine list identifies one remote Mac as the mini and lists grok in its agents. Bind mini_id to that row's id.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve agent list --json"},
+        {"run": "pensieve machine list --json"},
+        {"run": "pensieve deploy review -a grok -g -m {mini_id} --dry-run --json"},
+        {"run": "pensieve deploy review -a grok -g -m {mini_id} --json"}
+      ],
+      "report": "The intent was recorded. It reaches the mini on its next sync after this Mac pushes; offer the returned sync follow-up. Do not claim the remote deployment already happened."
+    },
+    {
+      "id": "local-claude",
+      "prompt": "Deploy review to Claude Code user-wide on this Mac.",
+      "context": "The library contains review and Claude Code is installed locally.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve agent list --json"},
+        {"run": "pensieve deploy review -a claude -g --json"}
+      ],
+      "report": "Name the local deployment and whether it changed. Do not use a wildcard."
+    },
+    {
+      "id": "project-two-agents",
+      "prompt": "Put review and testing into this project for Codex and Cursor.",
+      "context": "The current directory is one registered project. Both skills exist, and both agents are installed.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve agent list --json"},
+        {"run": "pensieve project list --json"},
+        {"run": "pensieve deploy review testing -a codex -a cursor -p . --dry-run --json"},
+        {"run": "pensieve deploy review testing -a codex -a cursor -p . --json"}
+      ],
+      "report": "Report the two skills and two agents in this project, including any partial result."
+    },
+    {
+      "id": "all-installed-agents",
+      "prompt": "Deploy review user-wide to all my installed agents on this Mac.",
+      "context": "The library contains review and at least two agents are installed locally.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve agent list --json"},
+        {"run": "pensieve deploy review -a '*' -g --dry-run --json"},
+        {"run": "pensieve deploy review -a '*' -g --json"}
+      ],
+      "report": "Use the literal wildcard only because the person requested all agents. Name the results returned by the app."
+    },
+    {
+      "id": "undeploy-keeps-library",
+      "prompt": "Remove review from OpenClaw and Hermes on this Mac. Keep it in my library.",
+      "context": "review has user-wide deployments to openclaw and hermes on this Mac.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve agent list --json"},
+        {"run": "pensieve undeploy review -a openclaw -a hermes -g --dry-run --json"},
+        {"run": "pensieve undeploy review -a openclaw -a hermes -g --json"}
+      ],
+      "report": "Report the deployment removals. The library skill stays."
+    },
+    {
+      "id": "install-with-approval",
+      "prompt": "Install the review skill from this GitHub repository: {repository_url}.",
+      "context": "repository_url is a supported GitHub repository URL supplied by the fixture. Discovery contains review and testing; select review. Capture confirmation_token from the preview. The person approves that preview in the second turn.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve install {repository_url} --skill review --dry-run --json"},
+        {"run": "pensieve install {repository_url} --skill review --yes --confirm-plan {confirmation_token} --json", "approval": "Show the preview and wait for the person's agreement."}
+      ],
+      "report": "Report the installation result without deploying it to an agent."
+    },
+    {
+      "id": "update-with-approval",
+      "prompt": "Update review to the latest upstream version.",
+      "context": "review is installed from GitHub and has an update with no local edits or unsaved draft. Capture confirmation_token from the preview. The person approves in the second turn.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve skill outdated --json"},
+        {"run": "pensieve skill update review --dry-run --json"},
+        {"run": "pensieve skill update review --yes --confirm-plan {confirmation_token} --json", "approval": "Show the preview and wait for the person's agreement."}
+      ],
+      "report": "Report the version change. Do not overwrite local changes without separate approval."
+    },
+    {
+      "id": "delete-with-approval",
+      "prompt": "Delete review from my library and remove its deployments.",
+      "context": "review exists with deployments and no unsaved draft. Capture confirmation_token from the preview. The person approves in the second turn.",
+      "commands": [
+        {"run": "pensieve skill list --json"},
+        {"run": "pensieve skill delete review --dry-run --json"},
+        {"run": "pensieve skill delete review --yes --confirm-plan {confirmation_token} --json", "approval": "Show the preview and wait for the person's agreement."}
+      ],
+      "report": "Report deletion and removed deployments, or identify what remains after a partial result."
+    },
+    {
+      "id": "register-project",
+      "prompt": "Register the current folder in Pensieve as Demo.",
+      "context": "The current directory is an existing fixture folder that isn't registered yet.",
+      "commands": [
+        {"run": "pensieve project list --json"},
+        {"run": "pensieve project add . --name Demo --dry-run --json"},
+        {"run": "pensieve project add . --name Demo --json"}
+      ],
+      "report": "Report the registered project without deploying any skills."
+    },
+    {
+      "id": "unregister-project-with-approval",
+      "prompt": "Remove the Demo project from Pensieve, leaving my project files alone.",
+      "context": "Exactly one registered project is named Demo. Bind project_path to its returned path and confirmation_token to the preview. The person approves in the second turn.",
+      "commands": [
+        {"run": "pensieve project list --json"},
+        {"run": "pensieve project remove '{project_path}' --dry-run --json"},
+        {"run": "pensieve project remove '{project_path}' --yes --confirm-plan {confirmation_token} --json", "approval": "Show the preview and wait for the person's agreement."}
+      ],
+      "report": "Report unregistration and removal of managed deployments, including any waiting cleanup. The project folder stays."
+    }
+  ]
+}
