@@ -169,6 +169,26 @@ final class CLIDeployHandlerTests: XCTestCase {
         }
     }
 
+    func testAFarLongerUnknownNameGetsNoSuggestionsAndAnswersAtOnce() async throws {
+        let h = try CLIDeployFixture()
+        for slug in ["aardvark", "revise", "reviews"] { h.context.insert(Skill(name: slug, directoryName: slug)) }
+        try h.context.save()
+        let name = String(repeating: "r", count: 50_000)
+        let before = try h.tree()
+        let started = Date()
+        let result = await h.handler.handle(h.request(skills: [name]), context: h.context)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5,
+                          "A name far longer than any skill must not be ranked against every skill")
+        XCTAssertEqual(result.exitCode, 4)
+        XCTAssertEqual(result.envelope.error?.code, "skill_not_found")
+        XCTAssertEqual(result.envelope.error?.hint, "Run pensieve skill list.",
+                       "No skill can be close to a name far longer than every skill, so none is suggested")
+        XCTAssertEqual(try h.tree(), before)
+        let near = await h.handler.handle(h.request(skills: [String(repeating: "r", count: 12)]), context: h.context)
+        XCTAssertTrue(near.envelope.error?.hint.hasPrefix("Closest names:") == true,
+                      "A name within reach of the skills' lengths keeps its suggestions")
+    }
+
     func testAmbiguousMachinesListIDsAndAnIDDisambiguatesTheTarget() async throws {
         let otherID = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
         let states = [CLIDeployFixture.remoteID, otherID].map { machineID in
