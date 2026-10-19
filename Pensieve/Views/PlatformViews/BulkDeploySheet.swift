@@ -60,6 +60,12 @@ struct BulkDeploySheet: View {
                 chooser
             }
 
+            if let warning = intentModel.catalogRefreshWarning {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             Spacer(minLength: 0)
             footer
         }

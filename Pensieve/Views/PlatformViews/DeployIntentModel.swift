@@ -10,6 +10,7 @@ final class DeployIntentModel {
     var dependencies: DeployIntentDependencies { service.dependencies }
     var machines: [DeployIntentMachine] { service.machines }
     var availablePlatforms: [PlatformTarget] { service.availablePlatforms }
+    private(set) var catalogRefreshWarning: String?
     var error: String?
 
     init(service: DeployMutationServicing) { self.service = service }
@@ -19,6 +20,7 @@ final class DeployIntentModel {
     }
 
     func reload(context: ModelContext) {
+        catalogRefreshWarning = nil
         do {
             try service.reload(context: context)
             error = nil
@@ -63,9 +65,17 @@ final class DeployIntentModel {
     @discardableResult
     func setSelected(_ selected: Bool, machineID: String, skill: Skill, platform: PlatformTarget,
                      context: ModelContext) throws -> BatchResult? {
-        try reportErrors {
+        let result = try reportErrors {
             try service.setSelected(selected, machineID: machineID, skill: skill, platform: platform, context: context)
         }
+        // Refreshing the picker must not turn an already applied change into a failure.
+        do {
+            try service.reload(context: context)
+            catalogRefreshWarning = nil
+        } catch {
+            catalogRefreshWarning = "Catalog refresh failed: \(error.localizedDescription)"
+        }
+        return result
     }
 
     func apply(skills: [Skill], platforms: Set<PlatformTarget>, selectedMachineIDs: Set<String>,
