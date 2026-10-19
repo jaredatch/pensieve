@@ -154,6 +154,10 @@ private final class UnlistableDirFileService: FileServiceProtocol {
     func symlinkTarget(at path: String) throws -> String { try real.symlinkTarget(at: path) }
     func isSymlink(at path: String) -> Bool { real.isSymlink(at: path) }
     func contentsHash(at path: String) throws -> String { try real.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { real.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try real.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try real.storeTemporaryParent(root: root) }
 }
 
 /// PLAN-12 / 12.3 — the launch-time rebuild-from-disk + gated one-time migration. Proves the GUI is

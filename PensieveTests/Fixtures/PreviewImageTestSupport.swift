@@ -87,4 +87,8 @@ final class PreviewImageFileSpy: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { files.isSymlink(at: path) }
     func isRegularFile(at path: String) -> Bool { files.isRegularFile(at: path) }
     func contentsHash(at path: String) throws -> String { try files.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { files.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try files.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try files.storeTemporaryParent(root: root) }
 }

@@ -10,9 +10,7 @@ private struct RecordedLink: Hashable {
     let projectPath: String?
 }
 
-private struct StubFailure: LocalizedError {
-    let errorDescription: String? = "stub failure"
-}
+private struct StubFailure: LocalizedError { let errorDescription: String? = "stub failure" }
 
 private struct SeededRule {
     let skill: Skill
@@ -75,6 +73,12 @@ private final class StubDetection: AgentDetectionServiceProtocol {
 }
 
 private struct StubFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     let linkService: RecordingLinkService
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws {}
@@ -185,14 +189,10 @@ final class CategoryReconcileWiringTests: XCTestCase {
     }
 
     @MainActor
-    private func skillCount(context: ModelContext) throws -> Int {
-        try context.fetch(FetchDescriptor<Skill>()).count
-    }
+    private func skillCount(context: ModelContext) throws -> Int { try context.fetch(FetchDescriptor<Skill>()).count }
 
     @MainActor
-    private func projectCount(context: ModelContext) throws -> Int {
-        try context.fetch(FetchDescriptor<Project>()).count
-    }
+    private func projectCount(context: ModelContext) throws -> Int { try context.fetch(FetchDescriptor<Project>()).count }
 
     @MainActor
     func testSetSkillReconcilesAssignAndUnassign() throws {

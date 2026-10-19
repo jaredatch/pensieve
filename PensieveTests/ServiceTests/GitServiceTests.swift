@@ -856,6 +856,10 @@ private struct AskpassWriteObservingFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
 }
 
 extension GitServiceTests {

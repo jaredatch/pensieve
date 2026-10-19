@@ -3,6 +3,12 @@ import XCTest
 
 final class SkillStoreTests: XCTestCase {
     private struct FakeFS: FileServiceProtocol {
+        // Canonical folders in this in-memory fixture have no ancestor aliases.
+        func resolveRealPath(at path: String) throws -> String {
+            guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+            return path
+        }
+
         var symlink: Bool
         var body: String
 

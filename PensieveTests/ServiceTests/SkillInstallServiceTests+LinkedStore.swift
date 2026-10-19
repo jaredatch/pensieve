@@ -24,7 +24,12 @@ extension SkillInstallServiceTests {
             let resolved = try fileService.resolveRealPath(at: root)
             XCTAssertTrue(resolved.hasPrefix("/private/"))
             XCTAssertEqual(fileService.realPath(at: String(resolved.dropFirst(8))), resolved)
-            try exerciseLinkedStore(root: resolved)
+            for spelling in [resolved, String(resolved.dropFirst(8))] {
+                try exerciseLinkedStore(root: spelling)
+                try fileService.deleteDirectory(at: spelling)
+                try fileService.createDirectory(at: spelling)
+                try fileService.deleteDirectory(at: tempDir + "/Vendor Fixture")
+            }
         }
     }
 
@@ -109,15 +114,30 @@ extension SkillInstallServiceTests {
     }
 
     private func assertVendorSweep(root: String) throws {
-        let stale = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService)
-        try fileService.writeFile(at: stale + "/partial", content: "partial")
+        let wrapped = FaultyFileService(wrapped: fileService)
+        let canonical = try fileService.resolveRealPath(at: root)
+        let canonicalNamespace = try VendorTemporaryDirectory.namespace(storeRoot: canonical, fileService: fileService)
+        let wrappedNamespace = try VendorTemporaryDirectory.namespace(storeRoot: root, fileService: wrapped)
+        XCTAssertEqual(wrappedNamespace.parent, canonicalNamespace.parent)
+        XCTAssertEqual(wrappedNamespace.prefix, canonicalNamespace.prefix)
+        XCTAssertEqual(try wrapped.resolveRealPath(at: root), canonical)
+        var stale: [String] = []
+        for kind in ["vendor", "manifest-build", "machine-state"] {
+            let path = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: kind)
+            try fileService.writeFile(at: kind == "machine-state" ? path : path + "/partial", content: "partial")
+            stale.append(path)
+        }
+        let legacy = (root as NSString).deletingLastPathComponent + "/"
+            + (root as NSString).lastPathComponent + ".vendor-" + UUID().uuidString + ".tmp"
+        try fileService.writeFile(at: legacy + "/partial", content: "legacy")
+        stale.append(legacy)
         let lockPath = tempDir + "/sync.lock"
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         SkillInstallService.cleanupVendorTemps(fileService: fileService, storeRoot: root, lockPath: lockPath)
-        XCTAssertTrue(fileService.directoryExists(at: stale))
+        for path in stale { XCTAssertTrue(try fileService.entryExistsWithoutFollowingLinks(at: path), path) }
         lock.release()
         SkillInstallService.cleanupVendorTemps(fileService: fileService, storeRoot: root, lockPath: lockPath)
-        XCTAssertFalse(fileService.directoryExists(at: stale))
+        for path in stale { XCTAssertFalse(try fileService.entryExistsWithoutFollowingLinks(at: path), path) }
     }
 
     @MainActor

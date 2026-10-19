@@ -29,6 +29,8 @@ struct ReverseListingFileService: FileServiceProtocol {
         try wrapped.listDirectory(at: path).reversed()
     }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 struct FailingCopyFileService: FileServiceProtocol {
@@ -67,6 +69,8 @@ struct FailingCopyFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 final class RecordingVendorFileService: FileServiceProtocol {
@@ -115,6 +119,8 @@ final class RecordingVendorFileService: FileServiceProtocol {
         reachedSwap = true
         try wrapped.replaceItem(at: path, with: sourcePath)
     }
+
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
@@ -160,6 +166,8 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
     }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 final class CrashManifest: ManifestReadWriting {

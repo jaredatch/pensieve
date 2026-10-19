@@ -16,6 +16,8 @@ protocol FileServiceProtocol {
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
+    /// Shared namespace key for store publishers, including a not-yet-created store.
+    func storeKey(root: String) throws -> String
     /// Existing outside directory on the store device for rename-only publication.
     func storeTemporaryParent(root: String) throws -> String
     func cleanStoreIntermediates(at root: String) throws

@@ -45,6 +45,12 @@ final class DeployStateBackfillTests: XCTestCase {
         let foreignLink = claudeRoot + "/foreign"
         try fileService.createSymlink(at: ownedLink, pointingTo: paths.pensieveSkillsDir + "/owned")
         try fileService.createSymlink(at: foreignLink, pointingTo: tempDir + "/outside/foreign")
+        for slug in ["dangling", "loop"] {
+            let canonical = paths.pensieveSkillsDir + "/" + slug
+            try fileService.createSymlink(at: canonical,
+                                          pointingTo: slug == "loop" ? canonical : tempDir + "/absent")
+            try fileService.createSymlink(at: claudeRoot + "/" + slug, pointingTo: canonical)
+        }
         try store.replaceAll([stateRecord(slug: "owned", platform: .claudeCode, artifactPath: ownedLink,
                                           recordedAt: "2026-01-01T00:00:00Z")])
 

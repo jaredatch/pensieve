@@ -2,6 +2,12 @@ import XCTest
 @testable import Pensieve
 
 private struct SnapshotFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     let document: String
 
     func readFile(at path: String) throws -> String { document }
@@ -27,6 +33,12 @@ private struct SnapshotFileService: FileServiceProtocol {
 /// A skill directory of named text files, for the inventory that rides the snapshot: the root lists them,
 /// each is a regular file holding `document`, nothing is a directory but the root.
 private struct InventoryFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     let document: String
     let entries: [String]
 

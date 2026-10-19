@@ -125,6 +125,10 @@ private struct InjectedListingFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) + extra }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
 }
 
 func stateYAML(machineID: String, schema: Int = 1) -> String {

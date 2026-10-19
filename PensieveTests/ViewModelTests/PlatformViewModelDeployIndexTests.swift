@@ -81,6 +81,12 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
     /// `deployOne`'s C7 and leaf guards admit the skill (the same shape `PlatformViewModelTests`'
     /// `CleanFileService` gives the deploy tests). The real store above does the ledger IO itself.
     private struct RegularLeafFileService: FileServiceProtocol {
+        // Canonical folders in this in-memory fixture have no ancestor aliases.
+        func resolveRealPath(at path: String) throws -> String {
+            guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+            return path
+        }
+
         func readFile(at path: String) throws -> String { "" }
         func writeFile(at path: String, content: String) throws {}
         func deleteFile(at path: String) throws {}

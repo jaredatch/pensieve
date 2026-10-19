@@ -44,17 +44,6 @@ final class DeployReconcilerPruneTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: agentDir + "/" + name, withDestinationPath: target)
     }
 
-    private func record(slug: String, artifactPath: String) -> DeployStateRecord {
-        DeployStateRecord(
-            slug: slug,
-            platform: PlatformTarget.claudeCode.rawValue,
-            scope: "user",
-            projectIdentityKey: nil,
-            artifactPath: artifactPath,
-            recordedAt: "2026-07-17T00:00:00Z"
-        )
-    }
-
     func testInjectedPruneDirectoryKeepsItsAgentIdentity() throws {
         try link("gone", to: storeSkillsDir + "/gone")
         let result = DeployReconciler(
@@ -87,10 +76,17 @@ final class DeployReconcilerPruneTests: XCTestCase {
         try fileService.createSymlink(at: outside + "/kept", pointingTo: storeSkillsDir + "/kept")
         let redirected = tempDir + "/redirected-agent/skills"
         try fileService.createSymlink(at: redirected, pointingTo: outside)
+        for slug in ["dangling", "loop"] {
+            let canonical = storeSkillsDir + "/" + slug
+            try fileService.createSymlink(at: canonical,
+                                          pointingTo: slug == "loop" ? canonical : tempDir + "/absent")
+            try link(slug, to: canonical)
+        }
         let result = makeReconciler(agentDirs: [agentDir, redirected]).pruneDangling()
         XCTAssertEqual(result.removed, [owned])
         XCTAssertFalse(fileService.isSymlink(at: owned))
         XCTAssertEqual(result.skippedDirs, [redirected])
+        for slug in ["dangling", "loop"] { XCTAssertTrue(fileService.isSymlink(at: agentDir + "/" + slug)) }
         XCTAssertTrue(fileService.isSymlink(at: outside + "/kept"))
         XCTAssertEqual(try deployStateStore.read().records, [])
     }
@@ -305,5 +301,18 @@ final class DeployReconcilerPruneTests: XCTestCase {
         XCTAssertEqual(result.removed, [linkPath])
         XCTAssertFalse(fileService.isSymlink(at: linkPath))
         XCTAssertFalse(fileService.fileExists(at: statePath))
+    }
+}
+
+private extension DeployReconcilerPruneTests {
+    func record(slug: String, artifactPath: String) -> DeployStateRecord {
+        DeployStateRecord(
+            slug: slug,
+            platform: PlatformTarget.claudeCode.rawValue,
+            scope: "user",
+            projectIdentityKey: nil,
+            artifactPath: artifactPath,
+            recordedAt: "2026-07-17T00:00:00Z"
+        )
     }
 }

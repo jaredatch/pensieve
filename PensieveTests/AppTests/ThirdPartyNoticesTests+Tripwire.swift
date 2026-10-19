@@ -218,4 +218,7 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
     func realPath(at path: String) -> String { base.realPath(at: path) }
     func regularFileMetadata(at path: String) -> RegularFileMetadata? { base.regularFileMetadata(at: path) }
     func touchRegularFile(at path: String, date: Date) throws { throw CocoaError(.featureUnsupported) }
+
+    func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }

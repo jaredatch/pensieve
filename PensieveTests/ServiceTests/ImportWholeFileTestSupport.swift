@@ -81,4 +81,7 @@ final class ImportReadSpy: FileServiceProtocol {
     func isRegularFile(at path: String) -> Bool { files.isRegularFile(at: path) }
     func listDirectory(at path: String) throws -> [String] { try files.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try files.contentsHash(at: path) }
+
+    func resolveRealPath(at path: String) throws -> String { try files.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try files.storeTemporaryParent(root: root) }
 }

@@ -119,26 +119,28 @@ extension FileService {
     }
 
     func storeTemporaryParent(root: String) throws -> String {
-        let store = try resolveRealPath(at: root)
+        let location = try resolvedStoreLocation(root: root)
+        let store = location.path
         var parent = FileManager.default.temporaryDirectory.path
-        if !sameStoreDevice(parent, store) {
+        if !sameStoreDevice(parent, location.existingAncestor) {
             // A volume-root store has no outside location on its own device. Refuse before
             // Foundation creates .TemporaryItems inside it; configuring Git supplies metadata.
             var volume = statfs()
-            guard statfs(store, &volume) == 0 else { throw storePublicationError(at: store, code: errno) }
+            guard statfs(location.existingAncestor, &volume) == 0 else { throw storePublicationError(at: store, code: errno) }
             let mount = withUnsafePointer(to: &volume.f_mntonname) {
                 $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
             }
             guard try resolveRealPath(at: mount) != store else {
                 throw storePublicationError(at: store, code: EXDEV)
             }
-            let replacement = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                                                          appropriateFor: URL(fileURLWithPath: store), create: true)
+            let replacement = try FileManager.default.url(
+                for: .itemReplacementDirectory, in: .userDomainMask,
+                appropriateFor: URL(fileURLWithPath: location.existingAncestor), create: true)
             parent = replacement.deletingLastPathComponent().path
             try? deleteDirectory(at: replacement.path)
         }
         parent = try resolveRealPath(at: parent)
-        guard sameStoreDevice(parent, store) else { throw storePublicationError(at: parent, code: EXDEV) }
+        guard sameStoreDevice(parent, location.existingAncestor) else { throw storePublicationError(at: parent, code: EXDEV) }
         guard parent != store, !PathSyntax.hasPrefix(parent, store + "/") else {
             throw storePublicationError(at: parent, code: EINVAL)
         }
@@ -150,7 +152,7 @@ extension FileService {
     private func skillNamespaces(root: String, parent: String) throws -> [String] {
         let store = try resolveRealPath(at: root)
         guard parent != store, !PathSyntax.hasPrefix(parent, store + "/") else { return [] }
-        let key = SHA256.hash(data: Data(store.utf8)).map { String(format: "%02x", $0) }.joined()
+        let key = try storeKey(root: root)
         let directory = parent + "/.pensieve-store-writes-" + key
         return [directory, directory + "-alternate"]
     }
@@ -242,5 +244,29 @@ extension FileService {
         guard access(metadata, W_OK | X_OK) == 0 else {
             throw storePublicationError(at: metadata, code: errno)
         }
+    }
+}
+
+// The same resolved path keys body writes and vendor, manifest and machine-state preparations.
+extension FileServiceProtocol {
+    func storeKey(root: String) throws -> String {
+        let store = try resolvedStoreLocation(root: root).path
+        return SHA256.hash(data: Data(store.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Missing components inherit the nearest existing ancestor's device and resolved spelling.
+    /// A present but unresolvable entry (including a dangling link) always throws.
+    func resolvedStoreLocation(root: String) throws -> (path: String, existingAncestor: String) {
+        do {
+            let path = try resolveRealPath(at: root)
+            return (path, path)
+        } catch {
+            guard try entryTypeWithoutFollowingLinks(at: root) == nil else { throw error }
+        }
+        let parent = (root as NSString).deletingLastPathComponent
+        guard parent != root else { throw CocoaError(.fileNoSuchFile) }
+        let location = try resolvedStoreLocation(root: parent.isEmpty ? "." : parent)
+        let path = (location.path as NSString).appendingPathComponent((root as NSString).lastPathComponent)
+        return (path, location.existingAncestor)
     }
 }

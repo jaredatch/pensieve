@@ -41,6 +41,11 @@ final class PlatformViewModelTests: XCTestCase {
         func contentsHash(at path: String) throws -> String { "hash" }
     }
     private struct CleanFileService: FileServiceProtocol {
+        // Canonical folders in this in-memory fixture have no ancestor aliases.
+        func resolveRealPath(at path: String) throws -> String {
+            guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+            return path
+        }
         var projectDirectories: Set<String> = []
         func readFile(at path: String) throws -> String { "" }
         func writeFile(at path: String, content: String) throws {}
@@ -78,9 +83,8 @@ final class PlatformViewModelTests: XCTestCase {
         func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { linked }
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { linked }
-        func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-            "/tmp/link/" + skill.directoryName
-        }
+        func linkPath(skill: Skill, platform: PlatformTarget,
+                      projectPath: String?) -> String { "/tmp/link/" + skill.directoryName }
         func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
             "/tmp/target/" + skill.directoryName
         }
@@ -95,16 +99,12 @@ final class PlatformViewModelTests: XCTestCase {
 
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
-        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
-            return false
-        }
+        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool { false }
         func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
         func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
 
         func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
-        func outputPath(skill: Skill, projectPath: String?) -> String {
-            "/tmp/cursor/" + skill.directoryName + ".mdc"
-        }
+        func outputPath(skill: Skill, projectPath: String?) -> String { "/tmp/cursor/" + skill.directoryName + ".mdc" }
     }
 
     @MainActor

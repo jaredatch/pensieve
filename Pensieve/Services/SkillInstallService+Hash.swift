@@ -74,10 +74,11 @@ extension SkillInstallService {
         let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
         guard externallyHeldLock || lock != nil else { return }
         defer { lock?.release() }
-        var locations = [((storeRoot as NSString).deletingLastPathComponent,
-                          (storeRoot as NSString).lastPathComponent + ".vendor-")]
-        if let current = try? VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: fileService) {
-            locations.append(current)
+        var locations = [VendorTemporaryDirectory.legacyNamespace(storeRoot: storeRoot)]
+        for kind in ["vendor", "manifest-build", "machine-state"] {
+            if let current = try? VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: fileService, kind: kind) {
+                locations.append(current)
+            }
         }
         for (parent, prefix) in locations {
             cleanupVendorTemps(fileService: fileService, parent: parent, prefix: prefix)

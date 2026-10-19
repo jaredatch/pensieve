@@ -43,7 +43,6 @@ struct ManifestService: ManifestReadWriting {
         try validateSnapshotForWrite(snapshot)
 
         // Complete the tree outside the store, on its device, before the atomic swap.
-        if !fileService.directoryExists(at: root) { try fileService.createDirectory(at: root) }
         let tmpDir = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: "manifest-build")
         let categoriesDir = tmpDir + "/categories"
         let skillsDir = tmpDir + "/skills"
@@ -74,6 +73,7 @@ struct ManifestService: ManifestReadWriting {
                 at: tmpDir + "/projects.yaml",
                 content: Self.serializeProjects(snapshot.projects)
             )
+            if !fileService.directoryExists(at: root) { try fileService.createDirectory(at: root) }
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
             return true
         } catch {

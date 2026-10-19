@@ -90,13 +90,14 @@ extension FileServiceProtocol {
     /// Compare one directory entry with its resolved parent. Missing leaves inherit the parent's
     /// spelling, so links in ancestors and /private aliases resolve identically on both sides.
     func isRealpathContained(_ path: String) -> Bool {
+        guard !isSymlink(at: path) else { return false }
         let parent = (path as NSString).deletingLastPathComponent
         let leaf = (path as NSString).lastPathComponent
         let expected = realPath(at: parent) + "/" + leaf
-        var resolved = realPath(at: path)
-        if resolved == path, !directoryExists(at: path), !fileExists(at: path), !isSymlink(at: path) {
-            resolved = expected
+        do { return try resolveRealPath(at: path) == expected } catch {
+            // Only a missing entry may inherit its parent's spelling. Resolution failures
+            // for present or unreadable entries must not turn the literal path into proof.
+            do { return try entryTypeWithoutFollowingLinks(at: path) == nil } catch { return false }
         }
-        return resolved == expected
     }
 }

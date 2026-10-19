@@ -73,4 +73,8 @@ final class SettingsReadFiles: FileServiceProtocol {
         }
         return base.isRegularFile(at: path)
     }
+
+    func realPath(at path: String) -> String { base.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }

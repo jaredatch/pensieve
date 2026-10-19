@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Pensieve
 
@@ -49,15 +50,25 @@ final class CanonicalSkillDirTests: XCTestCase {
         try fileService.createSymlink(at: linked, pointingTo: baseDir)
         try fileService.writeFile(at: outside + "/SKILL.md", content: "precious")
         try fileService.createSymlink(at: baseDir + "/victim", pointingTo: outside)
+        try fileService.createSymlink(at: baseDir + "/dangling", pointingTo: outside + "/missing")
+        try fileService.createSymlink(at: baseDir + "/loop", pointingTo: baseDir + "/loop")
+        for leaf in ["victim", "dangling", "loop"] {
+            XCTAssertFalse(fileService.isRealpathContained(try fileService.resolveRealPath(at: baseDir) + "/" + leaf), leaf)
+        }
         for base in [try XCTUnwrap(baseDir), linked] {
             let store = SkillStore(fileService: fileService, baseDir: base, storeRoot: tempDir)
-            for slug in ["victim", "..", ".", "", "victim/child"] {
+            for slug in ["victim", "dangling", "loop", "..", ".", "", "victim/child"] {
                 XCTAssertNil(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService))
                 XCTAssertThrowsError(try store.readBody(directoryName: slug))
                 XCTAssertThrowsError(try store.writeBody(directoryName: slug, body: "changed"))
             }
         }
         XCTAssertEqual(try fileService.readFile(at: outside + "/SKILL.md"), "precious")
+        let inaccessible = try fileService.resolveRealPath(at: baseDir) + "/inaccessible"
+        try fileService.createDirectory(at: inaccessible + "/child")
+        XCTAssertEqual(chmod(inaccessible, 0), 0)
+        defer { XCTAssertEqual(chmod(inaccessible, 0o700), 0) }
+        XCTAssertFalse(fileService.isRealpathContained(inaccessible + "/child"), "Unresolvable is not absent")
     }
 
     func testSymlinkedSlugDirReturnsNil() throws {

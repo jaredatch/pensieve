@@ -174,6 +174,10 @@ private final class CoordinatedAuditFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { base.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try base.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try base.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { base.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }
 
 private struct AuditHealthyEngine: SyncEngineProtocol {

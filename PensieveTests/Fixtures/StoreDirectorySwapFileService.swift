@@ -95,4 +95,6 @@ final class StoreDirectorySwapFileService: FileServiceProtocol {
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func regularFileMetadata(at path: String) -> RegularFileMetadata? { wrapped.regularFileMetadata(at: path) }
     func touchRegularFile(at path: String, date: Date) throws { try wrapped.touchRegularFile(at: path, date: date) }
+
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
 }

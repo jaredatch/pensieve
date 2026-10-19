@@ -261,6 +261,8 @@ extension ProjectRemovalExecutionTests {
         try h.files.createDirectory(at: h.project.path)
         var writes = 0
         h.mapped.beforeFileWrite = { path in
+            XCTAssertTrue(path.hasPrefix(h.root + "/"), "Publisher writes must stay inside the fixture sandbox")
+            XCTAssertFalse(path.hasPrefix(h.root + "/sync/"), "Preparation must remain outside the store")
             if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") { writes += 1 }
         }
         let manifest = RemovalPublicationCheckpointManifest(base: ManifestService(fileService: h.mapped)) {

@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// Store publishers prepare outside the store on its own device. The resolved-path key keeps
@@ -7,9 +6,13 @@ enum VendorTemporaryDirectory {
     static func namespace(storeRoot: String, fileService: FileServiceProtocol,
                           kind: String = "vendor") throws -> (parent: String, prefix: String) {
         let parent = try fileService.storeTemporaryParent(root: storeRoot)
-        let key = SHA256.hash(data: Data(fileService.realPath(at: storeRoot).utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let key = try fileService.storeKey(root: storeRoot)
         return (parent, ".pensieve-" + key + "." + kind + "-")
+    }
+
+    static func legacyNamespace(storeRoot: String) -> (parent: String, prefix: String) {
+        ((storeRoot as NSString).deletingLastPathComponent,
+         (storeRoot as NSString).lastPathComponent + ".vendor-")
     }
 
     static func makePath(storeRoot: String, fileService: FileServiceProtocol, kind: String = "vendor") throws -> String {

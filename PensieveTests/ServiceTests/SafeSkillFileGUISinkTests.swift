@@ -164,6 +164,12 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
 }
 
 private final class LeafRejectingFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     private(set) var readPaths: [String] = []
     private(set) var hashPaths: [String] = []
 
