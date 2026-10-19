@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct ProjectIdentity: Equatable {
     enum Kind: String, Codable {
@@ -21,10 +22,6 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
 
     init(fileService: FileServiceProtocol = FileService()) {
         self.fileService = fileService
-    }
-
-    func identity(forProjectAt path: String) throws -> ProjectIdentity {
-        try withIdentity(forProjectAt: path) { $0 }
     }
 
     /// Keep competing registrations from replacing or adopting a marker until its save succeeds.
@@ -50,12 +47,18 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
             do {
                 return try save(ProjectIdentity(kind: .marker, key: id))
             } catch {
-                if (try? fileService.readFile(at: markerPath)) == content {
-                    if let previousMarker {
-                        try? fileService.writeFileInProject(at: markerPath, content: previousMarker, project: project)
-                    } else if !hadMarker {
-                        try? fileService.deleteFile(at: markerPath)
+                do {
+                    if try fileService.readFile(at: markerPath) == content {
+                        if let previousMarker {
+                            try fileService.writeFileInProject(at: markerPath, content: previousMarker, project: project)
+                        } else if !hadMarker {
+                            try fileService.deleteFile(at: markerPath)
+                        }
                     }
+                } catch {
+                    let reason = error.localizedDescription
+                    Logger(subsystem: "com.jaredatch.pensieve", category: "projects")
+                        .warning("Project identity marker cleanup failed at \(markerPath): \(reason, privacy: .public)")
                 }
                 throw error
             }

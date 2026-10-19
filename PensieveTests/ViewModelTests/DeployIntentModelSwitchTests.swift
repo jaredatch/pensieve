@@ -8,7 +8,7 @@ private struct UnreadableSwitchIdentity: MachineIdentityProviding {
 
 @MainActor
 extension DeployIntentModelTests {
-    func testSelectionReturnsAppliedResultAlongsideCatalogRefreshWarning() throws {
+    func testSelectionReturnsAppliedResultAlongsideCatalogRefreshError() throws {
         for target in [localID, remoteID] {
             let identity = ReloadFailingIdentity(id: localID)
             var failWrite = false
@@ -25,9 +25,9 @@ extension DeployIntentModelTests {
                 XCTAssertNoThrow(result = try harness.model.setSelected(
                     selected, machineID: target, skill: skill, platform: .codex, context: harness.context
                 ))
-                XCTAssertNil(harness.model.error, "An applied change must not become a refresh error")
-                XCTAssertEqual(harness.model.catalogRefreshWarning,
-                    "Catalog refresh failed: \(DeployStubFailure().localizedDescription)")
+                XCTAssertEqual(harness.model.error,
+                    "The change applied, but the list of Macs and agents couldn't refresh: "
+                        + DeployStubFailure().localizedDescription)
                 if target == localID {
                     XCTAssertEqual(result?.successes.count, 1)
                     XCTAssertEqual(harness.platformVM.isDeployed(skill: skill, platform: .codex), selected)
@@ -47,13 +47,12 @@ extension DeployIntentModelTests {
                         false, machineID: target, skill: skill, platform: .codex, context: harness.context
                     ))
                     XCTAssertEqual(harness.model.error, DeployStubFailure().localizedDescription)
-                    XCTAssertNil(harness.model.catalogRefreshWarning, "A failed write must clear the previous refresh warning")
                     failWrite = false
                 }
             }
             identity.fails = false
             harness.model.reload(context: harness.context)
-            XCTAssertNil(harness.model.catalogRefreshWarning, "A successful refresh clears the warning")
+            XCTAssertNil(harness.model.error, "A successful refresh clears the error")
         }
     }
 
@@ -68,7 +67,6 @@ extension DeployIntentModelTests {
         harness.model.reload(context: harness.context)
 
         XCTAssertEqual(harness.model.error, DeployStubFailure().localizedDescription)
-        XCTAssertNil(harness.model.catalogRefreshWarning)
         XCTAssertEqual(harness.model.machines, machines)
         XCTAssertEqual(harness.model.availablePlatforms, platforms)
         identity.fails = false

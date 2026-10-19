@@ -43,7 +43,7 @@ extension CLILibraryHandler {
             let registrationContext = ModelContext(container)
             return try ProjectRegistration.register(project, context: registrationContext, files: files,
                                                     identityService: identity) {
-                try saveProjectRegistration($0, container: container)
+                try saveProjectRegistration($0, context: registrationContext)
             }
         }
         guard let registered = context.model(for: saved.id) as? Project else {

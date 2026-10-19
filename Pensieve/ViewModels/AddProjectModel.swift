@@ -132,7 +132,7 @@ final class AddProjectModel {
                   notifier: SyncStateNotifying = SyncStateNotifier.suppressed) throws -> Project {
         let saved = try ProjectRegistration.register(project, context: context, files: fileService,
                                                      identityService: identityService) {
-            try saveProjectRegistration($0, container: context.container)
+            try saveProjectRegistration($0, context: ModelContext(context.container))
         }
         guard let registered = context.model(for: saved.id) as? Project else {
             throw CocoaError(.persistentStoreOperation)

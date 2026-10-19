@@ -24,6 +24,7 @@ extension BundledSkillModelTests {
         await model.add(context: fixture.context)
         XCTAssertEqual(model.error,
             "The pensieve folder is taken by another skill. Rename or remove that skill, then try again.")
+        XCTAssertEqual(importer.error, model.error)
         XCTAssertEqual(model.state, .absent)
         XCTAssertEqual(importer.importedSkillCount, 0)
         XCTAssertEqual(try fixture.context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["pensieve"])

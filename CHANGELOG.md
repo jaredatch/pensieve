@@ -49,8 +49,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
-- Adding a project no longer leaves a new identity marker behind if saving fails, and simultaneous adds reuse the same registration.
-
+- If saving a new project fails, Pensieve cleans up its new identity marker when it can. Retrying reuses any marker left behind, and simultaneous adds share one registration.
 
 - Importing, deploying, installing or updating skills, removing a project and saving edits now keep category changes pulled by another process, even before the app’s next sync.
 

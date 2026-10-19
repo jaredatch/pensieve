@@ -100,14 +100,7 @@ final class BundledSkillModel {
             guard case .found = importer.scanFolder(bundledDirectory) else {
                 throw CommandLinkError(message: "The bundled pensieve skill couldn't be read.")
             }
-            var refusal: CommandLinkError?
-            _ = importer.importSelected(context: context, takenSlugs: { context in
-                do { return try self.takenSlugsForAdd(context) } catch let error as CommandLinkError {
-                    refusal = error
-                    throw error
-                }
-            })
-            if let refusal { throw refusal }
+            _ = importer.importSelected(context: context, takenSlugs: takenSlugsForAdd)
             guard importer.importedSkillCount > 0, let skill = try Self.findSkill(context, store: library.skillStore) else {
                 throw CommandLinkError(message: importer.error ?? "The skill wasn't added.")
             }
