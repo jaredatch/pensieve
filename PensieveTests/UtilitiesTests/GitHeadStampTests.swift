@@ -24,7 +24,7 @@ final class GitHeadStampTests: XCTestCase {
                     try files.writeFile(at: fixture.metadata + "/HEAD", content: fixture.oid + "\n")
                     try assertOracle(fixture, label: "\(shape): detached")
                     try files.writeFile(at: fixture.metadata + "/HEAD", content: "ref: refs/heads/unborn\n")
-                    try assertOracle(fixture, fallback: .unborn, label: "\(shape): unborn")
+                    try assertOracle(fixture, label: "\(shape): unborn")
                 }
             }
         }
@@ -37,7 +37,7 @@ final class GitHeadStampTests: XCTestCase {
                 for body in ["ref: refs/heads/main", "ref:\trefs/heads/main", "ref:  refs/heads/main",
                              "ref: refs/heads/main ", "ref: refs/heads/unborn", f.oid, f.oid.uppercased(), f.oid + " "] {
                     try files.writeFile(at: f.metadata + "/HEAD", content: body + ending)
-                    try assertOracle(f, fallback: body.contains("unborn") ? .unborn : .unreadable,
+                    try assertOracle(f,
                                      label: "HEAD \((body + ending).debugDescription)")
                 }
             }
@@ -81,7 +81,29 @@ final class GitHeadStampTests: XCTestCase {
     func testGeneratedPackedRefsTextMatchesGit() throws {
         try NativeTestWork.run { [self] in
             let f = try HeadRepository(base: base, shape: .worktree)
-            try files.deleteFile(at: f.common + "/refs/heads/main")
+            let old = String(repeating: "a", count: 40)
+            for packed in ["malformed\n", old + " refs/heads/main\n", old + " refs/heads/other\n"] {
+                try files.writeFile(at: f.common + "/packed-refs", content: packed)
+                try files.writeFile(at: f.common + "/refs/heads/main", content: f.oid + "\n")
+                // show-ref reads the exact ref; rev-parse also opens packed refs during DWIM setup.
+                let direct = try f.git(["show-ref", "--verify", "--hash", "refs/heads/main"])
+                let observed = RebuildReadFileService()
+                var reads: [String] = []
+                observed.afterRead = { path in
+                    let path = URL(fileURLWithPath: path).standardizedFileURL.path
+                    reads.append(path)
+                    if path == f.common + "/packed-refs", packed != "malformed\n" {
+                        // Git publishes the packed snapshot before pruning the loose ref.
+                        _ = try f.git(["pack-refs", "--all", "--prune"])
+                    }
+                }
+                XCTAssertEqual(GitHeadStamp(fileService: observed).state(root: f.root), .resolved(direct))
+                XCTAssertTrue(reads.contains(f.common + "/refs/heads/main"))
+                XCTAssertFalse(reads.contains(f.common + "/packed-refs"), "A present loose ref must win before packed I/O")
+            }
+            if files.fileExists(at: f.common + "/refs/heads/main") {
+                try files.deleteFile(at: f.common + "/refs/heads/main")
+            }
             let header = "# pack-refs with: peeled fully-peeled sorted \n"
             for ending in ["\n", "\r\n", ""] {
                 for prefix in ["", header] {
@@ -99,15 +121,8 @@ final class GitHeadStampTests: XCTestCase {
                          header + "bad\n" + f.oid + " refs/heads/main\n",
                          header + f.oid + " refs/heads/main\nbad\n"] {
                 try files.writeFile(at: f.common + "/packed-refs", content: text)
-                let absent = ["", header, f.oid + " refs/heads/other\n"].contains(text)
-                try assertOracle(f, fallback: absent ? .unborn : .unreadable, label: "packed \(text.debugDescription)")
+                try assertOracle(f, label: "packed \(text.debugDescription)")
             }
-            try files.writeFile(at: f.common + "/packed-refs", content: "malformed\n")
-            try files.writeFile(at: f.common + "/refs/heads/main", content: f.oid + "\n")
-            try assertOracle(f, label: "malformed packed refs with a loose ref")
-            let old = String(repeating: "a", count: 40)
-            try files.writeFile(at: f.common + "/packed-refs", content: old + " refs/heads/main\n")
-            try assertOracle(f, label: "loose ref wins over a different packed OID")
         }
     }
 
@@ -123,14 +138,42 @@ final class GitHeadStampTests: XCTestCase {
             XCTAssertEqual(try f.git(["rev-parse", "--verify", "HEAD"]), f.oid)
             XCTAssertEqual(GitHeadStamp().state(root: f.root), .unreadable,
                            "Ref chains deliberately force ingestion even when git can resolve them")
+            let table = try HeadRepository(base: base + "/table", shape: .folder, refFormat: "reftable")
+            XCTAssertEqual(try table.git(["rev-parse", "--verify", "HEAD"]), table.oid)
+            XCTAssertEqual(GitHeadStamp().state(root: table.root), .unreadable)
+            for format in ["sha1", "sha256"] {
+                let unsupported = try HeadRepository(base: base + "/extensions-" + format, shape: .folder, format: format)
+                _ = try unsupported.git(["config", "core.repositoryformatversion", "1"])
+                let configPath = unsupported.common + "/config"
+                let config = try files.readFile(at: configPath)
+                for header in ["[extensions]", "[extensions] # backend"] {
+                    try files.writeFile(at: configPath,
+                                        content: config + "\n" + header + "\nrefStorage = \"files\" # supported\n")
+                    try assertOracle(unsupported, label: format + " quoted files backend")
+                    for extensionLine in ["refStorage = reftable", "refStorage = future", "unknownExtension = true",
+                                          "objectFormat = future", "refStorage = \"files#future\"",
+                                          "objectFormat = \"sha1#future\""] {
+                        try files.writeFile(at: configPath, content: config + "\n" + header + "\n" + extensionLine + "\n")
+                        XCTAssertEqual(GitHeadStamp().state(root: unsupported.root), .unreadable, format + extensionLine)
+                    }
+                }
+            }
         }
     }
 
-    func assertOracle(_ fixture: HeadRepository, fallback: GitHeadStamp.State = .unreadable,
-                      label: String, file: StaticString = #filePath, line: UInt = #line) throws {
+    func assertOracle(_ fixture: HeadRepository, label: String,
+                      file: StaticString = #filePath, line: UInt = #line) throws {
         let oracle = try TestPaths.git.run(["rev-parse", "--verify", "HEAD"], in: fixture.root)
-        let expected = oracle.exit == 0
-            ? GitHeadStamp.State.resolved(oracle.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) : fallback
+        let symbolic = try TestPaths.git.run(["symbolic-ref", "-q", "HEAD"], in: fixture.root)
+        let expected: GitHeadStamp.State
+        if oracle.exit == 0 {
+            expected = .resolved(oracle.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        } else if symbolic.exit == 0 && oracle.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    == "fatal: Needed a single revision" {
+            expected = .unborn
+        } else {
+            expected = .unreadable
+        }
         XCTAssertEqual(GitHeadStamp().state(root: fixture.root), expected,
                        label + ": " + oracle.stderr, file: file, line: line)
     }
@@ -144,12 +187,13 @@ struct HeadRepository {
     let common: String
     let oid: String
 
-    init(base: String, shape: Shape, format: String = "sha1") throws {
+    init(base: String, shape: Shape, format: String = "sha1", refFormat: String = "files") throws {
         let files = FileService(), git = TestPaths.git
         root = base + "/store"
         try files.createDirectory(at: base)
         let initial = shape == .worktree ? base + "/primary" : root
         var arguments = ["init", "--initial-branch=main", "--object-format=" + format]
+        if refFormat != "files" { arguments += ["--ref-format=" + refFormat] }
         if shape == .separate { arguments += ["--separate-git-dir", base + "/metadata"] }
         _ = try git.runOrThrow(arguments + [initial], in: nil)
         _ = try git.runOrThrow(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",

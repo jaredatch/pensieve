@@ -14,6 +14,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
         entryObservations.increment()
         return try wrapped.entryObservation(at: path)
     }
+    var afterRead: ((String) throws -> Void)?
     var refuseReplacement = false
     var refuseSkillListing = false
     private var refusedListings = 0
@@ -29,6 +30,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func readFile(at path: String) throws -> String {
         if path.hasSuffix("/HEAD") { headReads.increment() }
         let value = try wrapped.readFile(at: path)
+        try afterRead?(path)
         guard path.hasSuffix("/alpha/SKILL.md") else { return value }
         let gate: TestWait.Gate? = lock.withLock {
             if Thread.isMainThread { mainReads += 1; return nil }

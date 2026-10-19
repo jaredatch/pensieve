@@ -37,13 +37,12 @@ struct GitHeadStamp {
             // These namespaces belong to a worktree; ordinary branch refs belong to commondir.
             let privateRef = ["refs/bisect/", "refs/worktree/", "refs/rewritten/"].contains { PathSyntax.hasPrefix(ref, $0) }
             let directory = privateRef ? git : common
-            let packed = try packedState(ref: ref, directory: common, length: length)
             let path = directory + "/" + ref
             if try fileService.entryExistsWithoutFollowingLinks(at: path) {
                 // A symbolic-ref chain is intentionally unresolved: callers must ingest first.
                 return Self.looseOID(try fileService.readFile(at: path), length: length).map(State.resolved) ?? .unreadable
             }
-            return packed
+            return try packedState(ref: ref, directory: common, length: length)
         } catch { return .unreadable }
     }
 
@@ -71,14 +70,28 @@ struct GitHeadStamp {
         let path = common + "/config"
         guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return 40 }
         let config = try fileService.readFile(at: path)
-        var extensions = false
+        var extensions = false, length = 40
         for line in config.components(separatedBy: .newlines) {
             let value = line.trimmingCharacters(in: .whitespaces).lowercased()
-            if value.hasPrefix("[") { extensions = value == "[extensions]"; continue }
-            if extensions, value.range(of: #"^objectformat\s*=\s*\"?sha256\"?\s*([#;].*)?$"#,
-                                       options: .regularExpression) != nil { return 64 }
+            if value.hasPrefix("[") {
+                extensions = value.range(of: #"^\[extensions\]\s*([#;].*)?$"#, options: .regularExpression) != nil
+                continue
+            }
+            guard extensions, !value.isEmpty, !value.hasPrefix("#"), !value.hasPrefix(";") else { continue }
+            let fields = value.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard fields.count == 2,
+                  fields[1].range(of: #"^(sha1|sha256|files|"(sha1|sha256|files)")\s*([#;].*)?$"#,
+                                  options: .regularExpression) != nil else { throw CocoaError(.fileReadCorruptFile) }
+            let setting = String(fields[1].prefix { $0 != "#" && $0 != ";" })
+                .trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            switch (fields[0], setting) {
+            case ("objectformat", "sha1"): length = 40
+            case ("objectformat", "sha256"): length = 64
+            case ("refstorage", "files"): break
+            default: throw CocoaError(.fileReadUnsupportedScheme)
+            }
         }
-        return 40
+        return length
     }
 
     private func packedState(ref: String, directory: String, length: Int) throws -> State {
@@ -96,13 +109,9 @@ struct GitHeadStamp {
             }
             return Self.exactOID(oid, length: length).map(State.resolved) ?? .unreadable
         }
-        // A valid absent branch is unborn; malformed records must not suppress ingestion.
-        return records.allSatisfy {
-            let line = $0.prefix { $0 != 10 }
-            let name = String(bytes: Self.packedName($0, length: length), encoding: .utf8) ?? ""
-            return line.count > length + 1 && Self.validRef(name)
-                && Self.exactOID((String(bytes: line.prefix(length), encoding: .utf8) ?? ""), length: length) != nil
-        } ? .unborn : .unreadable
+        // Git treats a search miss as an unborn branch, including names with extra separators.
+        // Fatal packed-file corruption has already failed in packedRecords.
+        return .unborn
     }
 
     private static func packedRecords(_ bytes: [UInt8], length: Int) throws -> [[UInt8]] {

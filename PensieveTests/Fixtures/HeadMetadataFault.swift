@@ -1,13 +1,37 @@
 import Foundation
 @testable import Pensieve
 
-/// Corrupts only git metadata, leaving the library readable so a real writer must rebuild it.
+/// Changes only git metadata, leaving the library readable so a real writer must rebuild it.
 /// The returned restoration is idempotent, allowing the fixture's subsequent sync to use git.
 enum HeadMetadataFault: String, CaseIterable {
-    case malformed, missingGitdir, refChain
+    case malformed, missingGitdir, refChain, reftable, unknownExtension
 
     func apply(root: String) throws -> () throws -> Void {
         let files = FileService()
+        if self == .reftable {
+            try NativeTestWork.run {
+                _ = try TestPaths.git.runOrThrow(["refs", "migrate", "--ref-format=reftable"], in: root)
+            }
+            var restored = false
+            return {
+                if !restored {
+                    try NativeTestWork.run {
+                        _ = try TestPaths.git.runOrThrow(["refs", "migrate", "--ref-format=files"], in: root)
+                    }
+                    restored = true
+                }
+            }
+        }
+        if self == .unknownExtension {
+            let path = root + "/.git/config", original = try files.readFile(at: path)
+            let ref = root + "/.git/refs/heads/main", oid = try files.readFile(at: ref)
+            try files.writeFile(at: path, content: original + "\n[extensions]\nunknownExtension = true\n")
+            try files.deleteFile(at: ref)
+            return {
+                try files.writeFile(at: path, content: original)
+                try files.writeFile(at: ref, content: oid)
+            }
+        }
         if self == .missingGitdir {
             let saved = root + "-saved-metadata"
             try FileManager.default.moveItem(atPath: root + "/.git", toPath: saved)
