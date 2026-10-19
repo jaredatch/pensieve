@@ -8,7 +8,7 @@ private struct UnreadableSwitchIdentity: MachineIdentityProviding {
 
 @MainActor
 extension DeployIntentModelTests {
-    func testSelectionReturnsAppliedResultAlongsideCatalogRefreshError() throws {
+    func testSelectionReturnsAppliedResultAndLeavesTheCatalogToTheNextReload() throws {
         for target in [localID, remoteID] {
             let identity = ReloadFailingIdentity(id: localID)
             var failWrite = false
@@ -25,9 +25,7 @@ extension DeployIntentModelTests {
                 XCTAssertNoThrow(result = try harness.model.setSelected(
                     selected, machineID: target, skill: skill, platform: .codex, context: harness.context
                 ))
-                XCTAssertEqual(harness.model.error,
-                    "The change applied, but the list of Macs and agents couldn't refresh: "
-                        + DeployStubFailure().localizedDescription)
+                XCTAssertNil(harness.model.error, "An applied change is no error, and no refresh runs inside it")
                 if target == localID {
                     XCTAssertEqual(result?.successes.count, 1)
                     XCTAssertEqual(harness.platformVM.isDeployed(skill: skill, platform: .codex), selected)
@@ -39,7 +37,7 @@ extension DeployIntentModelTests {
                 let manifest = try ManifestService(fileService: harness.manifestFileService).read(fromRoot: harness.root)
                 XCTAssertEqual(manifest.deployIntents.count, selected ? 1 : 0)
                 XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), selected ? 1 : 0)
-                XCTAssertEqual(harness.model.machines, machines, "A failed refresh keeps the last catalog")
+                XCTAssertEqual(harness.model.machines, machines, "The catalog is left to the next reload")
                 if selected {
                     identity.fails = false
                     failWrite = true
@@ -52,7 +50,7 @@ extension DeployIntentModelTests {
             }
             identity.fails = false
             harness.model.reload(context: harness.context)
-            XCTAssertNil(harness.model.error, "A successful refresh clears the error")
+            XCTAssertNil(harness.model.error, "The next reload clears the failed write's error")
         }
     }
 

@@ -48,7 +48,8 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
                 return try save(ProjectIdentity(kind: .marker, key: id))
             } catch {
                 do {
-                    if try fileService.readFile(at: markerPath) == content {
+                    // A marker already gone is nothing to clean up; only a failed restore or delete is a failure.
+                    if (try? fileService.readFile(at: markerPath)) == content {
                         if let previousMarker {
                             try fileService.writeFileInProject(at: markerPath, content: previousMarker, project: project)
                         } else if !hadMarker {
@@ -57,8 +58,9 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
                     }
                 } catch {
                     let reason = error.localizedDescription
+                    let marker = markerPath
                     Logger(subsystem: "com.jaredatch.pensieve", category: "projects")
-                        .warning("Project identity marker cleanup failed at \(markerPath): \(reason, privacy: .public)")
+                        .warning("Marker cleanup failed at \(marker, privacy: .public): \(reason, privacy: .public)")
                 }
                 throw error
             }

@@ -165,10 +165,7 @@ private final class AddProjectPathIdentity: ProjectIdentityServiceProtocol, @unc
         return ProjectIdentity(kind: .remote, key: "github.com/owner/app")
     }
     func withIdentity<Value>(forProjectAt path: String, save: (ProjectIdentity) throws -> Value) throws -> Value {
-        try save(identity(forProjectAt: path))
-    }
-    func identity(forProjectAt path: String) throws -> ProjectIdentity {
         lock.withLock { adds.append(path) }
-        return ProjectIdentity(kind: .remote, key: "github.com/owner/app")
+        return try save(ProjectIdentity(kind: .remote, key: "github.com/owner/app"))
     }
 }

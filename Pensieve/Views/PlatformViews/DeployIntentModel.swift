@@ -63,16 +63,11 @@ final class DeployIntentModel {
     @discardableResult
     func setSelected(_ selected: Bool, machineID: String, skill: Skill, platform: PlatformTarget,
                      context: ModelContext) throws -> BatchResult? {
-        let result = try reportErrors {
+        // Like its siblings, this applies the change and leaves the catalog to the sheet's next reload,
+        // so a refresh problem can never read as a failed change.
+        try reportErrors {
             try service.setSelected(selected, machineID: machineID, skill: skill, platform: platform, context: context)
         }
-        // Refreshing the picker must not turn an already applied change into a failure.
-        do {
-            try service.reload(context: context)
-        } catch {
-            self.error = "The change applied, but the list of Macs and agents couldn't refresh: \(error.localizedDescription)"
-        }
-        return result
     }
 
     func apply(skills: [Skill], platforms: Set<PlatformTarget>, selectedMachineIDs: Set<String>,
