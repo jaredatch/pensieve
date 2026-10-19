@@ -18,10 +18,11 @@ final class CommandLinkFixture {
     func clean() { try? files.deleteDirectory(at: root) }
 
     func installer(user: UInt32 = getuid(), homebrew: [String] = [], executable: String? = nil,
-                   files: FileServiceProtocol? = nil) -> CommandLinkInstaller {
+                   files: FileServiceProtocol? = nil, prompt: AdministratorPromptRunning? = nil) -> CommandLinkInstaller {
         CommandLinkInstaller(files: files ?? self.files, directory: directory, executable: executable ?? self.executable,
                              user: user, homebrewDirectories: homebrew,
-                             authorization: AdminCommandLinkAuthorization(prompt: authorization), ancestorOwner: getuid())
+                             authorization: AdminCommandLinkAuthorization(prompt: prompt ?? authorization),
+                             ancestorOwner: getuid())
     }
 
     func link(to target: String) throws { try files.createSymlink(at: path, pointingTo: target) }

@@ -3,6 +3,25 @@ import XCTest
 @testable import Pensieve
 
 extension CommandLinkInstallerTests {
+    func testRealPromptShowsProgramRefusalInSettingsAndPreservesReplacement() async throws {
+        let fixture = try CommandLinkFixture()
+        defer { fixture.clean() }
+        var replacement: CommandLinkEntry?
+        let files = LeafReadSwappingFileService(path: fixture.path) {
+            try fixture.files.writeFile(at: fixture.path, content: "replacement")
+            replacement = try fixture.files.commandLinkEntry(at: fixture.path)
+        }
+        let prompt = AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
+        let model = CommandLineSettingsModel(installer: fixture.installer(files: files, prompt: prompt))
+        let action = Task { await model.perform(.install) }
+        await TestWait.forTask(action, timeout: .seconds(15), failureMessage: "The real prompt must finish within 15 seconds")
+        guard !action.isCancelled else { return }
+        XCTAssertEqual(model.error, "Something appeared or changed. The link was not changed.")
+        let before = try XCTUnwrap(replacement, "The fixture must replace the leaf after inspection")
+        XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.path), "replacement")
+    }
+
     func assertPromptRejectsInheritedEnvironment() async throws {
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
