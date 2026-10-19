@@ -12,10 +12,10 @@ final class SkillHistoryAsyncTests: XCTestCase {
             let fixture = try fixture()
             let gate = TestWait.Gate(owner: self)
             let entered = expectation(description: "history log held")
-            fixture.git.logOperation = { _ in
+            fixture.git.logOperation = { _ in   // held past the progress wait, so a late render can't pass as versions
                 XCTAssertFalse(Thread.isMainThread)
                 entered.fulfill()
-                if !Thread.isMainThread { try? gate.wait() }
+                if !Thread.isMainThread { try? gate.wait(timeout: .seconds(TestWait.heldFixtureTimeoutSeconds)) }
                 return [Self.commit("first"), Self.commit("second")]
             }
             fixture.git.documents["first"] = "First body"
@@ -29,9 +29,14 @@ final class SkillHistoryAsyncTests: XCTestCase {
             let host = makeHost(root)
             defer { host.window.close(); gate.open() }
             await fulfillment(of: [entered], timeout: TestWait.firstRenderTimeoutSeconds)
-            await TestWait.until(failureMessage: "held History must render its progress indicator") {
-                Self.hasProgress(in: host.view) && Self.texts(in: host.view).contains("Loading history…")
-            }
+            await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                                 failureMessage: "held History must render its progress indicator", diagnostics: {
+                "sheet=\(sheet) visible=\(host.window.isVisible) key=\(host.window.isKeyWindow)"
+                    + " nodes=\(RenderedViewTestSupport.values(in: host.view).count) texts=\(Self.texts(in: host.view))"
+            }, {
+                host.view.needsLayout = true
+                return Self.hasProgress(in: host.view) && Self.texts(in: host.view).contains("Loading history…")
+            })
             XCTAssertFalse(Self.texts(in: host.view).contains(sheet ? "No history" : "No versions saved yet."))
             gate.open()
             await TestWait.until(failureMessage: "released History never rendered its versions") {
