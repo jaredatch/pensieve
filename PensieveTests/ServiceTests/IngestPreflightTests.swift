@@ -144,7 +144,7 @@ final class IngestPreflightTests: XCTestCase {
             machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()),
             headStamp: {
                 stampReads += 1
-                return stamp
+                return .resolved(stamp)
             }
         )
         await coordinator.seedLastIngestedHeadStamp(stamp)
@@ -165,6 +165,7 @@ final class IngestPreflightTests: XCTestCase {
 
     func testUnreadableHeadStampForcesPreflight() async throws {
         XCTAssertNil(GitHeadStamp().read(root: tempDir))
+        try NativeTestWork.run { try TestPaths.git.initRepository(at: self.tempDir) }
         let fileService = FileService()
         try fileService.createDirectory(at: tempDir + "/.git/refs/heads")
         try fileService.writeFile(at: tempDir + "/.git/HEAD", content: "ref: refs/heads/alias\n")
@@ -190,7 +191,7 @@ final class IngestPreflightTests: XCTestCase {
             root: tempDir,
             audit: IngestNullAudit(),
             machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()),
-            headStamp: { GitHeadStamp().read(root: self.tempDir) }
+            headStamp: { GitHeadStamp().state(root: self.tempDir) }
         )
         await coordinator.seedLastIngestedHeadStamp("previous")
 
@@ -198,6 +199,28 @@ final class IngestPreflightTests: XCTestCase {
             return XCTFail("cycle did not sync")
         }
         XCTAssertEqual(rebuild.calls, 1)
+    }
+
+    func testCoordinatorPreservesInjectedRepositoryStates() async throws {
+        let cases: [(GitHeadStamp.State, Int)] = [
+            (.noRepository, 0), (.unborn, 0), (.unreadable, 1), (.resolved("known"), 0), (.resolved("changed"), 1)
+        ]
+        for (state, expectedScans) in cases {
+            for pending in [false, true] {
+                let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+                let coordinator = await Task.detached { SyncCoordinator(modelContainer: container) }.value
+                let rebuild = IngestRecordingRebuild()
+                await coordinator.configure(engine: ReadinessRecordingEngine(), git: IngestRecordingGit(),
+                    credentials: IngestEmptyCredentials(), rebuildService: rebuild, root: tempDir,
+                    audit: IngestNullAudit(),
+                    machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()),
+                    headStamp: { state })
+                await coordinator.seedLastIngestedHeadStamp("known")
+                if pending { StoreIngestState.shared(for: container).invalidate() }
+                guard case .synced = await coordinator.runCycle() else { return XCTFail("Cycle failed: \(state)") }
+                XCTAssertEqual(rebuild.calls, pending ? 1 : expectedScans, "\(state), pending=\(pending)")
+            }
+        }
     }
 
     private func assertReadinessOrder(coordinatorFirst: Bool) async {

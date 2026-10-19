@@ -17,7 +17,7 @@ extension SyncBytePreservationTests {
                 }
                 XCTAssertEqual(try files.listDirectory(at: root), [".git"], "No control file is written before admission")
                 XCTAssertEqual(try files.listDirectory(at: volume + "/metadata").sorted(), before)
-                XCTAssertEqual(GitHeadStamp(fileService: files).state(root: root), .unreadable)
+                XCTAssertEqual(GitHeadStamp(fileService: files).state(root: root), .unborn)
             }
         }
     }

@@ -67,7 +67,7 @@ actor SyncCoordinator {
         audit: SyncAuditWriting,
         machine: (identity: MachineIdentityProviding, stateService: MachineStateServicing),
         now: @escaping () -> Date = Date.init,
-        headStamp: (() -> String?)? = nil
+        headStamp: (() -> GitHeadStamp.State)? = nil
     ) {
         self.engine = engine
         self.git = git
@@ -78,8 +78,7 @@ actor SyncCoordinator {
         self.machineIdentity = machine.identity
         self.machineStateService = machine.stateService
         self.now = now
-        self.headState = headStamp.map { read in { read().map(GitHeadStamp.State.resolved) ?? .unreadable } }
-            ?? { GitHeadStamp().state(root: root) }
+        self.headState = headStamp ?? { GitHeadStamp().state(root: root) }
     }
 
     func seedLastIngestedHeadStamp(_ stamp: String?) {

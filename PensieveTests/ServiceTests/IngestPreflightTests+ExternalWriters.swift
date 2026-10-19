@@ -47,18 +47,32 @@ extension IngestPreflightTests {
     }
 
     func testUnreadableHeadRebuildsBeforeImportDeployRemovalAndQueuedSave() async throws {
-        for writer in ExternalWriter.allCases { try await assertExternalWriter(writer, unreadableHead: true) }
+        for fault in HeadMetadataFault.allCases {
+            for writer in ExternalWriter.allCases { try await assertExternalWriter(writer, headFault: fault) }
+        }
+    }
+
+    func testLinkedWorktreeImportAndDeployIngestExternalCommitBeforePublishing() async throws {
+        for writer in [ExternalWriter.importSkill, .windowDeploy] {
+            try await assertExternalWriter(writer, linked: true)
+        }
     }
 
     func testUnchangedHeadSkipsImportAndDeployRebuild() async throws {
-        for writer in [ExternalWriter.importSkill, .windowDeploy] {
-            let f = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/unchanged-\(writer)") }
-            let context = try damageContext(f)
-            let manifest = WriterIngestManifest()
-            XCTAssertFalse(StoreIngestState.shared(for: context.container).needsRebuild)
-            try await performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
-            XCTAssertEqual(manifest.reads, 0, "Unchanged HEAD must not scan the manifest for a rebuild: \(writer)")
-            XCTAssertEqual(manifest.writes, 1, "The writer must actually publish")
+        for linked in [false, true] {
+            for writer in [ExternalWriter.importSkill, .windowDeploy] {
+                let f = try NativeTestWork.run {
+                    let fixture = try IncompleteIngestFixture(base: self.tempDir + "/unchanged-\(linked)-\(writer)")
+                    if linked { try fixture.convertToLinkedWorktree() }
+                    return fixture
+                }
+                let context = try damageContext(f)
+                let manifest = WriterIngestManifest()
+                XCTAssertFalse(StoreIngestState.shared(for: context.container).needsRebuild)
+                try await performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
+                XCTAssertEqual(manifest.reads, 0, "Unchanged HEAD must not scan the manifest for a rebuild: \(writer)")
+                XCTAssertEqual(manifest.writes, 1, "The writer must actually publish")
+            }
         }
     }
 
@@ -79,13 +93,23 @@ extension IngestPreflightTests {
                 try await performImmediateWriter(writer, fixture: f, context: context, manifest: manifest)
                 XCTAssertEqual(manifest.reads, 0, "No foreign HEAD exists: repository=\(repository), \(writer)")
                 XCTAssertEqual(manifest.writes, 1)
+                try f.manifest.write(IncompleteIngestFixture.snapshot(["Added", "Kept"]), toRoot: f.app)
+                StoreIngestState.shared(for: context.container).invalidate()
+                let pendingManifest = WriterIngestManifest()
+                try await performImmediateWriter(writer, fixture: f, context: context, manifest: pendingManifest)
+                XCTAssertGreaterThan(pendingManifest.reads, 0, "Pending ingest must scan even without a commit")
+                XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Kept"])
             }
         }
     }
 
-    private func assertExternalWriter(_ writer: ExternalWriter, unreadableHead: Bool = false) async throws {
+    private func assertExternalWriter(_ writer: ExternalWriter, headFault: HeadMetadataFault? = nil,
+                                      linked: Bool = false) async throws {
         let f = try NativeTestWork.run {
-            try IncompleteIngestFixture(base: self.tempDir + "/outside-\(writer)-\(unreadableHead)")
+            let fixture = try IncompleteIngestFixture(
+                base: self.tempDir + "/outside-\(writer)-\(headFault?.rawValue ?? "readable")-\(linked)")
+            if linked { try fixture.convertToLinkedWorktree() }
+            return fixture
         }
         let context = try damageContext(f)
         let rebuild = IncompleteIngestRebuild()
@@ -100,12 +124,9 @@ extension IngestPreflightTests {
         XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Deleted", "Kept"])
         XCTAssertFalse(StoreIngestState.shared(for: context.container).needsRebuild,
                        "This regression must be detected by HEAD, without a failed-ingest flag")
-        let headPath = f.app + "/.git/HEAD", head = try f.files.readFile(at: f.app + "/.git/HEAD")
-        if unreadableHead {
-            try f.files.writeFile(at: headPath, content: "unreadable head\n")
-            XCTAssertNil(GitHeadStamp().read(root: f.app))
-        }
-        defer { if unreadableHead { try? f.files.writeFile(at: headPath, content: head) } }
+        let restore = try headFault?.apply(root: f.app)
+        if headFault != nil { XCTAssertEqual(GitHeadStamp().state(root: f.app), .unreadable) }
+        defer { try? restore?() }
         let manifest = WriterIngestManifest(), container = context.container
         manifest.beforeWrite = {
             let observed = ModelContext(container)
@@ -128,9 +149,9 @@ extension IngestPreflightTests {
         XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Kept"],
                        "The window must reflect the outside pull when \(writer) finishes")
         XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name).sorted(), ["Added", "Kept"])
-        if unreadableHead { try f.files.writeFile(at: headPath, content: head) }
+        try restore?()
         guard case .synced = await coordinator.runCycle() else { return XCTFail("Next sync must succeed") }
-        if !unreadableHead {
+        if headFault == nil {
             XCTAssertEqual(rebuild.calls, 1, "Coordinator must reuse the writer's ingest and only rebuild after its pull")
         }
         try NativeTestWork.run { try f.assertRemoteCategories() }
