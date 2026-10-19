@@ -25,6 +25,9 @@ final class AppRuntimeTests: XCTestCase {
         await TestWait.until(failureMessage: "The main window must render before activation") {
             !RenderedViewTestSupport.values(in: host).isEmpty
         }
+        // The sync model starts idle and learns the library is unconfigured from the bootstrap's detached git
+        // read. A slow host (GitHub's runner) can still be reading here, and the footer stays up until it lands.
+        await harness.runtime.bootstrapTask.value
         XCTAssertFalse(harness.runtime.syncModel.showsFooter(saves: h.saves))
         try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged while inactive")
         host.rootView = content(.active)
