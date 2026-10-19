@@ -9,7 +9,10 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
     func report() {
         let state: [String: Any] = ["pid": ProcessInfo.processInfo.processIdentifier,
             "path": Bundle.main.bundlePath, "arguments": CommandLine.arguments,
-            "active": NSApp.isActive, "windows": NSApp.windows.filter(\.isVisible).count, "reopens": reopens]
+            "active": NSApp.isActive, "windows": NSApp.windows.filter(\.isVisible).count, "reopens": reopens,
+            // What the launched app itself sees: the front app at report time and its own activation policy.
+            "frontmost": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1,
+            "policy": NSApp.activationPolicy().rawValue]
         let url = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(Bundle.main.bundleURL.lastPathComponent + ".json")
         try! JSONSerialization.data(withJSONObject: state).write(to: url, options: .atomic)
     }
@@ -29,7 +32,12 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-if CommandLine.arguments.contains("--frontmost") {
+if CommandLine.arguments.contains("--frontmost-detail") {
+    // The front app described for a failure message: a runner's desktop has no obvious front app to stay behind.
+    guard let front = NSWorkspace.shared.frontmostApplication else { print("none"); exit(0) }
+    print("\(front.processIdentifier) \(front.localizedName ?? "?") \(front.bundleIdentifier ?? "?")"
+        + " policy=\(front.activationPolicy.rawValue) hidden=\(front.isHidden) menuBar=\(front.ownsMenuBar)")
+} else if CommandLine.arguments.contains("--frontmost") {
     print(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1)
 } else if CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--reopen" {
     let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),

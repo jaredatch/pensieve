@@ -190,6 +190,7 @@ __attribute__((constructor)) static void install(void) {
         stale = socket.socket(socket.AF_UNIX)
         stale.bind(str(self.root / (self.bundle_id + '.sock'))); stale.close()
         frontmost = subprocess.check_output([str(self.fixture), '--frontmost'], text=True).strip()
+        before_detail = self.frontmost_detail()
         receipt = self.root / 'configuration.json'
         self.launch_environment['CLI_FIXTURE_LAUNCH_CONFIGURATION'] = str(receipt)
         self.launch_environment['DYLD_INSERT_LIBRARIES'] += ':' + str(self.configuration_probe)
@@ -203,11 +204,16 @@ __attribute__((constructor)) static void install(void) {
         self.assertEqual(state['arguments'][1:], ['--background'])
         self.assertEqual(state['windows'], 0)
         current = subprocess.check_output([str(self.fixture), '--frontmost'], text=True).strip()
-        self.assert_launch_activation(state, frontmost, current, json.loads(receipt.read_text()))
+        detail = (f'before: {before_detail}; after: {self.frontmost_detail()}; '
+                  f"the app saw frontmost {state.get('frontmost')} with policy {state.get('policy')}")
+        self.assert_launch_activation(state, frontmost, current, json.loads(receipt.read_text()), detail)
         self.assertEqual([r['command'] for r in requests], ['skill list'])
 
-    def assert_launch_activation(self, state, frontmost, current, configuration):
-        receipt = f'frontmost pid before launch: {frontmost}'
+    def frontmost_detail(self):
+        return subprocess.check_output([str(self.fixture), '--frontmost-detail'], text=True).strip()
+
+    def assert_launch_activation(self, state, frontmost, current, configuration, detail=''):
+        receipt = f'frontmost pid before launch: {frontmost}; {detail}'
         self.assertFalse(configuration['activates'], receipt)
         if int(frontmost) > 0:
             self.assertFalse(state['active'], receipt)
