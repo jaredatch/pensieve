@@ -44,9 +44,7 @@ extension ProjectIdentityServiceTests {
             writes += 1
             try files.deleteDirectory(at: path)
         }
-        XCTAssertThrowsError(try ProjectRegistration.makeProject(
-            name: "Deleted", path: path, using: ProjectIdentityService(fileService: mapped)
-        )) { error in
+        XCTAssertThrowsError(try ProjectIdentityService(fileService: mapped).identity(forProjectAt: path)) { error in
             guard case ProjectFolderError.missing(let missing) = error else {
                 return XCTFail("Expected missing project folder, got \(error)")
             }

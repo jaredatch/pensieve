@@ -88,6 +88,101 @@ extension CLILibraryHandlerTests {
         XCTAssertEqual(files.probeCounts.main, 0, "Project path work must not block the main actor")
     }
 
+    func testSheetJoinsCLIRegistrationAlreadyWritingItsMarker() async throws {
+        let h = try CLILibraryFixture()
+        defer { h.stop() }
+        try await h.start()
+        let folder = h.root + "/saving"
+        try h.files.createDirectory(at: folder)
+        let sheetFiles = CLIProjectFileService()
+        let model = AddProjectModel(fileService: sheetFiles, previewDelay: {})
+        model.name = "Sheet"
+        model.path = folder
+        await TestWait.until(failureMessage: "Sheet preview") { !model.isCheckingIdentity }
+        let files = CLIProjectFileService()
+        let gate = TestWait.Gate(owner: self)
+        files.beforeMarkerWrite = { try gate.wait() }
+        let handler = CLILibraryHandler(runtime: h.runtime, files: files)
+        let pending = Task { await handler.handle(CLIRequest(command: "project add", arguments: [folder])) }
+        await TestWait.until(failureMessage: "CLI marker write held") { gate.waiterCount == 1 }
+        sheetFiles.beforeProjectProbe = { gate.open() }
+        var sheetProject: Project?
+        model.submit { project in
+            do { sheetProject = try model.register(project, context: h.context) } catch { XCTFail(String(describing: error)) }
+        }
+        let reply = await pending.value
+        XCTAssertTrue(reply.envelope.ok)
+        let rows = try h.context.fetch(FetchDescriptor<Project>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(sheetProject?.id, rows.first?.id)
+        XCTAssertEqual(rows.first?.identityKey,
+                       ProjectIdentityService.parseMarkerID(from: try h.files.readFile(at: folder + "/.pensieve-project")))
+        XCTAssertEqual(files.markerWriteCount + sheetFiles.markerWriteCount, 1)
+    }
+
+    func testCompetingCLIAndSheetAddsKeepTheRegisteredMarker() async throws {
+        for useSheet in [false, true] {
+            let h = try CLILibraryFixture()
+            defer { h.stop() }
+            try await h.start()
+            let folder = h.root + "/racing"
+            try h.files.createDirectory(at: folder)
+            let files = CLIProjectFileService()
+            let gate = TestWait.Gate(owner: self)
+            files.afterMarkerRead = { try gate.wait() }
+            let handler = CLILibraryHandler(runtime: h.runtime, files: files)
+            let pending = Task { await handler.handle(CLIRequest(command: "project add", arguments: [folder])) }
+            await TestWait.until(failureMessage: "First add has read an absent marker") { gate.waiterCount == 1 }
+            if useSheet {
+                let model = AddProjectModel(fileService: h.files, previewDelay: {})
+                model.name = "Sheet"
+                model.path = folder
+                await TestWait.until(failureMessage: "Sheet preview") { !model.isCheckingIdentity }
+                model.submit { project in
+                    do { try model.register(project, context: h.context) } catch { XCTFail(String(describing: error)) }
+                }
+            } else {
+                _ = try await h.run(["project", "add", folder])
+            }
+            let marker = try h.files.readFile(at: folder + "/.pensieve-project")
+            gate.open()
+            let reply = await pending.value
+            XCTAssertEqual(reply.envelope.error?.code, "project_changed")
+            XCTAssertEqual(reply.envelope.error?.retryable, true)
+            let projects = try h.context.fetch(FetchDescriptor<Project>())
+            XCTAssertEqual(projects.count, 1)
+            XCTAssertEqual(try h.files.readFile(at: folder + "/.pensieve-project"), marker)
+            XCTAssertEqual(projects.first?.identityKey, ProjectIdentityService.parseMarkerID(from: marker))
+        }
+    }
+
+    func testFinalProjectChecksLeaveNoMarker() async throws {
+        for fence in [false, true] {
+            let h = try CLILibraryFixture()
+            defer { h.stop() }
+            try await h.start()
+            let folder = h.root + "/refused"
+            try h.files.createDirectory(at: folder)
+            let files = CLIProjectFileService()
+            let gate = TestWait.Gate(owner: self)
+            files.beforeProjectProbe = { try gate.wait() }
+            let handler = CLILibraryHandler(runtime: h.runtime, files: files)
+            let pending = Task { await handler.handle(CLIRequest(command: "project add", arguments: [folder])) }
+            await TestWait.until(failureMessage: "Registration admission held") { gate.waiterCount == 1 }
+            if fence {
+                h.runtime.library.setLaunchIngestPending(true)
+            } else {
+                h.context.insert(Project(name: "Other", path: h.root + "/other"))
+                try h.context.save()
+            }
+            gate.open()
+            let reply = await pending.value
+            XCTAssertEqual(reply.envelope.error?.code, fence ? "store_unreadable" : "project_changed")
+            if !fence { XCTAssertEqual(reply.envelope.error?.retryable, true) }
+            XCTAssertFalse(h.files.fileExists(at: folder + "/.pensieve-project"))
+        }
+    }
+
     func testBuiltProjectSaveFailureUsesRealReadOnlyStore() async throws {
         let h = try CLILibraryFixture(readOnly: true)
         defer { h.stop() }
@@ -96,6 +191,7 @@ extension CLILibraryHandlerTests {
         try h.files.createDirectory(at: folder)
         let reply = try await h.run(["project", "add", folder], exit: 1)
         XCTAssertFalse(reply.ok)
+        XCTAssertFalse(h.files.fileExists(at: folder + "/.pensieve-project"))
         XCTAssertTrue(reply.error?.message.localizedCaseInsensitiveContains("permission") == true, String(describing: reply))
         XCTAssertEqual(try ModelContext(h.context.container).fetchCount(FetchDescriptor<Project>()), 0, "Durable store")
         XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).isEmpty)

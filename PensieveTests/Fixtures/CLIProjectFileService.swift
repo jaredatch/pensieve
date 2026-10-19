@@ -3,15 +3,25 @@ import XCTest
 @testable import Pensieve
 
 /// Delegates to real fixture files and records the thread for canonicalization, project admission
-/// and marker writes. It neither blocks nor supplies a project identity or registration result.
+/// and marker writes. Optional hooks pause admission, completed marker reads or marker writes
+/// to order competing real operations; they supply neither identity nor registration results.
 final class CLIProjectFileService: FileServiceProtocol {
     private let wrapped = FileService()
     private let lock = NSLock()
+    var beforeProjectProbe: (() throws -> Void)?
+    var afterMarkerRead: (() throws -> Void)?
+    var beforeMarkerWrite: (() throws -> Void)?
+    private var markerWrites = 0
+    var markerWriteCount: Int { lock.withLock { markerWrites } }
     private var probes = 0
     private var mainProbes = 0
     var probeCounts: (total: Int, main: Int) { lock.withLock { (probes, mainProbes) } }
     private func noteProbe() { lock.withLock { probes += 1; if Thread.isMainThread { mainProbes += 1 } } }
-    func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
+    func readFile(at path: String) throws -> String {
+        let result = Result { try wrapped.readFile(at: path) }
+        if (path as NSString).lastPathComponent == ".pensieve-project" { try afterMarkerRead?() }
+        return try result.get()
+    }
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func readData(at path: String) throws -> Data { try wrapped.readData(at: path) }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
@@ -45,11 +55,17 @@ final class CLIProjectFileService: FileServiceProtocol {
     func isUserExecutableFile(at path: String) -> Bool { wrapped.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool {
-        noteProbe(); return try wrapped.directoryExistsFollowingLinks(at: path)
+        noteProbe(); try beforeProjectProbe?()
+        return try wrapped.directoryExistsFollowingLinks(at: path)
     }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func createDirectoryWithoutParents(at path: String) throws { try wrapped.createDirectoryWithoutParents(at: path) }
     func writeFileWithoutParents(at path: String, content: String) throws {
+        noteProbe()
+        if (path as NSString).lastPathComponent == ".pensieve-project" {
+            try beforeMarkerWrite?()
+            lock.withLock { markerWrites += 1 }
+        }
         try wrapped.writeFileWithoutParents(at: path, content: content)
     }
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {

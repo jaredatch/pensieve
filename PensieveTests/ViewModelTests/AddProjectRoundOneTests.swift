@@ -17,7 +17,8 @@ final class AddProjectRoundOneTests: XCTestCase {
         XCTAssertTrue(model.isValid)
         XCTAssertEqual(identities.previewPaths, [expanded])
         XCTAssertEqual(model.makeProject()?.path, expanded)
-        XCTAssertEqual(identities.addPaths, [expanded])
+        XCTAssertEqual(identities.previewPaths, [expanded, expanded])
+        XCTAssertTrue(identities.addPaths.isEmpty, "Preparing a submission only reads identity")
     }
 
     func testRelativePathIsRefusedWithoutAnyProbeOrAdd() async throws {

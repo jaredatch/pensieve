@@ -34,15 +34,26 @@ extension CLILibraryHandler {
         }
         // The sheet uses the same registration constructor and persistence operation.
         let project = try await BlockingWork.run {
-            try ProjectRegistration.makeProject(name: name, path: path, using: identity)
+            try ProjectRegistration.makeProject(name: name, path: path, using: identity, files: files)
         }
         try requireAddsAllowed()
         try requireUnchangedProjects(snapshots)
-        let reconcile = runtime.reconcileIntent
-        let notifier = runtime.syncStateNotifier
-        let registered = try registerProject(project, context: context,
-            intentReconciler: reconcile, notifier: notifier)
-        return success(projectValue(registered), changed: true)
+        let container = context.container
+        let saved = try await BlockingWork.run {
+            let registrationContext = ModelContext(container)
+            let registered = try ProjectRegistration.register(project, context: registrationContext, files: files) {
+                registrationContext.insert($0)
+                try registrationContext.save()
+                return $0
+            }
+            return (registered.persistentModelID, registered.id == project.id)
+        }
+        guard let registered = context.model(for: saved.0) as? Project else {
+            throw CocoaError(.persistentStoreOperation)
+        }
+        _ = runtime.reconcileIntent(context)
+        runtime.syncStateNotifier()
+        return success(projectValue(registered), changed: saved.1)
     }
 
     private func requireUnchangedProjects(_ snapshots: [(id: UUID, path: String)]) throws {

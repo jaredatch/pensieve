@@ -85,8 +85,7 @@ extension CLILibraryHandlerTests {
     }
 
     func seedPendingRegistration(_ h: CLILibraryFixture, folder: String) throws {
-        let identity = try ProjectRegistration.makeProject(name: "Pending", path: folder)
-        let key = try XCTUnwrap(identity.identityKey)
+        let key = try ProjectIdentityService(fileService: h.files).identity(forProjectAt: folder).key
         let machine = try XCTUnwrap(h.runtime.machineObservability.identity.existingIdentifier())
         h.context.insert(MachineDeployIntent(machineID: machine, skillSlug: "foo", platformRaw: "claudeCode", projectKey: key))
         try h.context.save()

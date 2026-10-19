@@ -49,6 +49,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Adding a project no longer leaves a new identity marker behind if saving fails, and simultaneous adds reuse the same registration.
+
 - A deployment selection that already applied no longer looks failed just because its catalog couldn’t refresh. The refresh problem gets its own message.
 
 - Importing, deploying, installing or updating skills, removing a project and saving edits now keep category changes pulled by another process, even before the app’s next sync.

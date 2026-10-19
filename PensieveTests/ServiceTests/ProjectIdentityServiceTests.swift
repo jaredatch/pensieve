@@ -19,6 +19,22 @@ final class ProjectIdentityServiceTests: XCTestCase {
         }
     }
 
+    func testIdentityRereadsMarkerBeforeCreatingOne() throws {
+        let path = tempDir + "/competing"
+        try fileService.createDirectory(at: path)
+        let files = CLIProjectFileService()
+        let marker = "id = 11111111-2222-3333-4444-555555555555\nformat_version = 1\n"
+        var reads = 0
+        files.afterMarkerRead = {
+            reads += 1
+            if reads == 1 { try self.fileService.writeFile(at: path + "/.pensieve-project", content: marker) }
+        }
+        let identity = try ProjectIdentityService(fileService: files).identity(forProjectAt: path)
+        XCTAssertEqual(identity.key, "11111111-2222-3333-4444-555555555555")
+        XCTAssertEqual(files.markerWriteCount, 0, "Adopting a marker must not rewrite it")
+        XCTAssertEqual(try fileService.readFile(at: path + "/.pensieve-project"), marker)
+    }
+
     func testIdentityReturnsRemoteForGitDirectoryWithOriginRemote() throws {
         let projectPath = tempDir + "/git-project"
         try fileService.createDirectory(at: projectPath + "/.git")
@@ -33,6 +49,7 @@ final class ProjectIdentityServiceTests: XCTestCase {
         let identity = try service.identity(forProjectAt: projectPath)
 
         XCTAssertEqual(identity, ProjectIdentity(kind: .remote, key: "github.com/owner/repo"))
+        XCTAssertFalse(fileService.fileExists(at: projectPath + "/.pensieve-project"))
     }
 
     func testIdentityUsesMarkerForGitFileWorktreeStyleDirectory() throws {
@@ -119,5 +136,6 @@ final class ProjectIdentityServiceTests: XCTestCase {
         let identity = service.peekIdentity(forProjectAt: projectPath)
 
         XCTAssertEqual(identity, ProjectIdentity(kind: .remote, key: "github.com/owner/repo"))
+        XCTAssertFalse(fileService.fileExists(at: projectPath + "/.pensieve-project"))
     }
 }

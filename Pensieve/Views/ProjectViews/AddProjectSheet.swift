@@ -74,7 +74,7 @@ struct AddProjectSheet: View {
     private func registerAndDismiss(_ project: Project) {
         guard !didSubmit else { return }
         do {
-            let created = try registerProject(project, context: context,
+            let created = try model.register(project, context: context,
                 intentReconciler: intentReconciler, notifier: notifier)
             didSubmit = true
             onCreated(created)
