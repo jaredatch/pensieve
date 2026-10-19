@@ -103,12 +103,21 @@ struct CLINameResolver {
 
     private func missing(_ kind: String, _ name: String, choices: [String], hint: String) -> CLICommandRefusal {
         let query = name.lowercased()
-        let scored: [(name: String, distance: Int)] = choices.map { ($0, Self.distance(query, $0.lowercased())) }
-        let closest = scored.sorted {
-            $0.distance == $1.distance ? $0.name < $1.name : $0.distance < $1.distance
-        }.prefix(3).map { $0.name }
+        let closest = Self.closestNames(to: query, in: choices)
         let advice = closest.isEmpty ? hint : "Closest names: " + closest.joined(separator: ", ") + ". " + hint
         return CLICommandRefusal(reply: .failure(kind + "_not_found", "No \(kind) named \(name).", hint: advice, exit: 4))
+    }
+
+    /// The three nearest choices by edit distance. A name much longer than every choice gets none: the
+    /// distance is at least the length gap, and ranking every choice against a very long name (tens of
+    /// thousands of characters) takes seconds on the main thread.
+    static func closestNames(to query: String, in choices: [String]) -> [String] {
+        let longest = choices.map(\.count).max() ?? 0
+        guard query.count <= max(32, 2 * longest) else { return [] }
+        let scored: [(name: String, distance: Int)] = choices.map { ($0, distance(query, $0.lowercased())) }
+        return scored.sorted {
+            $0.distance == $1.distance ? $0.name < $1.name : $0.distance < $1.distance
+        }.prefix(3).map { $0.name }
     }
 
     private static func distance(_ left: String, _ right: String) -> Int {

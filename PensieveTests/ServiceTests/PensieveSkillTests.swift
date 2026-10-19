@@ -32,6 +32,8 @@ final class PensieveSkillTests: XCTestCase {
             "Before `install`, `skill update`, `skill delete` or `project remove`",
             "`--dry-run` before a broad change", "`-a '*'` only when the person says \"all\"",
             "names skills to install from a repository", "each as `--skill <slug>` in both the dry run and the apply",
+            "Preview with the names you were given first", "fails with \"A selected skill was not found\"",
+            "once without `--skill` or `--rename` to list the repository's skills and their slugs",
             "ask for approval", "`--yes` only after they agree",
             "`confirmationToken` in `--confirm-plan`",
             "Retry only when `error.retryable` is true", "Report what changed",

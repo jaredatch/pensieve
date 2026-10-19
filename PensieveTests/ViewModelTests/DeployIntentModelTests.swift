@@ -33,6 +33,8 @@ final class DeployIntentModelTests: XCTestCase {
 
         XCTAssertEqual(harness.linkService.linkCalls.count, 0)
         XCTAssertEqual(try harness.context.fetch(FetchDescriptor<MachineDeployIntent>()).first?.machineID, remoteID)
+        // The catalog refreshes on the sheet's next reload, as it does after every other change.
+        harness.model.reload(context: harness.context)
         XCTAssertTrue(harness.model.availablePlatforms.contains(.hermes))
     }
 

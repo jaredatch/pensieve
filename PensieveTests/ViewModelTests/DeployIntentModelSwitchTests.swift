@@ -8,17 +8,68 @@ private struct UnreadableSwitchIdentity: MachineIdentityProviding {
 
 @MainActor
 extension DeployIntentModelTests {
-    private func assertSelectionReloadFailureSurfacesAfterSavedIntent() throws {
+    func testSelectionReturnsAppliedResultAndLeavesTheCatalogToTheNextReload() throws {
         for target in [localID, remoteID] {
             let identity = ReloadFailingIdentity(id: localID)
-            let h = try makeHarness(reconcile: { _ in identity.fails = true; return BatchResult() }, identity: identity)
-            let skill = try insertSkill(context: h.context)
-            XCTAssertThrowsError(try h.model.setSelected(true, machineID: target, skill: skill,
-                platform: .codex, context: h.context))
-            XCTAssertNotNil(h.model.error, "The picker must report its failed refresh")
-            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1,
-                "The already saved selection is retained")
+            var failWrite = false
+            let harness = try makeHarness(saveContext: { context in
+                if failWrite { throw DeployStubFailure() }
+                try context.save()
+            }, identity: identity, onReconcile: { identity.fails = true })
+            let skill = try insertSkill(context: harness.context)
+            harness.model.reload(context: harness.context)
+            let machines = harness.model.machines
+            for selected in [true, false] {
+                identity.fails = false
+                var result: BatchResult?
+                XCTAssertNoThrow(result = try harness.model.setSelected(
+                    selected, machineID: target, skill: skill, platform: .codex, context: harness.context
+                ))
+                XCTAssertNil(harness.model.error, "An applied change is no error, and no refresh runs inside it")
+                if target == localID {
+                    XCTAssertEqual(result?.successes.count, 1)
+                    XCTAssertEqual(harness.platformVM.isDeployed(skill: skill, platform: .codex), selected)
+                } else {
+                    XCTAssertNil(result, "Remote-only changes still return no local result")
+                    XCTAssertTrue(harness.linkService.linkCalls.isEmpty)
+                    XCTAssertTrue(harness.linkService.unlinkCalls.isEmpty)
+                }
+                let manifest = try ManifestService(fileService: harness.manifestFileService).read(fromRoot: harness.root)
+                XCTAssertEqual(manifest.deployIntents.count, selected ? 1 : 0)
+                XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), selected ? 1 : 0)
+                XCTAssertEqual(harness.model.machines, machines, "The catalog is left to the next reload")
+                if selected {
+                    identity.fails = false
+                    failWrite = true
+                    XCTAssertThrowsError(try harness.model.setSelected(
+                        false, machineID: target, skill: skill, platform: .codex, context: harness.context
+                    ))
+                    XCTAssertEqual(harness.model.error, DeployStubFailure().localizedDescription)
+                    failWrite = false
+                }
+            }
+            identity.fails = false
+            harness.model.reload(context: harness.context)
+            XCTAssertNil(harness.model.error, "The next reload clears the failed write's error")
         }
+    }
+
+    func testPlainReloadFailureRemainsAnErrorAndKeepsTheCatalog() throws {
+        let identity = ReloadFailingIdentity(id: localID)
+        let harness = try makeHarness(identity: identity)
+        harness.model.reload(context: harness.context)
+        let machines = harness.model.machines
+        let platforms = harness.model.availablePlatforms
+        identity.fails = true
+
+        harness.model.reload(context: harness.context)
+
+        XCTAssertEqual(harness.model.error, DeployStubFailure().localizedDescription)
+        XCTAssertEqual(harness.model.machines, machines)
+        XCTAssertEqual(harness.model.availablePlatforms, platforms)
+        identity.fails = false
+        harness.model.reload(context: harness.context)
+        XCTAssertNil(harness.model.error)
     }
 
     func testLocalAndProjectSwitchesPersistBeforeDeployAndNudge() async throws {
@@ -51,7 +102,6 @@ extension DeployIntentModelTests {
         let manifest = try ManifestService(fileService: harness.manifestFileService).read(fromRoot: harness.root)
         XCTAssertEqual(manifest.deployIntents.count, 2)
         try await assertRuntimeDeploymentNudges()
-        try assertSelectionReloadFailureSurfacesAfterSavedIntent()
     }
 
     func testTurningOffIntentAndManualDeploysAlwaysRemovesArtifactWithoutAdoption() throws {

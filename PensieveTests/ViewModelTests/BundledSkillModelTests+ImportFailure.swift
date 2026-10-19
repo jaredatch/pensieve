@@ -3,6 +3,36 @@ import XCTest
 @testable import Pensieve
 
 extension BundledSkillModelTests {
+    func testAddRefusesFolderArrivingDuringScanWithOriginalMessage() async throws {
+        let fixture = try CLILibraryFixture()
+        defer { fixture.stop() }
+        try await fixture.start()
+        let library = fixture.runtime.library
+        let own = "---\nname: pensieve\ndescription: Arrived from sync\n---\nKeep these instructions.\n"
+        let path = fixture.paths.skillsDir + "/pensieve/SKILL.md"
+        let scanner = BundledArrivalScanner(base: fixture.paths.makeImportScanner()) {
+            do { try fixture.files.writeFile(at: path, content: own) } catch { XCTFail("Sync arrival: \(error)") }
+            StoreIngestState.shared(for: fixture.context.container).invalidate()
+        }
+        let importer = ImportViewModel(scanner: scanner, skillStore: library.skillStore,
+            lockPath: fixture.paths.syncLockPath, manifestService: ManifestService(fileService: fixture.files),
+            manifestRoot: fixture.paths.storeRoot)
+        let receipt = fixture.paths.appSupportDir + "/arrival-receipt.json"
+        let model = BundledSkillModel(files: fixture.files,
+            bundledDirectory: Bundle.main.bundlePath + "/Contents/Resources/pensieve", receiptPath: receipt,
+            lockPath: fixture.paths.syncLockPath, library: library, importer: importer)
+        await model.add(context: fixture.context)
+        XCTAssertEqual(model.error,
+            "The pensieve folder is taken by another skill. Rename or remove that skill, then try again.")
+        XCTAssertEqual(importer.error, model.error)
+        XCTAssertEqual(model.state, .absent)
+        XCTAssertEqual(importer.importedSkillCount, 0)
+        XCTAssertEqual(try fixture.context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["pensieve"])
+        XCTAssertEqual(try fixture.files.listDirectory(at: fixture.paths.skillsDir), ["pensieve"])
+        XCTAssertEqual(try fixture.files.readFile(at: path), own)
+        XCTAssertFalse(fixture.files.fileExists(at: receipt))
+    }
+
     func assertManifestFailureStillRecordsTheAddedSkill() async throws {
         let fixture = try CLILibraryFixture()
         defer { fixture.stop() }
@@ -72,5 +102,19 @@ final class SettingsReadFiles: FileServiceProtocol {
             do { try gate.wait() } catch { XCTFail("Held refresh failed: \(error)") }
         }
         return base.isRegularFile(at: path)
+    }
+}
+
+/// Runs the real folder scan, then introduces a sync arrival before the importer acquires its lock.
+private struct BundledArrivalScanner: ImportScannerProtocol {
+    let base: ImportScannerProtocol
+    let arrive: () -> Void
+    func isInsideStore(_ path: String) -> Bool { base.isInsideStore(path) }
+    func scan() -> [DiscoveredSkill] { base.scan() }
+    func scanFolder(_ path: String) -> [DiscoveredSkill] { scanFolderWithReport(path).skills }
+    func scanFolderWithReport(_ path: String) -> ImportScanReport {
+        let report = base.scanFolderWithReport(path)
+        arrive()
+        return report
     }
 }
