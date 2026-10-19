@@ -141,9 +141,7 @@ struct MachineStateService: MachineStateServicing {
         }
         try fileService.createDirectory(at: directory)
         let destination = directory + "/" + state.machineID + ".yaml"
-        let parent = (root as NSString).deletingLastPathComponent
-        let base = (root as NSString).lastPathComponent
-        let temporary = parent + "/" + base + ".machine-state-" + UUID().uuidString + ".tmp"
+        let temporary = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: "machine-state")
         do {
             try fileService.writeFile(at: temporary, content: Self.serialize(state))
             try fileService.replaceItem(at: destination, with: temporary)

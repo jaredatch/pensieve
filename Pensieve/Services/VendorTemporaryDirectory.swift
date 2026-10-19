@@ -1,13 +1,19 @@
+import CryptoKit
 import Foundation
 
-/// The install/import preparation namespace, outside the configured store and owned by its locked sweep.
+/// Store publishers prepare outside the store on its own device. The resolved-path key keeps
+/// separate stores with the same basename from sweeping each other's abandoned preparations.
 enum VendorTemporaryDirectory {
-    static func namespace(storeRoot: String) -> (parent: String, prefix: String) {
-        ((storeRoot as NSString).deletingLastPathComponent, (storeRoot as NSString).lastPathComponent + ".vendor-")
+    static func namespace(storeRoot: String, fileService: FileServiceProtocol,
+                          kind: String = "vendor") throws -> (parent: String, prefix: String) {
+        let parent = try fileService.storeTemporaryParent(root: storeRoot)
+        let key = SHA256.hash(data: Data(fileService.realPath(at: storeRoot).utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return (parent, ".pensieve-" + key + "." + kind + "-")
     }
 
-    static func makePath(storeRoot: String) -> String {
-        let location = namespace(storeRoot: storeRoot)
+    static func makePath(storeRoot: String, fileService: FileServiceProtocol, kind: String = "vendor") throws -> String {
+        let location = try namespace(storeRoot: storeRoot, fileService: fileService, kind: kind)
         return location.parent + "/" + location.prefix + UUID().uuidString + ".tmp"
     }
 

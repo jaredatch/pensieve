@@ -116,7 +116,7 @@ final class SkillStore: SkillStoreProtocol {
                               avoiding: Set<String>) throws -> SkillFolderImportResult {
         let candidate = Self.availableDirectoryName(for: name, occupied: avoiding)
         let destination = try validatedSkillDirectory(candidate)
-        let temporary = VendorTemporaryDirectory.makePath(storeRoot: storeRoot)
+        let temporary = try VendorTemporaryDirectory.makePath(storeRoot: storeRoot, fileService: fileService)
         do {
             try fileService.createDirectory(at: temporary)
             try fileService.writeFile(at: temporary + "/SKILL.md", content: content)
@@ -243,9 +243,7 @@ final class SkillStore: SkillStoreProtocol {
     static func safeSkillDirectory(slug: String, base: String, fileService: FileServiceProtocol) -> String? {
         guard let dirPath = skillDirectoryPath(slug: slug, base: base) else { return nil }
         if fileService.isSymlink(at: dirPath) { return nil }
-        let realBase = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
-        let realDir = URL(fileURLWithPath: dirPath).resolvingSymlinksInPath().path
-        guard realDir == realBase + "/" + slug else { return nil }
+        guard fileService.isRealpathContained(dirPath) else { return nil }
         return dirPath
     }
 

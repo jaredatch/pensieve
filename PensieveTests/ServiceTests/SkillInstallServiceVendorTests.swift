@@ -324,15 +324,20 @@ extension SkillInstallServiceTests {
                     from: fetched,
                     context: makeInstallContext()
                 )
-            )
+            ) { error in
+                XCTAssertTrue(error is FailingCopyFileService.CopyFailure, "Must reach the injected copy failure: \(error)")
+            }
             XCTAssertFalse(fileService.directoryExists(at: root + "/skills/vendor"))
             XCTAssertTrue(vendorTempPaths(under: root).isEmpty)
-            let siblingPrefix = (root as NSString).lastPathComponent + ".vendor-"
-            XCTAssertTrue(try fileService.listDirectory(at: tempDir).filter {
-                $0.hasPrefix(siblingPrefix) && $0.hasSuffix(".tmp")
-            }.isEmpty)
+            try assertNoVendorTemps(root: root)
             XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
         }
+    }
+
+    func assertNoVendorTemps(root: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let location = try VendorTemporaryDirectory.namespace(storeRoot: root, fileService: fileService)
+        XCTAssertFalse(try fileService.listDirectory(at: location.parent).contains { $0.hasPrefix(location.prefix) },
+                       file: file, line: line)
     }
 
     private func vendorTempPaths(under root: String) -> [String] {

@@ -18,6 +18,34 @@ final class FileServiceTests: XCTestCase {
         }
     }
 
+    func testPublicationAcrossDevicesRefusesWithoutCopying() throws {
+        let probe = try StoreWriteCrashProbe(directory: tempDir)
+        try probe.withVolume { volume in
+            let snapshot = ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
+                                            categories: [], projects: [], skills: [])
+            XCTAssertThrowsError(try ManifestService(fileService: fileService).write(snapshot, toRoot: volume)) { error in
+                XCTAssertEqual((error as NSError).code, Int(EXDEV), "A volume-root store has no outside staging location")
+            }
+            XCTAssertFalse(fileService.directoryExists(at: volume + "/manifest"))
+            for existing in [false, true] {
+                let source = tempDir + "/source-\(existing)"
+                let destination = volume + "/destination-\(existing)"
+                try fileService.writeFile(at: source + "/keep", content: "source")
+                if existing { try fileService.writeFile(at: destination + "/keep", content: "destination") }
+                XCTAssertThrowsError(try fileService.replaceItem(at: destination, with: source)) { error in
+                    XCTAssertEqual((error as NSError).domain, NSPOSIXErrorDomain)
+                    XCTAssertEqual((error as NSError).code, Int(EXDEV))
+                }
+                XCTAssertEqual(try fileService.readFile(at: source + "/keep"), "source")
+                if existing {
+                    XCTAssertEqual(try fileService.readFile(at: destination + "/keep"), "destination")
+                } else {
+                    XCTAssertFalse(fileService.directoryExists(at: destination))
+                }
+            }
+        }
+    }
+
     func testReplaceItemPreservesDanglingDestinationAndSourceOnFailure() throws {
         let source = tempDir + "/replacement"
         let destination = tempDir + "/dangling"

@@ -97,7 +97,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
     private func userWideSymlinkCandidates() -> [Candidate] {
         var candidates: [Candidate] = []
         for (dir, platform) in Self.userWideSymlinkDirectories(paths: deployPaths) {
-            if fileService.isSymlink(at: dir) || !isRealpathContained(dir) {
+            if fileService.isSymlink(at: dir) || !fileService.isRealpathContained(dir) {
                 continue
             }
             guard fileService.directoryExists(at: dir),
@@ -195,14 +195,6 @@ struct DeployStateBackfill: DeployStateBackfilling {
             ))
         }
         return candidates
-    }
-
-    private func isRealpathContained(_ dir: String) -> Bool {
-        let parent = (dir as NSString).deletingLastPathComponent
-        let last = (dir as NSString).lastPathComponent
-        let realDir = URL(fileURLWithPath: dir).resolvingSymlinksInPath().path
-        let realParent = URL(fileURLWithPath: parent).resolvingSymlinksInPath().path
-        return realDir == realParent + "/" + last
     }
 
     private var recordedAtFormatter: ISO8601DateFormatter {

@@ -55,6 +55,8 @@ final class ImportPublicationFileService: FileServiceProtocol {
     }
     func isExecutableFile(at path: String) -> Bool { files.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { files.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try files.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { files.realPath(at: path) }
     func createDirectory(at path: String) throws { try files.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try files.deleteDirectory(at: path) }
     func createSymlink(at path: String, pointingTo target: String) throws {

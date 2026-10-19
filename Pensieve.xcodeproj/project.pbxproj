@@ -1112,6 +1112,7 @@
 		E4C09CE95C7ECA45F93429A5 /* ProjectPreviewDelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40EB7B4D296FF9EBE5B1CEA7 /* ProjectPreviewDelay.swift */; };
 		E53AF7D4D3BD2FE244BA2521 /* AddProjectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F022937A434A5A11A964A32 /* AddProjectSheet.swift */; };
 		E550929B50B7D29484C99F51 /* CursorOwnershipTests+Review.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D2B5799D91871BF0D91EDB /* CursorOwnershipTests+Review.swift */; };
+		E55D5602CD09CAFF18160088 /* CLILibraryHandlerTests+LinkedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AC7ECA6417204F5F8F3A79D /* CLILibraryHandlerTests+LinkedStore.swift */; };
 		E573370ABDEE59B1F59A5D4B /* GitFailureSyncTests+Authentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE3BDA3059A4485A28BCA739 /* GitFailureSyncTests+Authentication.swift */; };
 		E5D350B253AB0D42CF8D41B8 /* IntentAssignment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 091C32F06C75700130558BF6 /* IntentAssignment.swift */; };
 		E6F1087B4A5E2F4D60EBC3A2 /* SyncNudgeInstallTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9094FAA72A48B16A492E8FAF /* SyncNudgeInstallTests.swift */; };
@@ -1164,6 +1165,7 @@
 		F100CEE7D1EDF974C411D4F4 /* SkillDeploymentsTab+Primitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58F10B50612F23A737CA4DB /* SkillDeploymentsTab+Primitives.swift */; };
 		F128BA83A0023B66FD7A7261 /* SkillHistoryPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E7E298FD3885226AD4C9CC1 /* SkillHistoryPresentationTests.swift */; };
 		F16C47564C69574B0299DE8B /* DaemonCLI+Deployed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2DDE8B4F2A8D3EDE5AF947 /* DaemonCLI+Deployed.swift */; };
+		F1A84382A951909E08DED7B5 /* SkillInstallServiceTests+LinkedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA2FFF08279D03DDD96207C /* SkillInstallServiceTests+LinkedStore.swift */; };
 		F26A702AC21E4A7F092BA2D5 /* SkillLibraryViewModel+Write.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12D7456AC67896DBEAEBE6F /* SkillLibraryViewModel+Write.swift */; };
 		F292794706BBA6E220DBDDC6 /* AppRuntimeSyncRecoveryTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 846D612C2C6235777CF39BBF /* AppRuntimeSyncRecoveryTestSupport.swift */; };
 		F2AA5EABED26D16E5E0BBB09 /* ImportBoundedReadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1369E3C58E99BF763244A08 /* ImportBoundedReadTests.swift */; };
@@ -1355,6 +1357,7 @@
 		0A13C7BEC794DF86E2F98C9E /* UpstreamHistorySequenceEnumerationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistorySequenceEnumerationTests.swift; sourceTree = "<group>"; };
 		0A46BBC34C9B31990DC0FEA7 /* ScenarioRemovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioRemovalTests.swift; sourceTree = "<group>"; };
 		0AC78FB297DD93292EF4337E /* HistoryLifetimeFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryLifetimeFixture.swift; sourceTree = "<group>"; };
+		0AC7ECA6417204F5F8F3A79D /* CLILibraryHandlerTests+LinkedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CLILibraryHandlerTests+LinkedStore.swift"; sourceTree = "<group>"; };
 		0AFBC4D16E14809FD65E3013 /* RemoteURLPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteURLPolicy.swift; sourceTree = "<group>"; };
 		0B4F9A147EB6D2426E47CED2 /* ManifestProjectsRetiredTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestProjectsRetiredTests.swift; sourceTree = "<group>"; };
 		0BBA27E57D8F0F594230D39C /* SkillDocumentSaveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDocumentSaveTests.swift; sourceTree = "<group>"; };
@@ -1582,6 +1585,7 @@
 		3EFE9A94862611E4371207F8 /* SkillInstallService+Updates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallService+Updates.swift"; sourceTree = "<group>"; };
 		3F037D72607E925B1EA30175 /* StoreMigrationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigrationService.swift; sourceTree = "<group>"; };
 		3F75D7E75E34D26AF1282150 /* RemoteProjectModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteProjectModelTests.swift; sourceTree = "<group>"; };
+		3FA2FFF08279D03DDD96207C /* SkillInstallServiceTests+LinkedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallServiceTests+LinkedStore.swift"; sourceTree = "<group>"; };
 		3FACF5907F6714F858359D9B /* CLISyncHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLISyncHandlerTests.swift; sourceTree = "<group>"; };
 		3FBBFDCE1F8A45D5B3A5B894 /* DeployIntentModelSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployIntentModelSwitchTests.swift; sourceTree = "<group>"; };
 		4093E88C365EC8EE244E5AAA /* UpdatesViewModelTests+Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpdatesViewModelTests+Support.swift"; sourceTree = "<group>"; };
@@ -3483,6 +3487,7 @@
 				9189DC05F3370ED72B51FD46 /* CLILibraryFixture+Deadline.swift */,
 				3BEC96AF3395906E9777F094 /* CLILibraryHandlerTests.swift */,
 				B7ACD9A8D650A93E49AB495B /* CLILibraryHandlerTests+Damage.swift */,
+				0AC7ECA6417204F5F8F3A79D /* CLILibraryHandlerTests+LinkedStore.swift */,
 				28948A329FE9B0905E464293 /* CLILibraryHandlerTests+Refusals.swift */,
 				4CB341015D3D779917E5FFE9 /* CLILibraryHandlerTests+Repairs.swift */,
 				409D8FF641509506DC9DDD6A /* CLIReadHandlerTests.swift */,
@@ -3686,6 +3691,7 @@
 				D8A733EB806829BE41D08CC2 /* SkillInstallServiceTests+DocumentEcho.swift */,
 				7598335D2D5EA07A81C1500D /* SkillInstallServiceTests+ExternalPull.swift */,
 				A29C9457BA648916046C797B /* SkillInstallServiceTests+FolderLink.swift */,
+				3FA2FFF08279D03DDD96207C /* SkillInstallServiceTests+LinkedStore.swift */,
 				FBAF5388454F1EFB7FC9DE51 /* SkillInstallServiceTests+StableHash.swift */,
 				C18EF900DA92C44B41372B65 /* SkillInstallServiceTests+VendorCleanup.swift */,
 				AD45A11961E5A56B657725D5 /* SkillInstallServiceVendorTests.swift */,
@@ -4161,6 +4167,7 @@
 				37A1AEC5C5F483601EFFF210 /* CLILibraryFixture+Deadline.swift in Sources */,
 				A4320C7428604B2191D9BF46 /* CLILibraryFixture.swift in Sources */,
 				AA90DA283BC5E6C47EEAF84E /* CLILibraryHandlerTests+Damage.swift in Sources */,
+				E55D5602CD09CAFF18160088 /* CLILibraryHandlerTests+LinkedStore.swift in Sources */,
 				AA95AA01F263F55D479F5AFB /* CLILibraryHandlerTests+Refusals.swift in Sources */,
 				68832B5255573AE717CC6301 /* CLILibraryHandlerTests+Repairs.swift in Sources */,
 				830AEEB02A8BF4873125DD21 /* CLILibraryHandlerTests.swift in Sources */,
@@ -4520,6 +4527,7 @@
 				D3171FB81D69E850E042A9B6 /* SkillInstallServiceTests+DocumentEcho.swift in Sources */,
 				DE1522033FE8169EAC519DE8 /* SkillInstallServiceTests+ExternalPull.swift in Sources */,
 				B5D9E3404BC6E936C8A5C461 /* SkillInstallServiceTests+FolderLink.swift in Sources */,
+				F1A84382A951909E08DED7B5 /* SkillInstallServiceTests+LinkedStore.swift in Sources */,
 				B12A833ABC20893BD9369CB6 /* SkillInstallServiceTests+StableHash.swift in Sources */,
 				0FD8EF4B9892F5E2AEE48628 /* SkillInstallServiceTests+VendorCleanup.swift in Sources */,
 				84D719DA68A3606ACD6A7672 /* SkillInstallServiceTests.swift in Sources */,

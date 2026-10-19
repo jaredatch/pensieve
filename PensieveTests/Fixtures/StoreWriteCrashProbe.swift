@@ -48,15 +48,28 @@ struct StoreWriteCrashProbe {
 
     /// Mounts only a new fixture image beside this probe; the real system allocator chooses its temp location.
     func withVolume(_ body: (String) throws -> Void) throws {
+        let volume = try attachVolume()
+        defer { detachVolume(volume) }
+        try body(volume)
+    }
+
+    func withVolume(_ body: (String) async throws -> Void) async throws {
+        let volume = try attachVolume()
+        defer { detachVolume(volume) }
+        try await body(volume)
+    }
+
+    private func attachVolume() throws -> String {
         let volume = library + ".volume"
         let disk = library + ".sparseimage"
         try FileService().createDirectory(at: volume)
         try diskTool(["create", "-size", "64m", "-fs", "APFS", "-type", "SPARSE", "-volname", "WriterFixture", disk])
         try diskTool(["attach", "-nobrowse", "-mountpoint", volume, disk])
-        defer {
-            do { try diskTool(["detach", volume]) } catch { XCTFail("Fixture detach failed: \(error)") }
-        }
-        try body(volume)
+        return volume
+    }
+
+    private func detachVolume(_ volume: String) {
+        do { try diskTool(["detach", volume]) } catch { XCTFail("Fixture detach failed: \(error)") }
     }
 
     private func diskTool(_ arguments: [String]) throws {

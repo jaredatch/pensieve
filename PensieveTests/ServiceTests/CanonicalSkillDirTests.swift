@@ -31,6 +31,35 @@ final class CanonicalSkillDirTests: XCTestCase {
         )
     }
 
+    func testLinkedStoreAcceptsNewAndExactlySpelledFolders() throws {
+        let linked = tempDir + "/linked"
+        try fileService.createSymlink(at: linked, pointingTo: baseDir)
+        for base in [try XCTUnwrap(baseDir), linked] {
+            for slug in ["missing", "MiXeD", "café", "cafe\u{301}"] {
+                XCTAssertEqual(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService), base + "/" + slug)
+                try fileService.createDirectory(at: base + "/" + slug)
+                XCTAssertEqual(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService), base + "/" + slug)
+            }
+        }
+    }
+
+    func testPlainAndLinkedStoreRejectEscapesAtReadAndWriteBoundary() throws {
+        let linked = tempDir + "/linked"
+        let outside = tempDir + "/outside"
+        try fileService.createSymlink(at: linked, pointingTo: baseDir)
+        try fileService.writeFile(at: outside + "/SKILL.md", content: "precious")
+        try fileService.createSymlink(at: baseDir + "/victim", pointingTo: outside)
+        for base in [try XCTUnwrap(baseDir), linked] {
+            let store = SkillStore(fileService: fileService, baseDir: base, storeRoot: tempDir)
+            for slug in ["victim", "..", ".", "", "victim/child"] {
+                XCTAssertNil(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService))
+                XCTAssertThrowsError(try store.readBody(directoryName: slug))
+                XCTAssertThrowsError(try store.writeBody(directoryName: slug, body: "changed"))
+            }
+        }
+        XCTAssertEqual(try fileService.readFile(at: outside + "/SKILL.md"), "precious")
+    }
+
     func testSymlinkedSlugDirReturnsNil() throws {
         let outside = tempDir + "/outside"
         try FileManager.default.createDirectory(atPath: outside, withIntermediateDirectories: true)

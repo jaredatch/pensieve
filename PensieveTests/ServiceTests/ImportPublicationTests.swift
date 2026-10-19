@@ -45,7 +45,9 @@ final class ImportPublicationTests: XCTestCase {
     }
 
     private func temps() throws -> [String] {
-        try files.listDirectory(at: root).filter { $0.hasPrefix("store.vendor-") }
+        let location = try VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: files)
+        return try files.listDirectory(at: location.parent).filter { $0.hasPrefix(location.prefix) }
+            .map { location.parent + "/" + $0 }
     }
 
     func testReadersSeeOnlyCompleteSkillsAndLiveTempsSurviveSweepForTheBatch() throws {
@@ -59,7 +61,7 @@ final class ImportPublicationTests: XCTestCase {
             XCTAssertFalse(try self.files.listDirectory(at: self.skills).contains(name))
             XCTAssertNil(SyncLock.tryAcquire(at: self.lockPath), "Lock precedes the first build and covers the next one")
             XCTAssertEqual((path as NSString).deletingLastPathComponent,
-                self.root + "/" + (try XCTUnwrap(try self.temps().first)))
+                try XCTUnwrap(try self.temps().first))
             SkillInstallService.cleanupVendorTemps(fileService: self.files, storeRoot: self.storeRoot, lockPath: self.lockPath)
             XCTAssertTrue(self.files.directoryExists(at: (path as NSString).deletingLastPathComponent))
         }
@@ -135,23 +137,6 @@ final class ImportPublicationTests: XCTestCase {
         XCTAssertTrue(try temps().isEmpty)
         XCTAssertFalse(files.fileExists(at: stagedFile))
         XCTAssertTrue(try files.listDirectory(at: skills).isEmpty)
-    }
-
-    func testOccupiedSlugsKeepTheirEntryTypesAndBytes() throws {
-        for kind in ["file", "link", "empty"] {
-            let name = kind.capitalized
-            let path = skills + "/" + kind
-            try occupy(path, kind: kind)
-            let identity = try XCTUnwrap(files.fileIdentity(at: path, followingLinks: false))
-            let model = try model(names: [name])
-            model.selectedSkills = Set(model.discoveredSkills.filter { $0.name == name }.map(\.sourcePath))
-            let context = try context()
-            model.importSelected(context: context)
-            XCTAssertNil(model.error)
-            XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), [kind + "-2"])
-            try assertOccupant(path, kind: kind, identity: identity)
-            XCTAssertEqual(try files.readFile(at: skills + "/" + kind + "-2/SKILL.md"), content(name))
-        }
     }
 
     func testSlugClaimedDuringBuildIsNeverReplacedAndOtherSkillsImport() throws {
@@ -269,5 +254,33 @@ final class ImportPublicationTests: XCTestCase {
     private func stop(_ process: Process) {
         if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         process.waitUntilExit()
+    }
+}
+
+extension ImportPublicationTests {
+    func testOccupiedSlugsKeepTheirEntryTypesAndBytes() throws {
+        try assertOccupiedSlugsPreserved()
+        try files.deleteDirectory(at: storeRoot)
+        let real = root + "/real-store"
+        try files.createDirectory(at: real + "/skills")
+        try files.createSymlink(at: storeRoot, pointingTo: real)
+        try assertOccupiedSlugsPreserved()
+    }
+
+    private func assertOccupiedSlugsPreserved() throws {
+        for kind in ["file", "link", "empty"] {
+            let name = kind.capitalized
+            let path = skills + "/" + kind
+            try occupy(path, kind: kind)
+            let identity = try XCTUnwrap(files.fileIdentity(at: path, followingLinks: false))
+            let model = try model(names: [name])
+            model.selectedSkills = Set(model.discoveredSkills.filter { $0.name == name }.map(\.sourcePath))
+            let context = try context()
+            model.importSelected(context: context)
+            XCTAssertNil(model.error)
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), [kind + "-2"])
+            try assertOccupant(path, kind: kind, identity: identity)
+            XCTAssertEqual(try files.readFile(at: skills + "/" + kind + "-2/SKILL.md"), content(name))
+        }
     }
 }

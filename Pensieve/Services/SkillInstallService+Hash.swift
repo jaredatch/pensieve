@@ -38,7 +38,7 @@ extension SkillInstallService {
             at: sourceDirectory,
             excludingTopLevelGitMetadata: excludingTopLevelGitMetadata
         )
-        let temp = VendorTemporaryDirectory.makePath(storeRoot: storeRoot)
+        let temp = try VendorTemporaryDirectory.makePath(storeRoot: storeRoot, fileService: fileService)
         do {
             try fileService.createDirectory(at: temp)
             for entry in entries where entry.isDirectory {
@@ -74,7 +74,17 @@ extension SkillInstallService {
         let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
         guard externallyHeldLock || lock != nil else { return }
         defer { lock?.release() }
-        let (parent, prefix) = VendorTemporaryDirectory.namespace(storeRoot: storeRoot)
+        var locations = [((storeRoot as NSString).deletingLastPathComponent,
+                          (storeRoot as NSString).lastPathComponent + ".vendor-")]
+        if let current = try? VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: fileService) {
+            locations.append(current)
+        }
+        for (parent, prefix) in locations {
+            cleanupVendorTemps(fileService: fileService, parent: parent, prefix: prefix)
+        }
+    }
+
+    private static func cleanupVendorTemps(fileService: FileServiceProtocol, parent: String, prefix: String) {
         guard !fileService.isSymlink(at: parent),
               fileService.directoryExists(at: parent),
               let entries = try? fileService.listDirectory(at: parent) else {

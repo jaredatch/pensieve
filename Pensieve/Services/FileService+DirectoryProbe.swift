@@ -85,3 +85,18 @@ extension FileServiceProtocol {
             metadata: Data("\(String(describing: identity)):\(String(describing: metadata))".utf8))
     }
 }
+
+extension FileServiceProtocol {
+    /// Compare one directory entry with its resolved parent. Missing leaves inherit the parent's
+    /// spelling, so links in ancestors and /private aliases resolve identically on both sides.
+    func isRealpathContained(_ path: String) -> Bool {
+        let parent = (path as NSString).deletingLastPathComponent
+        let leaf = (path as NSString).lastPathComponent
+        let expected = realPath(at: parent) + "/" + leaf
+        var resolved = realPath(at: path)
+        if resolved == path, !directoryExists(at: path), !fileExists(at: path), !isSymlink(at: path) {
+            resolved = expected
+        }
+        return resolved == expected
+    }
+}

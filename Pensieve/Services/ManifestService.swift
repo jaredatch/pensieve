@@ -42,11 +42,9 @@ struct ManifestService: ManifestReadWriting {
         guard try admitsWrite(root: root, replacing: damage) else { return false }
         try validateSnapshotForWrite(snapshot)
 
-        // Whole tree built in a SIBLING temp OUTSIDE the repo (sync's `git add -A` can't push a partial build;
-        // same volume for `replaceItem`'s atomic swap); UUID-unique temp so concurrent writers never collide.
-        let parent = (root as NSString).deletingLastPathComponent
-        let base = (root as NSString).lastPathComponent
-        let tmpDir = parent + "/" + base + ".manifest-build-" + UUID().uuidString + ".tmp"
+        // Complete the tree outside the store, on its device, before the atomic swap.
+        if !fileService.directoryExists(at: root) { try fileService.createDirectory(at: root) }
+        let tmpDir = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: "manifest-build")
         let categoriesDir = tmpDir + "/categories"
         let skillsDir = tmpDir + "/skills"
         let deploysDir = tmpDir + "/deploys"
@@ -76,9 +74,6 @@ struct ManifestService: ManifestReadWriting {
                 at: tmpDir + "/projects.yaml",
                 content: Self.serializeProjects(snapshot.projects)
             )
-            if !fileService.directoryExists(at: root) {
-                try fileService.createDirectory(at: root)
-            }
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
             return true
         } catch {

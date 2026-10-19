@@ -76,6 +76,25 @@ final class DeployReconcilerPruneTests: XCTestCase {
         XCTAssertFalse(fileService.isSymlink(at: agentDir + "/gone"))
     }
 
+    func testLinkedStorePrunesOwnedDanglingLinkAndKeepsRedirectedAgentFolder() throws {
+        let linked = tempDir + "/home/.pensieve"
+        try fileService.createSymlink(at: linked, pointingTo: tempDir + "/store")
+        storeSkillsDir = linked + "/skills"
+        let owned = agentDir + "/gone"
+        try link("gone", to: storeSkillsDir + "/gone")
+        try deployStateStore.replaceAll([record(slug: "gone", artifactPath: owned)])
+        let outside = tempDir + "/outside"
+        try fileService.createSymlink(at: outside + "/kept", pointingTo: storeSkillsDir + "/kept")
+        let redirected = tempDir + "/redirected-agent/skills"
+        try fileService.createSymlink(at: redirected, pointingTo: outside)
+        let result = makeReconciler(agentDirs: [agentDir, redirected]).pruneDangling()
+        XCTAssertEqual(result.removed, [owned])
+        XCTAssertFalse(fileService.isSymlink(at: owned))
+        XCTAssertEqual(result.skippedDirs, [redirected])
+        XCTAssertTrue(fileService.isSymlink(at: outside + "/kept"))
+        XCTAssertEqual(try deployStateStore.read().records, [])
+    }
+
     /// (b) A Pensieve symlink whose canonical store dir still exists survives.
     func testLivePensieveLinkSurvives() throws {
         try makeStoreSkill("live")

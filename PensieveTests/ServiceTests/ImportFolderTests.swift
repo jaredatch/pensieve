@@ -39,7 +39,9 @@ final class ImportFolderTests: XCTestCase {
     }
 
     func assertNoTemps(file: StaticString = #filePath, line: UInt = #line) throws {
-        XCTAssertFalse(try files.listDirectory(at: root).contains { $0.hasPrefix("store.vendor-") }, file: file, line: line)
+        let location = try VendorTemporaryDirectory.namespace(storeRoot: store, fileService: files)
+        XCTAssertFalse(try files.listDirectory(at: location.parent).contains { $0.hasPrefix(location.prefix) },
+                       file: file, line: line)
     }
 
     func assertRendered(_ notices: [String], model: ImportViewModel, uniqueFailure: String? = nil) async throws {

@@ -58,7 +58,7 @@ extension FileService {
             directory = metadata
         } else {
             guard !control else { throw CocoaError(.fileNoSuchFile) }
-            let parent = try skillTemporaryParent(root: root)
+            let parent = try storeTemporaryParent(root: root)
             let candidates = try skillNamespaces(root: root, parent: parent)
             guard let candidate = candidates.first(where: {
                 let type = try? entryTypeWithoutFollowingLinks(at: $0)
@@ -97,7 +97,7 @@ extension FileService {
         if sameStoreDevice(system, root) {
             parent = try? resolveRealPath(at: system)
         } else if metadata == nil {
-            parent = try? skillTemporaryParent(root: root)
+            parent = try? storeTemporaryParent(root: root)
         } else { parent = nil }
         guard let parent, let candidates = try? skillNamespaces(root: root, parent: parent) else { return }
         for directory in candidates { cleanStoreDirectory(directory) }
@@ -118,7 +118,7 @@ extension FileService {
         return device == fileIdentity(at: second, followingLinks: true)?.device
     }
 
-    private func skillTemporaryParent(root: String) throws -> String {
+    func storeTemporaryParent(root: String) throws -> String {
         let store = try resolveRealPath(at: root)
         var parent = FileManager.default.temporaryDirectory.path
         if !sameStoreDevice(parent, store) {

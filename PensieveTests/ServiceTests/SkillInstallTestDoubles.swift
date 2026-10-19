@@ -16,6 +16,8 @@ struct ReverseListingFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -49,8 +51,13 @@ struct FailingCopyFileService: FileServiceProtocol {
     }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -88,6 +95,8 @@ final class RecordingVendorFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws {
         if !reachedSwap {
             pathsCreatedBeforeSwap.append(path)
@@ -131,6 +140,8 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
