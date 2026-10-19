@@ -65,6 +65,7 @@ final class DeployIntentModel {
     @discardableResult
     func setSelected(_ selected: Bool, machineID: String, skill: Skill, platform: PlatformTarget,
                      context: ModelContext) throws -> BatchResult? {
+        catalogRefreshWarning = nil
         let result = try reportErrors {
             try service.setSelected(selected, machineID: machineID, skill: skill, platform: platform, context: context)
         }

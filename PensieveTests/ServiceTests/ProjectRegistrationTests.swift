@@ -41,10 +41,11 @@ final class ProjectRegistrationTests: XCTestCase {
         let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [], physicalSandbox: root)
         mapped.beforeArtifactCreation = { _ in throw StubError.identityUnavailable }
         let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
-        XCTAssertThrowsError(try ProjectRegistration.register(project, context: context, files: mapped) {
+        XCTAssertThrowsError(try ProjectRegistration.register(project, context: context, files: mapped,
+            identityService: ProjectIdentityService(fileService: mapped)) {
             context.insert($0)
             try context.save()
-            return $0
+            return $0.persistentModelID
         }) { error in
             XCTAssertTrue(error is StubError)
         }

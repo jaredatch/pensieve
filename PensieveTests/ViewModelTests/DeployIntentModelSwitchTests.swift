@@ -11,7 +11,11 @@ extension DeployIntentModelTests {
     func testSelectionReturnsAppliedResultAlongsideCatalogRefreshWarning() throws {
         for target in [localID, remoteID] {
             let identity = ReloadFailingIdentity(id: localID)
-            let harness = try makeHarness(identity: identity, onReconcile: { identity.fails = true })
+            var failWrite = false
+            let harness = try makeHarness(saveContext: { context in
+                if failWrite { throw DeployStubFailure() }
+                try context.save()
+            }, identity: identity, onReconcile: { identity.fails = true })
             let skill = try insertSkill(context: harness.context)
             harness.model.reload(context: harness.context)
             let machines = harness.model.machines
@@ -36,6 +40,16 @@ extension DeployIntentModelTests {
                 XCTAssertEqual(manifest.deployIntents.count, selected ? 1 : 0)
                 XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), selected ? 1 : 0)
                 XCTAssertEqual(harness.model.machines, machines, "A failed refresh keeps the last catalog")
+                if selected {
+                    identity.fails = false
+                    failWrite = true
+                    XCTAssertThrowsError(try harness.model.setSelected(
+                        false, machineID: target, skill: skill, platform: .codex, context: harness.context
+                    ))
+                    XCTAssertEqual(harness.model.error, DeployStubFailure().localizedDescription)
+                    XCTAssertNil(harness.model.catalogRefreshWarning, "A failed write must clear the previous refresh warning")
+                    failWrite = false
+                }
             }
             identity.fails = false
             harness.model.reload(context: harness.context)

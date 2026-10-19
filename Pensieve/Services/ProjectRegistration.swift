@@ -25,18 +25,22 @@ enum ProjectRegistration {
     /// Both entry points hold the same lock from the duplicate lookup through the marker and save.
     /// The caller owns its context on this thread; no actor hop occurs inside the transaction.
     static func register(_ project: Project, context: ModelContext, files: FileServiceProtocol,
-                         save: (Project) throws -> Project) throws -> Project {
+                         identityService: ProjectIdentityServiceProtocol,
+                         save: (Project) throws -> PersistentIdentifier) throws -> (id: PersistentIdentifier, didSave: Bool) {
         try registrationLock.withLock {
             let resolved = files.realPath(at: project.path)
             let existing = try context.fetch(FetchDescriptor<Project>()).filter {
                 files.realPath(at: $0.path) == resolved
             }
-            if let existing = existing.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first { return existing }
-            return try ProjectIdentityService(fileService: files).withIdentity(forProjectAt: project.path) { identity in
+            if let existing = existing.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first {
+                return (existing.persistentModelID, false)
+            }
+            let id = try identityService.withIdentity(forProjectAt: project.path) { identity in
                 project.identityKey = identity.key
                 project.identityKind = identity.kind.rawValue
                 return try save(project)
             }
+            return (id, true)
         }
     }
 }

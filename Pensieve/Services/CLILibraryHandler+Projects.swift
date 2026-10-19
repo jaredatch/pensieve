@@ -41,19 +41,19 @@ extension CLILibraryHandler {
         let container = context.container
         let saved = try await BlockingWork.run {
             let registrationContext = ModelContext(container)
-            let registered = try ProjectRegistration.register(project, context: registrationContext, files: files) {
-                registrationContext.insert($0)
-                try registrationContext.save()
-                return $0
+            return try ProjectRegistration.register(project, context: registrationContext, files: files,
+                                                    identityService: identity) {
+                try saveProjectRegistration($0, container: container)
             }
-            return (registered.persistentModelID, registered.id == project.id)
         }
-        guard let registered = context.model(for: saved.0) as? Project else {
+        guard let registered = context.model(for: saved.id) as? Project else {
             throw CocoaError(.persistentStoreOperation)
         }
-        _ = runtime.reconcileIntent(context)
-        runtime.syncStateNotifier()
-        return success(projectValue(registered), changed: saved.1)
+        if saved.didSave {
+            _ = runtime.reconcileIntent(context)
+            runtime.syncStateNotifier()
+        }
+        return success(projectValue(registered), changed: saved.didSave)
     }
 
     private func requireUnchangedProjects(_ snapshots: [(id: UUID, path: String)]) throws {

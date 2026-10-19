@@ -130,11 +130,17 @@ final class AddProjectModel {
     func register(_ project: Project, context: ModelContext,
                   intentReconciler: (@MainActor (ModelContext) -> BatchResult)? = nil,
                   notifier: SyncStateNotifying = SyncStateNotifier.suppressed) throws -> Project {
-        let registered = try ProjectRegistration.register(project, context: context, files: fileService) {
-            try registerProject($0, context: context)
+        let saved = try ProjectRegistration.register(project, context: context, files: fileService,
+                                                     identityService: identityService) {
+            try saveProjectRegistration($0, container: context.container)
         }
-        _ = intentReconciler?(context)
-        notifier()
+        guard let registered = context.model(for: saved.id) as? Project else {
+            throw CocoaError(.persistentStoreOperation)
+        }
+        if saved.didSave {
+            _ = intentReconciler?(context)
+            notifier()
+        }
         return registered
     }
 

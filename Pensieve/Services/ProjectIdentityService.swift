@@ -11,7 +11,7 @@ struct ProjectIdentity: Equatable {
 }
 
 protocol ProjectIdentityServiceProtocol {
-    func identity(forProjectAt path: String) throws -> ProjectIdentity
+    func withIdentity<Value>(forProjectAt path: String, save: (ProjectIdentity) throws -> Value) throws -> Value
     func peekIdentity(forProjectAt path: String) -> ProjectIdentity?
 }
 
@@ -28,7 +28,7 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
     }
 
     /// Keep competing registrations from replacing or adopting a marker until its save succeeds.
-    /// Only a marker created by this attempt is removed when persistence fails.
+    /// The callback must end at persistence; later work belongs outside this transaction.
     func withIdentity<Value>(forProjectAt path: String, save: (ProjectIdentity) throws -> Value) throws -> Value {
         let project = try fileService.requireProjectDirectory(at: path)
         return try Self.markerLock.withLock {
@@ -52,9 +52,9 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
             } catch {
                 if (try? fileService.readFile(at: markerPath)) == content {
                     if let previousMarker {
-                        try fileService.writeFileInProject(at: markerPath, content: previousMarker, project: project)
+                        try? fileService.writeFileInProject(at: markerPath, content: previousMarker, project: project)
                     } else if !hadMarker {
-                        try fileService.deleteFile(at: markerPath)
+                        try? fileService.deleteFile(at: markerPath)
                     }
                 }
                 throw error

@@ -107,8 +107,13 @@ extension CLILibraryHandlerTests {
         await TestWait.until(failureMessage: "CLI marker write held") { gate.waiterCount == 1 }
         sheetFiles.beforeProjectProbe = { gate.open() }
         var sheetProject: Project?
+        var reconciles = 0
+        var nudges = 0
         model.submit { project in
-            do { sheetProject = try model.register(project, context: h.context) } catch { XCTFail(String(describing: error)) }
+            do {
+                sheetProject = try model.register(project, context: h.context,
+                    intentReconciler: { _ in reconciles += 1; return BatchResult() }, notifier: { nudges += 1 })
+            } catch { XCTFail(String(describing: error)) }
         }
         let reply = await pending.value
         XCTAssertTrue(reply.envelope.ok)
@@ -118,6 +123,8 @@ extension CLILibraryHandlerTests {
         XCTAssertEqual(rows.first?.identityKey,
                        ProjectIdentityService.parseMarkerID(from: try h.files.readFile(at: folder + "/.pensieve-project")))
         XCTAssertEqual(files.markerWriteCount + sheetFiles.markerWriteCount, 1)
+        XCTAssertEqual(reconciles, 0, "Joining a registration must not reconcile")
+        XCTAssertEqual(nudges, 0, "Joining a registration must not publish")
     }
 
     func testCompetingCLIAndSheetAddsKeepTheRegisteredMarker() async throws {
