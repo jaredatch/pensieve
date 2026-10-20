@@ -37,10 +37,10 @@ final class ManifestSaveModel {
     var pausedForRepair = false
     var hasActiveSaves: Bool { pendingCount > 0 && !pausedForRepair }
     @ObservationIgnored var refused: [ManifestRefusedEdit] = []
-    typealias OrderedCategoryNotice = (order: Int, entry: CategorySaveNotice.Entry)
+    private typealias OrderedCategoryNotice = (order: Int, entry: CategorySaveNotice.Entry)
     @ObservationIgnored private var nextOrder = 0
     @ObservationIgnored private var categoryMessages: [OrderedCategoryNotice] = []
-    @ObservationIgnored var stagedRefusals: [UUID: () -> Void] = [:]
+    @ObservationIgnored var stagedRefusals: [(id: UUID, complete: () -> Void)] = []
     @ObservationIgnored var worker: Task<Void, Never>?
 
     struct Item {
@@ -296,15 +296,15 @@ extension ManifestSaveModel {
 
     @MainActor
     func stageCategoryRefusal(_ item: Item, durable: ManifestSnapshot?, error: Error) {
-        guard stagedRefusals[item.id] == nil else { return }
-        stagedRefusals[item.id] = prepareCategoryRefusal(item, durable: durable, error: error)
+        guard !stagedRefusals.contains(where: { $0.id == item.id }) else { return }
+        stagedRefusals.append((item.id, prepareCategoryRefusal(item, durable: durable, error: error)))
     }
 
     @MainActor
     func finishStagedRefusals() {
-        let completions = stagedRefusals.values
-        stagedRefusals = [:]
-        for complete in completions { complete() }
+        let completions = stagedRefusals
+        stagedRefusals = []
+        for completion in completions { completion.complete() }
     }
 
     @MainActor

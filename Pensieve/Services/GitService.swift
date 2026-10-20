@@ -773,8 +773,8 @@ extension GitService {
             try store.runOrThrow(["rebase", "--abort"])
         } catch {
             let paths = abortBlockingFolders(error)
+            guard !paths.isEmpty else { throw error }
             guard let permittedFolder else {
-                guard !paths.isEmpty else { throw error }
                 throw ConflictAbortBlocked(paths: paths, underlying: error)
             }
             try finishRefusedAbort(error, paths: paths, permittedFolder: permittedFolder, root: path)
@@ -797,7 +797,6 @@ extension GitService {
 
     /// Native abort runs first. Validate its exact obstruction before discarding anything.
     private func finishRefusedAbort(_ failure: Error, paths: [String], permittedFolder: String, root: String) throws {
-        guard !paths.isEmpty else { throw failure }
         let blocked = ConflictAbortBlocked(paths: paths, underlying: failure)
         guard paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw blocked }
         do {

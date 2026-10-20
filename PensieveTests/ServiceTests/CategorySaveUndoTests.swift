@@ -66,6 +66,37 @@ final class CategorySaveUndoTests: XCTestCase {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories, peer.categories.sorted { $0.name < $1.name })
     }
 
+    func testStagedRefusalsReportAndReconcileInQueueOrder() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let queued = (0..<8).map { Pensieve.Category(name: "Queued \($0)") }
+        for category in queued { h.context.insert(category) }
+        try h.context.save()
+        try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { held.release() }
+        h.library.updateMetadata(h.alpha, tags: ["head edit"], scope: .user, context: h.context)
+        var peer = try h.manifest.read(fromRoot: h.root)
+        var callbacks: [String] = []
+        for (index, category) in queued.enumerated() {
+            let name = "Taken \(index)"
+            let edit = CategorySaveEdit(category: category, context: h.context,
+                                        change: .renameCategory(category.name, name))
+            category.name = name
+            try edit.save(in: h.context)
+            h.saves.submit(edit.change, context: h.context, categoryEdit: edit, reconcile: {
+                callbacks.append("reconcile \(index)")
+                return BatchResult()
+            }, report: { _ in callbacks.append("report \(index)") })
+            peer.categories.append(CategoryRecord(name: name, projectKeys: ["peer"], skillSlugs: []))
+        }
+        try h.manifest.write(peer, toRoot: h.root)
+        held.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(callbacks, (0..<8).flatMap { ["report \($0)", "reconcile \($0)"] },
+                       "Independent refused edits must report and reconcile in queue order")
+    }
+
     func testRefusedCreateAndDependentRenameLeaveNoCategory() async throws {
         let h = try ManifestSaveFixture(unopenableLock: true)
         defer { h.cleanup() }
