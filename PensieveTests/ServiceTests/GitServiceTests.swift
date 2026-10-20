@@ -1184,3 +1184,38 @@ extension GitServiceTests {
         """)
     }
 }
+
+extension GitServiceTests {
+    func testManifestAdmissionPreservesUntrackedPathBytes() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let root = tempDir + "/store"
+            try files.createDirectory(at: root)
+            try git.initRepository(at: root)
+            try files.writeFile(at: root + "/manifest/manifest.yaml", content: "damaged\n")
+            _ = try git.stageAllAndCommit(at: root, message: "committed damage")
+            let executable = tempDir + "/manifest-listing-git"
+            for visible in [false, true] {
+                let entry = Data("manifest/categories/".utf8)
+                    + Data((visible ? ".env." : "node_modules/").utf8) + Data([0xFF])
+                    + Data((visible ? ".yaml\0" : "\0").utf8)
+                try files.writeExecutableFile(at: executable, content: """
+                    #!/bin/sh
+                    is_manifest_listing() {
+                        \(FakeGitScript.skipGlobalOptions)
+                        [ "$1" = ls-files ] || return 1
+                        case "$*" in *--directory*) return 0 ;; *) return 1 ;; esac
+                    }
+                    if is_manifest_listing "$@"; then
+                        printf '%s' '\(entry.base64EncodedString())' | /usr/bin/base64 -D
+                        exit 0
+                    fi
+                    exec /usr/bin/git "$@"
+                    """ + "\n")
+                let listing = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+                XCTAssertEqual(try listing.manifestMatchesHead(at: root), !visible,
+                               "Invalid UTF-8 must not erase a parser-visible untracked path")
+            }
+        }
+    }
+}

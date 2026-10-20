@@ -103,7 +103,10 @@ extension ManifestSaveModel {
 
     @MainActor
     func replaceWithThisMac(context: ModelContext) async {
-        guard let expected = confirmedDamage else { return }
+        guard let expected = confirmedDamage else {
+            await refreshDamage()
+            return
+        }
         cancelRepair()
         repairError = nil
         var held: SyncLock?

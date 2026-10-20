@@ -51,6 +51,11 @@ enum SyncError: LocalizedError, Equatable {
     }
 }
 
+/// A recovery refusal still means damaged library; retain the cause for the cycle's UI and audit.
+struct ManifestRecoveryFailure: Error {
+    let underlying: Error
+}
+
 // MARK: - Protocol
 
 protocol SyncEngineProtocol {
@@ -141,7 +146,9 @@ struct SyncEngine: SyncEngineProtocol {
         let recoveredByPull = try recoverCommittedDamage(root: root, credential: credential)
 
         let headStamp = GitHeadStamp(fileService: fileService)
-        let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
+        // Recovery already checked the scoped, pinned revision. Pull still rechecks collisions
+        // after preparation, including protected files created while preparing the snapshot.
+        let incoming = recoveredByPull ? nil : try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
         try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
 
@@ -288,14 +295,13 @@ struct SyncEngine: SyncEngineProtocol {
             try requireReadableManifest(root: root)
             return false
         } catch ManifestError.damaged {
-            guard gitService.isWorktreeClean(at: root) else { throw ManifestError.damaged }
-            do {
-                guard try gitService.manifestMatchesHead(at: root),
-                      case .fastForwarded = try gitService.fastForwardOnly(at: root, credential: credential) else {
-                    throw ManifestError.damaged
-                }
-            } catch {
-                // Fetch, divergence and protected-file refusals leave the repair offer in place.
+            let recovery = Result { () throws -> FastForwardResult in
+                guard gitService.isWorktreeClean(at: root),
+                      try gitService.manifestMatchesHead(at: root) else { return .upToDate }
+                return try gitService.fastForwardOnly(at: root, credential: credential)
+            }
+            guard case .success(.fastForwarded) = recovery else {
+                if case let .failure(error) = recovery { throw ManifestRecoveryFailure(underlying: error) }
                 throw ManifestError.damaged
             }
             try requireReadableManifest(root: root)

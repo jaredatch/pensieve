@@ -20,28 +20,25 @@ extension GitService {
         let difference = try store.run(args)
         if difference.exit == 1 { return false }
         guard difference.exit == 0 else { throw commandError(difference, args: ["-C", path] + args) }
-        let untracked = try store.runOrThrow(["ls-files", "--others", "--directory", "-z", "--", ":(literal)manifest"])
-        // Git can collapse an untracked container into one entry. Inspect its children using
-        // the same rule as individually listed additions; empty writer containers also match.
-        let containers = ["manifest/categories/", "manifest/skills/", "manifest/deploys/"]
-        return try untracked.stdout.split(separator: "\0").allSatisfy { entry in
-            let entry = String(entry)
-            if isIgnoredManifestAddition(entry) { return true }
-            guard containers.contains(entry) else { return false }
-            return try fileService.listDirectory(at: path + "/" + entry).allSatisfy {
-                isIgnoredManifestAddition(entry + $0)
-            }
+        let listingArgs = ["ls-files", "--others", "--directory", "-z", "--", ":(literal)manifest"]
+        let untracked = try store.runData(listingArgs)
+        guard untracked.exit == 0 else { throw dataCommandError(untracked, args: ["-C", path] + listingArgs) }
+        // Git can collapse untracked directories. Excluded leaves are checked as bytes;
+        // visible containers match only when the reader permits them and no visible child remains.
+        func matches(_ entry: Data.SubSequence) throws -> Bool {
+            let parts = entry.split(separator: 0x2F)
+            guard parts.first?.elementsEqual("manifest".utf8) == true, let leaf = parts.last else { return false }
+            let relative = entry.dropFirst("manifest/".utf8.count)
+            if StoreExclusions.isExcludedFile(entry) || StoreExclusions.isExcludedDirectory(leaf),
+               ManifestService.ignoresEntry(at: relative) { return true }
+            guard let name = String(bytes: entry, encoding: .utf8),
+                  try fileService.entryTypeWithoutFollowingLinks(at: path + "/" + name) == .directory else { return false }
+            let prefix = entry.last == 0x2F ? Data(entry) : Data(entry) + Data([0x2F])
+            return try fileService.listDirectory(at: path + "/" + name).allSatisfy {
+                try matches(prefix + Data($0.utf8))
+            } && ManifestService.ignoresEntry(at: relative, emptyDirectory: true)
         }
-    }
-
-    private func isIgnoredManifestAddition(_ path: String) -> Bool {
-        guard StoreExclusions.isExcludedFile(Data(path.utf8)) else { return false }
-        let parts = PathSyntax.components(path)
-        guard parts.first == "manifest", parts.count >= 2 else { return false }
-        // Root exclusions are not schema/projects files. Category and skill readers skip
-        // non-YAML entries; deploy readers validate all entries, including excluded names.
-        if parts.count == 2 { return true }
-        return (parts[1] == "categories" || parts[1] == "skills") && !parts[2].hasSuffix(".yaml")
+        return try untracked.stdout.split(separator: 0).allSatisfy(matches)
     }
 
     /// True iff the worktree has no uncommitted changes sync would stage. New nested repositories

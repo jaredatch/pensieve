@@ -49,6 +49,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Finder metadata in the synced library no longer triggers a false damage warning or blocks a repair from another Mac.
 - Sync can pull a repaired library file from another Mac when the damage is already committed and this Mac has no pending file changes. Waiting edits then save, and the repair offer closes.
 
 - A queued library edit retries when another tool commits to the library during its save, instead of being undone.

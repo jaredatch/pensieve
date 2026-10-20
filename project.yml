@@ -122,6 +122,9 @@ targets:
       - path: Pensieve/Services/SkillParser+Preservation.swift
       - path: Pensieve/Services/SkillSerializer.swift
       - path: Pensieve/Services/CheckedYAMLLoader.swift
+      - path: Pensieve/Services/ManifestTypes.swift
+      - path: Pensieve/Services/ManifestService.swift
+      - path: Pensieve/Services/ManifestService+DeployIntents.swift
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Utilities/BlockingWork.swift

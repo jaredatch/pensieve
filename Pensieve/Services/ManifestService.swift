@@ -156,7 +156,8 @@ struct ManifestService: ManifestReadWriting {
         var categories: [CategoryRecord] = []
         let categoriesDir = manifestDir + "/categories"
         guard try manifestDirectoryExists(at: categoriesDir) else { return [] }
-        for entry in try fileService.listDirectory(at: categoriesDir) where entry.hasSuffix(".yaml") {
+        for entry in try fileService.listDirectory(at: categoriesDir)
+            where !Self.ignoresEntry(at: Data(("categories/" + entry).utf8)) {
             guard let content = try? readManifestText(at: categoriesDir + "/" + entry),
                   let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                   let name = obj["name"] as? String else {
@@ -175,7 +176,8 @@ struct ManifestService: ManifestReadWriting {
         var skills: [SkillOverlay] = []
         let skillsDir = manifestDir + "/skills"
         if try manifestDirectoryExists(at: skillsDir) {
-            for entry in try fileService.listDirectory(at: skillsDir) where entry.hasSuffix(".yaml") {
+            for entry in try fileService.listDirectory(at: skillsDir)
+                where !Self.ignoresEntry(at: Data(("skills/" + entry).utf8)) {
                 guard let content = try? readManifestText(at: skillsDir + "/" + entry),
                       let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                       let slug = obj["slug"] as? String else {

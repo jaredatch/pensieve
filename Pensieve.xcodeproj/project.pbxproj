@@ -56,6 +56,7 @@
 		0C11B6C4584AA3B0E90F55CF /* ViewChangesFileRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62AF86AF43E2041C26719DED /* ViewChangesFileRow.swift */; };
 		0C8483A0BEEA2EEE2B3FDD22 /* PlatformTarget+CLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C4A05BD7F67E78ED01B73A2 /* PlatformTarget+CLI.swift */; };
 		0C8F6C8AAD9820437E876015 /* FileServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52DCD49B7E167D6577255FC2 /* FileServiceTests.swift */; };
+		0D72AB31823CDC685BC37E0E /* ManifestTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70BD019BE6EBE7B9E3E23880 /* ManifestTypes.swift */; };
 		0D8DCB52C89B1494D5D44C6C /* GitProcessProbe+Cancellation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B63CDE3AA0169CF2451C63 /* GitProcessProbe+Cancellation.swift */; };
 		0DC258219972DC07845F9B1C /* GitCancellation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1691A51735DC973400F7A962 /* GitCancellation.swift */; };
 		0E5D7EE49CFF7285611A7D75 /* ProjectFolderSecondFixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBE185B3FC9F84FDC7D6CDAF /* ProjectFolderSecondFixTests.swift */; };
@@ -114,6 +115,7 @@
 		1A6E33B4A341810F7A208012 /* PathSyntaxGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAAF8309AAFD4BFA1310F2F /* PathSyntaxGuardTests.swift */; };
 		1A7EA9DF758E05FDF3CF148A /* SkillHistoryLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08862F3DB9B3CD83AFD932CC /* SkillHistoryLayoutTests.swift */; };
 		1ABD238E55C0DFB156BA9A23 /* SyncEngineLockTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8D109C7C54D1756CB77B5A /* SyncEngineLockTests.swift */; };
+		1AEE9EBBD93956C1C3694349 /* ManifestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7EF0F5FBE6434FEDE72758 /* ManifestService.swift */; };
 		1B6BBA58365A664E70F91AD2 /* FakeGitScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01296FE1ED341EC4E510BD /* FakeGitScript.swift */; };
 		1B9045FEFEB1E28A80644F83 /* WindowPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45248026A35BAB81A65DA559 /* WindowPolicyTests.swift */; };
 		1C10BC5A955D364F13AAA40C /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = E11E661F870A06624A209BFA /* Yams */; };
@@ -690,6 +692,7 @@
 		904581E32BB2634B60C4FF06 /* IsolatedDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DACB4687F3E214FE37C447B /* IsolatedDefaults.swift */; };
 		907D6222EABAF1717E200815 /* ProjectFolderReviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBAC5F6A464142514A8DA8AF /* ProjectFolderReviewTests.swift */; };
 		90A8E5863508F203A9AD9D94 /* AddEntitySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 672467D86C5783EB1F367122 /* AddEntitySheet.swift */; };
+		90FD63B2B9A1909D28B2A7A4 /* ManifestService+DeployIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BFE973DF07F620C36F86B3 /* ManifestService+DeployIntents.swift */; };
 		912BE4AEE59DDEDE6C9FD8CB /* NativeTestWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BE2C30C65CCD46886F7DCDB /* NativeTestWork.swift */; };
 		913A30EF49D42321D056032A /* SkillInstallViewModel+Collisions.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3025957B0D902516F3B3E9 /* SkillInstallViewModel+Collisions.swift */; };
 		914C6C1B8F73D7DC1C2FD8DD /* WindowPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52941C23B6F842CD0C27D476 /* WindowPolicy.swift */; };
@@ -5250,6 +5253,9 @@
 				2D3720B3866D417745B46D93 /* GitServiceProtocol+CallSite.swift in Sources */,
 				0754FA7A5969771770E7D4E4 /* ImportPublicationFileService.swift in Sources */,
 				650ADA85135BEF3BF10DE560 /* MainThreadGuard.swift in Sources */,
+				90FD63B2B9A1909D28B2A7A4 /* ManifestService+DeployIntents.swift in Sources */,
+				1AEE9EBBD93956C1C3694349 /* ManifestService.swift in Sources */,
+				0D72AB31823CDC685BC37E0E /* ManifestTypes.swift in Sources */,
 				C7FD152FC46799581A4A9E75 /* PathConstants.swift in Sources */,
 				8D35B5CA3C7A939045726750 /* PathSyntax.swift in Sources */,
 				0021527B8B84035850F26BC3 /* PlatformTarget.swift in Sources */,

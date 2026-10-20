@@ -10,13 +10,20 @@ extension IngestPreflightTests {
             defer { h.close() }
             let finderFile = h.f.app + "/manifest/categories/.DS_Store"
             try h.f.files.writeFile(at: finderFile, content: "Finder metadata\n")
+            for addition in ["deploys/.DS_Store", "deploys/00000000-0000-0000-0000-000000000001/.DS_Store",
+                             "categories/node_modules/local.txt", "skills/node_modules/local.txt"] {
+                try h.f.files.writeFile(at: h.f.app + "/manifest/" + addition, content: "ignored\n")
+            }
+            try h.f.files.writeFile(at: h.f.app + "/skills/item/.env", content: "local fixture\n")
             try h.publishRepair()
-            let result = await h.cycle()
+            let result = try await h.cycle(git: h.tracingGit())
             guard case .synced(_, _, _, _, let pulled) = result else {
                 XCTFail("Expected recovery sync for \(path): \(result)")
                 continue
             }
             XCTAssertTrue(pulled, "The recovery fast-forward is a pull even when the later rebase is idle")
+            let checks = try h.f.files.readFile(at: h.f.base + "/collision-checks").split(separator: "\n")
+            XCTAssertEqual(checks.count, 2, "Check once before recovery, then recheck after preparation")
             await h.saves.waitUntilIdle()
             XCTAssertFalse(h.saves.libraryDamaged)
             XCTAssertFalse(h.saves.showsDamageAlert)
@@ -49,6 +56,12 @@ extension IngestPreflightTests {
         await h.saves.replaceWithThisMac(context: h.context)
         XCTAssertEqual(h.manifest.repairs, writes, "A stale Replace must not reach the repair writer")
         XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: h.f.app, files: h.f.files), before)
+        try h.f.files.writeFile(at: h.f.app + "/manifest/manifest.yaml", content: "changed after dismissal\n")
+        let changed = try ManifestSaveFixture.manifestBytes(root: h.f.app, files: h.f.files)
+        await h.saves.replaceWithThisMac(context: h.context)
+        XCTAssertTrue(h.saves.libraryDamaged, "A retired Replace must refresh the latest disk state")
+        XCTAssertEqual(h.manifest.repairs, writes)
+        XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: h.f.app, files: h.f.files), changed)
     }
 
     func testUncommittedDamageRefusesPeerRepair() async throws {
@@ -56,6 +69,17 @@ extension IngestPreflightTests {
             let h = try await peerRepairHarness(path: path, committed: false)
             defer { h.close() }
             try h.publishRepair()
+            await h.assertRefusedUnchanged()
+        }
+        for addition in ["categories/.env.yaml", "deploys/stray.txt",
+                         "deploys/00000000-0000-0000-0000-000000000001/stray.txt"] {
+            let h = try await peerRepairHarness(untrackedCategories: true)
+            defer { h.close() }
+            try h.publishRepair()
+            try h.f.files.writeFile(at: h.f.app + "/manifest/" + addition, content: "invalid\n")
+            try h.f.files.writeFile(at: h.f.app + "/.git/info/exclude", content: "manifest/" + addition + "\n")
+            XCTAssertTrue(try NativeTestWork.run { h.f.git.isWorktreeClean(at: h.f.app) },
+                          "The addition must reach the whole-manifest check")
             await h.assertRefusedUnchanged()
         }
     }
@@ -108,11 +132,21 @@ extension IngestPreflightTests {
     }
 
     func testFailedFetchKeepsDamageAndWaitingEdits() async throws {
-        let h = try await peerRepairHarness()
-        defer { h.close() }
-        try h.publishRepair()
-        try NativeTestWork.run { try h.f.git.setRemote("file://" + h.f.base + "/missing.git", at: h.f.app) }
-        await h.assertRefusedUnchanged()
+        for authentication in [false, true] {
+            let h = try await peerRepairHarness()
+            defer { h.close() }
+            try h.publishRepair()
+            if !authentication {
+                try NativeTestWork.run { try h.f.git.setRemote("file://" + h.f.base + "/missing.git", at: h.f.app) }
+            }
+            try await h.assertRefusedUnchanged(git: h.tracingGit(authenticationFailure: authentication))
+            let status = try JSONDecoder().decode(DaemonStatus.self,
+                from: h.f.files.readData(at: h.f.base + "/audit/daemon-status.json"))
+            XCTAssertEqual(status.result, "failed")
+            XCTAssertTrue(status.detail.contains(authentication ? "Authentication failed" : "missing.git"), status.detail)
+            guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
+            XCTAssertTrue(message.contains(authentication ? "access token" : "missing.git"), message)
+        }
     }
 
     func testProtectedLocalCollisionKeepsDamageAndWaitingEdits() async throws {
@@ -129,6 +163,11 @@ extension IngestPreflightTests {
             XCTAssertTrue(h.f.git.isWorktreeClean(at: h.f.app), "The protected file must reach the collision check")
         }
         await h.assertRefusedUnchanged()
+        let status = try JSONDecoder().decode(DaemonStatus.self,
+            from: h.f.files.readData(at: h.f.base + "/audit/daemon-status.json"))
+        XCTAssertTrue(status.detail.contains("skills/item/.env"), status.detail)
+        guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
+        XCTAssertTrue(message.contains("skills/item/.env"), message)
     }
 
     private func peerRepairHarness(path: String = "manifest.yaml", committed: Bool = true,
@@ -162,6 +201,8 @@ extension IngestPreflightTests {
         await h.saves.waitUntilIdle()
         XCTAssertTrue(h.saves.libraryDamaged)
         XCTAssertTrue(h.saves.showsDamageAlert)
+        XCTAssertTrue(h.runtime.library.addsFenced)
+        XCTAssertFalse(h.runtime.library.categoryEditsFenced)
         XCTAssertEqual(h.saves.pendingCount, 2)
         return h
     }
@@ -176,6 +217,7 @@ private final class PeerRepairHarness {
     let runtime: AppRuntime
     let saves: ManifestSaveModel
     let manifest = PeerRepairManifest()
+    var lastResult: SyncCycleResult?
     var footer: SyncFooterPresentation? {
         SyncFooterPresentation.make(state: .idle, canResolve: false, hovering: false,
                                     now: Date(), libraryDamaged: saves.libraryDamaged)
@@ -205,12 +247,16 @@ private final class PeerRepairHarness {
         }
     }
 
-    func cycle() async -> SyncCycleResult {
+    func cycle(git: GitService? = nil) async -> SyncCycleResult {
+        let git = AllowlistedRemoteGit(wrapping: git ?? f.git)
+        let engine = SyncEngine(gitService: git, storeRebuildService: StoreRebuildService(),
+                                lockPath: f.base + "/sync.lock")
         let coordinator = SyncCoordinator(modelContainer: context.container)
-        await coordinator.configure(engine: f.engine(rebuild: StoreRebuildService()), git: f.git,
-            credentials: IngestEmptyCredentials(), root: f.app, audit: IngestNullAudit(),
+        await coordinator.configure(engine: engine, git: git,
+            credentials: IngestEmptyCredentials(), root: f.app, audit: SyncAudit(appSupport: f.base + "/audit"),
             machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()))
         let result = await coordinator.runCycle()
+        lastResult = result
         await runtime.applyLibrarySyncOutcome(result)
         return result
     }
@@ -224,17 +270,37 @@ private final class PeerRepairHarness {
         XCTAssertEqual(saves.pendingCount, 2, file: file, line: line)
     }
 
-    func assertRefusedUnchanged(file: StaticString = #filePath, line: UInt = #line) async {
+    func assertRefusedUnchanged(git: GitService? = nil, file: StaticString = #filePath, line: UInt = #line) async {
         do {
             let head = GitHeadStamp().read(root: f.app)
             let before = try worktreeBytes()
             let index = try NativeTestWork.run { [f] in try ingestRawGit(["-C", f.app, "ls-files", "--stage", "-z"]) }
-            await assertDamage(await cycle(), file: file, line: line)
+            await assertDamage(await cycle(git: git), file: file, line: line)
             XCTAssertEqual(GitHeadStamp().read(root: f.app), head, file: file, line: line)
             XCTAssertEqual(try worktreeBytes(), before, file: file, line: line)
             XCTAssertEqual(try NativeTestWork.run { [f] in try ingestRawGit(["-C", f.app, "ls-files", "--stage", "-z"]) },
                            index, file: file, line: line)
         } catch { XCTFail("Fixture failed: \(error)", file: file, line: line) }
+    }
+
+    func tracingGit(authenticationFailure: Bool = false) throws -> GitService {
+        let executable = f.base + "/tracing-git"
+        try f.files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            inspect() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = ls-tree ] && [ "$2" = -r ] && [ "$3" = --name-only ]; then
+                    printf 'check\\n' >> '\(f.base)/collision-checks'
+                fi
+                if [ "$1" = fetch ] && [ '\(authenticationFailure)' = true ]; then
+                    echo "fatal: Authentication failed for 'https://fixture.test/x.git'" >&2
+                    exit 128
+                fi
+            }
+            inspect "$@"
+            exec /usr/bin/git "$@"
+            """ + "\n")
+        return GitService(askpassHelperPath: f.base + "/askpass", executablePath: executable)
     }
 
     private func worktreeBytes() throws -> [String: Data] {

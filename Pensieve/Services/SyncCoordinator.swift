@@ -131,7 +131,12 @@ actor SyncCoordinator {
                                  preparedHeadStamp: preparedHeadStamp, preflightAdvanced: preflightAdvanced)
         } catch {
             cycleError = error
-            result = Self.cycleFailure(authentication.reporting(error))
+            if let recovery = error as? ManifestRecoveryFailure {
+                result = .manifestDamaged(ManifestError.damaged.localizedDescription + ". "
+                    + authentication.reporting(recovery.underlying).localizedDescription)
+            } else {
+                result = Self.cycleFailure(authentication.reporting(error))
+            }
         }
         Self.recordAudit(for: result, error: cycleError, audit: audit)
         return result
@@ -146,7 +151,9 @@ actor SyncCoordinator {
     /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.
     private static func recordAudit(for result: SyncCycleResult, error: Error?, audit: SyncAuditWriting) {
         let fields = result.auditFields
-        if let error, case GitError.authenticationFailed = error {
+        if let recovery = error as? ManifestRecoveryFailure {
+            audit.record(category: fields.category, detail: recovery.underlying.localizedDescription)
+        } else if let error, case GitError.authenticationFailed = error {
             audit.record(category: fields.category, detail: error.localizedDescription)
         } else {
             audit.record(category: fields.category, detail: fields.detail)
