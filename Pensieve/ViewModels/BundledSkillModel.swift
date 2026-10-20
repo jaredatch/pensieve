@@ -96,10 +96,11 @@ final class BundledSkillModel {
             state = snapshot.state
             try requireAddsAllowed()
             guard snapshot.skillID == nil else { return }
+            _ = try takenSlugsForAdd(context)
             guard case .found = importer.scanFolder(bundledDirectory) else {
                 throw CommandLinkError(message: "The bundled pensieve skill couldn't be read.")
             }
-            _ = importer.importSelected(context: context)
+            _ = importer.importSelected(context: context, takenSlugs: takenSlugsForAdd)
             guard importer.importedSkillCount > 0, let skill = try Self.findSkill(context, store: library.skillStore) else {
                 throw CommandLinkError(message: importer.error ?? "The skill wasn't added.")
             }
@@ -153,11 +154,23 @@ final class BundledSkillModel {
     }
 
     nonisolated private static func findSkill(_ context: ModelContext, store: SkillStoreProtocol) throws -> Skill? {
-        for skill in try context.fetch(FetchDescriptor<Skill>()) {
+        // Folder and marker sync together. Copies keep the marker, so it alone cannot identify the bundled skill.
+        let descriptor = FetchDescriptor<Skill>(predicate: #Predicate { $0.directoryName == "pensieve" })
+        for skill in try context.fetch(descriptor) {
             guard let bytes = try? store.readData(directoryName: skill.directoryName) else { continue }
             if BundledSkillContent.version(bytes) != nil { return skill }
         }
         return nil
+    }
+
+    private func takenSlugsForAdd(_ context: ModelContext) throws -> Set<String> {
+        let taken = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName))
+        // Check before scanning and again under the import lock, after any pending sync ingestion.
+        guard !taken.contains("pensieve"), try !library.skillStore.slugEntryExists("pensieve") else {
+            throw CommandLinkError(message:
+                "The pensieve folder is taken by another skill. Rename or remove that skill, then try again.")
+        }
+        return taken
     }
 
     private func requireAddsAllowed() throws {

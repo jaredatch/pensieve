@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct ProjectIdentity: Equatable {
     enum Kind: String, Codable {
@@ -11,38 +12,65 @@ struct ProjectIdentity: Equatable {
 }
 
 protocol ProjectIdentityServiceProtocol {
-    func identity(forProjectAt path: String) throws -> ProjectIdentity
+    func withIdentity<Value>(forProjectAt path: String, save: (ProjectIdentity) throws -> Value) throws -> Value
     func peekIdentity(forProjectAt path: String) -> ProjectIdentity?
 }
 
 struct ProjectIdentityService: ProjectIdentityServiceProtocol {
+    private static let markerLock = NSLock()
     private let fileService: FileServiceProtocol
 
     init(fileService: FileServiceProtocol = FileService()) {
         self.fileService = fileService
     }
 
-    func identity(forProjectAt path: String) throws -> ProjectIdentity {
+    /// Keep competing registrations from replacing or adopting a marker until its save succeeds.
+    /// The callback must end at persistence; later work belongs outside this transaction.
+    func withIdentity<Value>(forProjectAt path: String, save: (ProjectIdentity) throws -> Value) throws -> Value {
         let project = try fileService.requireProjectDirectory(at: path)
-        if let existing = peekIdentity(forProjectAt: path) {
-            return existing
+        return try Self.markerLock.withLock {
+            if let existing = peekIdentity(forProjectAt: path) { return try save(existing) }
+            let markerPath = path + "/.pensieve-project"
+            // Preparation can race another writer. Re-read before creating any marker.
+            let previousMarker = try? fileService.readFile(at: markerPath)
+            if let previousMarker, let id = Self.parseMarkerID(from: previousMarker) {
+                return try save(ProjectIdentity(kind: .marker, key: id))
+            }
+            let hadMarker = try fileService.entryExistsWithoutFollowingLinks(at: markerPath)
+            let id = UUID().uuidString
+            let content = """
+            # Pensieve project identity — committed so this project is recognized across machines.
+            id = \(id)
+            format_version = 1
+            """
+            try fileService.writeFileInProject(at: markerPath, content: content, project: project)
+            do {
+                return try save(ProjectIdentity(kind: .marker, key: id))
+            } catch {
+                do {
+                    // A marker already gone is nothing to clean up; only a failed restore or delete is a failure.
+                    if (try? fileService.readFile(at: markerPath)) == content {
+                        if let previousMarker {
+                            try fileService.writeFileInProject(at: markerPath, content: previousMarker, project: project)
+                        } else if !hadMarker {
+                            try fileService.deleteFile(at: markerPath)
+                        }
+                    }
+                } catch {
+                    let reason = error.localizedDescription
+                    let marker = markerPath
+                    Logger(subsystem: "com.jaredatch.pensieve", category: "projects")
+                        .warning("Marker cleanup failed at \(marker, privacy: .public): \(reason, privacy: .public)")
+                }
+                throw error
+            }
         }
-
-        let markerPath = path + "/.pensieve-project"
-        let id = UUID().uuidString
-        let content = """
-        # Pensieve project identity — committed so this project is recognized across machines.
-        id = \(id)
-        format_version = 1
-        """
-        try fileService.writeFileInProject(at: markerPath, content: content, project: project)
-        return ProjectIdentity(kind: .marker, key: id)
     }
 
     /// Read-only identity probe for previews: returns the existing identity (a parseable git remote,
     /// or an existing `.pensieve-project` marker) without creating anything. Returns nil for a
-    /// directory that has neither — the marker is created only by `identity(forProjectAt:)` at the
-    /// registration "Add" action; it does not rewrite an existing identity.
+    /// directory that has neither. Registration finalizes identity around its save; previews
+    /// neither create a marker nor rewrite an existing identity.
     func peekIdentity(forProjectAt path: String) -> ProjectIdentity? {
         // Git worktrees/submodules use a .git file; those intentionally fall through to marker identity.
         if fileService.directoryExists(at: path + "/.git"),

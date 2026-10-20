@@ -306,6 +306,9 @@ private extension ImportViewModel {
         }
         do {
             return try takenSlugs(context).union(skillStore.prepareImport())
+        } catch let refusal as CommandLinkError {
+            self.error = refusal.localizedDescription
+            return nil
         } catch {
             self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"
             return nil

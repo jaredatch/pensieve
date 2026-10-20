@@ -180,7 +180,8 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
         XCTAssertFalse(files.fileExists(at: valid + "/.pensieve-project"))
         let project = try XCTUnwrap(model.makeProject())
-        try registerProject(project, context: context)
+        XCTAssertFalse(files.fileExists(at: valid + "/.pensieve-project"), "Preparing the sheet submission writes nothing")
+        try model.register(project, context: context)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Project>()), 1)
         XCTAssertEqual(project.path, valid)
         XCTAssertEqual(project.identityKind, "marker")
@@ -209,7 +210,10 @@ final class AddProjectModelTests: XCTestCase {
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Linked preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
-        XCTAssertEqual(try XCTUnwrap(model.makeProject()).path, root + "/linked")
+        let project = try XCTUnwrap(model.makeProject())
+        XCTAssertEqual(project.path, root + "/linked")
+        let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        try model.register(project, context: context)
         XCTAssertTrue(files.fileExists(at: root + "/directory/.pensieve-project"))
     }
 
@@ -236,6 +240,60 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
     }
+}
+
+extension AddProjectModelTests {
+    func testFailedSheetSaveLeavesNoMarkerAndCanRetry() async throws {
+        let h = try CLILibraryFixture(readOnly: true)
+        defer { h.stop() }
+        let folder = h.root + "/sheet"
+        try h.files.createDirectory(at: folder)
+        let model = AddProjectModel(fileService: h.files, previewDelay: {})
+        model.name = "Sheet"
+        model.path = folder
+        await TestWait.until(failureMessage: "Sheet preview") { !model.isCheckingIdentity }
+        var failures = 0
+        for _ in 0..<2 {
+            model.submit { project in
+                do { try model.register(project, context: h.context) } catch {
+                    failures += 1
+                    model.allowSubmissionRetry()
+                }
+            }
+            XCTAssertFalse(h.files.fileExists(at: folder + "/.pensieve-project"))
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
+        }
+        XCTAssertEqual(failures, 2)
+        for marker in ["id = 11111111-2222-3333-4444-555555555555\nformat_version = 1\n", "unfinished marker"] {
+            try h.files.writeFile(at: folder + "/.pensieve-project", content: marker)
+            model.submit { project in
+                do {
+                    try model.register(project, context: h.context)
+                    XCTFail("The read-only store must refuse the sheet save")
+                } catch {
+                    model.allowSubmissionRetry()
+                }
+            }
+            XCTAssertEqual(try h.files.readFile(at: folder + "/.pensieve-project"), marker)
+        }
+    }
+
+    func testPreparedSheetAdoptsMarkerWrittenBeforeSave() async throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        let model = AddProjectModel(fileService: h.files, previewDelay: {})
+        model.name = "Sheet"
+        model.path = h.otherProject.path
+        await TestWait.until(failureMessage: "Sheet preview") { !model.isCheckingIdentity }
+        let project = try XCTUnwrap(model.makeProject())
+        let marker = "id = 11111111-2222-3333-4444-555555555555\nformat_version = 1\n"
+        try h.files.writeFile(at: project.path + "/.pensieve-project", content: marker)
+        let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        let saved = try model.register(project, context: context)
+        XCTAssertEqual(saved.identityKey, "11111111-2222-3333-4444-555555555555")
+        XCTAssertEqual(try h.files.readFile(at: project.path + "/.pensieve-project"), marker)
+    }
+
 }
 
 /// NSLock protects the cancellation flag shared by the disk task and the test actor.

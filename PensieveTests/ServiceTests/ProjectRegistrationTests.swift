@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import Pensieve
 
@@ -10,49 +11,46 @@ final class ProjectRegistrationTests: XCTestCase {
     }
 
     func testMakeProjectStoresRemoteIdentity() throws {
-        let project = try ProjectRegistration.makeProject(
-            name: "Pensieve",
-            path: "/tmp/pensieve",
-            using: StubProjectIdentityService(result: .success(ProjectIdentity(kind: .remote, key: "github.com/owner/repo")))
-        )
-
+        let root = TestTemporaryDirectory.path + "ProjectRemote-\(UUID().uuidString)"
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
+        try files.writeFile(at: root + "/.git/config", content: "[remote \"origin\"]\nurl = git@github.com:owner/repo.git\n")
+        let project = try ProjectRegistration.makeProject(name: "Remote", path: root)
         XCTAssertEqual(project.identityKey, "github.com/owner/repo")
         XCTAssertEqual(project.identityKind, "remote")
     }
 
     func testMakeProjectStoresMarkerIdentity() throws {
+        let root = TestTemporaryDirectory.path + "ProjectMarker-\(UUID().uuidString)"
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
         let uuid = "11111111-2222-3333-4444-555555555555"
-
-        let project = try ProjectRegistration.makeProject(
-            name: "Local Project",
-            path: "/tmp/local-project",
-            using: StubProjectIdentityService(result: .success(ProjectIdentity(kind: .marker, key: uuid)))
-        )
-
+        try files.writeFile(at: root + "/.pensieve-project", content: "id = \(uuid)\nformat_version = 1\n")
+        let project = try ProjectRegistration.makeProject(name: "Local", path: root)
         XCTAssertEqual(project.identityKey, uuid)
         XCTAssertEqual(project.identityKind, "marker")
     }
 
-    func testMakeProjectPropagatesIdentityFailure() {
-        XCTAssertThrowsError(try ProjectRegistration.makeProject(
-            name: "Pending Project",
-            path: "/tmp/pending-project",
-            using: StubProjectIdentityService(result: .failure(StubError.identityUnavailable))
-        )) { error in
+    @MainActor
+    func testRegistrationPropagatesIdentityFailure() throws {
+        let root = TestTemporaryDirectory.path + "ProjectIdentityFailure-\(UUID().uuidString)"
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
+        try files.createDirectory(at: root)
+        let project = try ProjectRegistration.makeProject(name: "Pending", path: root)
+        let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [], physicalSandbox: root)
+        mapped.beforeArtifactCreation = { _ in throw StubError.identityUnavailable }
+        let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        XCTAssertThrowsError(try ProjectRegistration.register(project, context: context, files: mapped,
+            identityService: ProjectIdentityService(fileService: mapped)) {
+            context.insert($0)
+            try context.save()
+            return $0.persistentModelID
+        }) { error in
             XCTAssertTrue(error is StubError)
         }
-    }
-}
-
-private struct StubProjectIdentityService: ProjectIdentityServiceProtocol {
-    let result: Result<ProjectIdentity, Error>
-
-    func identity(forProjectAt path: String) throws -> ProjectIdentity {
-        try result.get()
-    }
-
-    func peekIdentity(forProjectAt path: String) -> ProjectIdentity? {
-        try? result.get()
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Project>()), 0)
+        XCTAssertFalse(files.fileExists(at: root + "/.pensieve-project"))
     }
 }
 

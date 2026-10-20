@@ -1,5 +1,5 @@
 ---
-pensieve-bundled: 40457b8daf65c621e6827d5ff564c16bd2d0e6aea12a4642b2609383d7d9bfe1
+pensieve-bundled: 2cb88dc1d34fccb4da3eaa8861bda3ab0f2afb6e6f8108a47fc4c48388f711f3
 name: pensieve
 description: Use Pensieve when deploying, installing, updating or removing skills for Claude Code, Grok, Cursor, Codex, OpenClaw or Hermes, in projects or on another Mac.
 ---
@@ -24,7 +24,7 @@ Run `--dry-run` before a broad change. Use `-a '*'` only when the person says "a
 
 Before `install`, `skill update`, `skill delete` or `project remove`, show the person the dry run and ask for approval. Pass `--yes` only after they agree. Keep that preview's `confirmationToken` in `--confirm-plan` when applying it. If the plan changes, show the new preview and ask again. Overwriting local changes needs explicit approval too. An unsaved draft must be saved or discarded by the person in the app.
 
-When the person names skills to install from a repository, pass each as `--skill <slug>` in both the dry run and the apply.
+When the person names skills to install from a repository, pass each as `--skill <slug>` in both the dry run and the apply. Preview with the names you were given first. If that dry run fails with "A selected skill was not found", run it once without `--skill` or `--rename` to list the repository's skills and their slugs, pick the slugs that match the names, and preview again with them.
 
 ## Handle the result
 

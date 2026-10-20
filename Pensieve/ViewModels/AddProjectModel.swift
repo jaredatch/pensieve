@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 
 /// Sheet-local validation and identity preview. Path changes probe off the render path.
 @Observable
@@ -124,6 +125,25 @@ final class AddProjectModel {
         onCreated(project)
     }
 
+    @MainActor
+    @discardableResult
+    func register(_ project: Project, context: ModelContext,
+                  intentReconciler: (@MainActor (ModelContext) -> BatchResult)? = nil,
+                  notifier: SyncStateNotifying = SyncStateNotifier.suppressed) throws -> Project {
+        let saved = try ProjectRegistration.register(project, context: context, files: fileService,
+                                                     identityService: identityService) {
+            try saveProjectRegistration($0, context: ModelContext(context.container))
+        }
+        guard let registered = context.model(for: saved.id) as? Project else {
+            throw CocoaError(.persistentStoreOperation)
+        }
+        if saved.didSave {
+            _ = intentReconciler?(context)
+            notifier()
+        }
+        return registered
+    }
+
     func allowSubmissionRetry() { didSubmit = false }
 
     func cancelSubmission() { queuedSubmission = nil }
@@ -137,7 +157,8 @@ final class AddProjectModel {
         do {
             let expanded = submissionPath
             return try ProjectRegistration.makeProject(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines), path: expanded, using: identityService
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines), path: expanded,
+                using: identityService, files: fileService
             )
         } catch {
             hasProjectDirectory = false

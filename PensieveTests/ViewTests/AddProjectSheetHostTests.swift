@@ -150,7 +150,9 @@ final class AddProjectSheetHostTests: XCTestCase {
             defer { delay.advance() }
             let model = AddProjectModel(fileService: h.mapped, previewDelay: { await delay.wait() })
             model.name = "Queued"
-            model.path = h.otherProject.path
+            let folder = h.root + "/queued-project"
+            try h.files.createDirectory(at: folder)
+            model.path = folder
             let presentation = QueuedProjectSheetPresentation()
             var created: [Project] = []
             let host = NSHostingView(rootView: QueuedProjectSheetHost(presentation: presentation,

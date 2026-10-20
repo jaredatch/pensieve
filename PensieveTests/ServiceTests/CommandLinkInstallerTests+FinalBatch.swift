@@ -80,6 +80,27 @@ extension CommandLinkInstallerTests {
                            "Invalid actions cannot create a command folder")
         }
     }
+
+    func testAFailedStatusReadClearsOnceTheNextReadSucceeds() async throws {
+        let fixture = try CommandLinkFixture()
+        defer { fixture.clean() }
+        try fixture.link(to: fixture.executable)
+        let files = LeafReadSwappingFileService(path: fixture.path) {}
+        let model = CommandLineSettingsModel(installer: fixture.installer(files: files))
+        await model.refresh()
+        let installed = model.status
+        XCTAssertNil(model.error)
+        files.afterRead = { throw CommandLinkError(message: "Operation not permitted") }
+        await model.refresh()
+        XCTAssertEqual(model.error, "Operation not permitted")
+        XCTAssertEqual(model.status, installed, "A failed read keeps the last known status")
+        await model.refresh()
+        XCTAssertEqual(model.status, installed)
+        XCTAssertNil(model.error, "A read that succeeds clears the error of the read that failed, with the status unchanged")
+        model.error = "A refused change"
+        await model.refresh()
+        XCTAssertEqual(model.error, "A refused change", "An action's error still waits for the status to change")
+    }
 }
 
 extension CommandLinkInstallerTests {

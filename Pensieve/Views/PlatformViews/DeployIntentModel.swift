@@ -63,6 +63,8 @@ final class DeployIntentModel {
     @discardableResult
     func setSelected(_ selected: Bool, machineID: String, skill: Skill, platform: PlatformTarget,
                      context: ModelContext) throws -> BatchResult? {
+        // Like its siblings, this applies the change and leaves the catalog to the sheet's next reload,
+        // so a refresh problem can never read as a failed change.
         try reportErrors {
             try service.setSelected(selected, machineID: machineID, skill: skill, platform: platform, context: context)
         }

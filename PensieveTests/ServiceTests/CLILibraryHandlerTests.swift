@@ -214,6 +214,7 @@ final class CLILibraryHandlerTests: XCTestCase {
         try h.files.createDirectory(at: folder)
         let preview = try await h.run(["project", "add", folder, "--name", "Work", "--dry-run"])
         XCTAssertEqual(preview.data?["name"], .string("Work"))
+        XCTAssertEqual(preview.data?["createsMarker"], .bool(true))
         XCTAssertFalse(h.files.fileExists(at: folder + "/.pensieve-project"))
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
         _ = try await h.run(["install", h.sourceURL, "--yes"])

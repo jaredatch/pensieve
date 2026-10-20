@@ -10,15 +10,20 @@ func registerProject(_ project: Project,
                      context: ModelContext,
                      intentReconciler: (@MainActor (ModelContext) -> BatchResult)? = nil,
                      notifier: SyncStateNotifying = SyncStateNotifier.suppressed) throws -> Project {
-    let registrationContext = ModelContext(context.container)
-    registrationContext.insert(project)
-    try registrationContext.save()
-    guard let registered = context.model(for: project.persistentModelID) as? Project else {
+    let id = try saveProjectRegistration(project, context: ModelContext(context.container))
+    guard let registered = context.model(for: id) as? Project else {
         throw CocoaError(.persistentStoreOperation)
     }
     _ = intentReconciler?(context)
     notifier()
     return registered
+}
+
+/// Return immediately after saving so identity rollback never includes caller-context lookup failures.
+func saveProjectRegistration(_ project: Project, context registrationContext: ModelContext) throws -> PersistentIdentifier {
+    registrationContext.insert(project)
+    try registrationContext.save()
+    return project.persistentModelID
 }
 
 /// Save and publish request withdrawal, remove prepared artifacts while the project is live,

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import Pensieve
 
@@ -16,7 +17,14 @@ final class AddProjectRoundOneTests: XCTestCase {
                              failureMessage: "Expanded path preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertEqual(identities.previewPaths, [expanded])
-        XCTAssertEqual(model.makeProject()?.path, expanded)
+        let prepared = try XCTUnwrap(model.makeProject())
+        XCTAssertEqual(prepared.path, expanded)
+        XCTAssertEqual(identities.previewPaths, [expanded, expanded])
+        XCTAssertTrue(identities.addPaths.isEmpty, "Preparing a submission only reads identity")
+        let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        let saved = try model.register(prepared, context: context)
+        XCTAssertEqual(saved.identityKey, "github.com/owner/app")
+        XCTAssertEqual(saved.identityKind, "remote")
         XCTAssertEqual(identities.addPaths, [expanded])
     }
 
@@ -156,8 +164,8 @@ private final class AddProjectPathIdentity: ProjectIdentityServiceProtocol, @unc
         lock.withLock { previews.append(path) }
         return ProjectIdentity(kind: .remote, key: "github.com/owner/app")
     }
-    func identity(forProjectAt path: String) throws -> ProjectIdentity {
+    func withIdentity<Value>(forProjectAt path: String, save: (ProjectIdentity) throws -> Value) throws -> Value {
         lock.withLock { adds.append(path) }
-        return ProjectIdentity(kind: .remote, key: "github.com/owner/app")
+        return try save(ProjectIdentity(kind: .remote, key: "github.com/owner/app"))
     }
 }
