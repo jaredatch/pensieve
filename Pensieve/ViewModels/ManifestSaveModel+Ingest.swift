@@ -4,6 +4,11 @@ import SwiftData
 extension ManifestSaveModel {
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
 
+    struct SaveResult {
+        let published: Bool
+        let error: Error?
+    }
+
     struct Publication {
         let snapshot: ManifestSnapshot
         let published: Bool
@@ -27,7 +32,7 @@ extension ManifestSaveModel {
 
     @MainActor
     func rebuild(_ item: Item, durable: ManifestSnapshot, published: Bool,
-                 prepared: PreparedStoreRebuild? = nil) async {
+                 prepared: PreparedStoreRebuild? = nil) async -> Error? {
         do {
             if let prepared {
                 var accepted = durable
@@ -41,16 +46,16 @@ extension ManifestSaveModel {
                                       includingHeadEdit: false)
                 StoreIngestState.shared(for: item.presentation.context.container).accept(observation, result: RebuildResult())
             }
-            item.report(nil)
+            return nil
         } catch {
             StoreIngestState.shared(for: item.presentation.context.container).invalidate()
             let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
-            item.report(ManifestSaveError.rebuildFailed(cause, manifestSaved: published))
+            return ManifestSaveError.rebuildFailed(cause, manifestSaved: published)
         }
     }
 
     @MainActor
-    func saveWithStableHead(_ item: Item, disk: inout ManifestSnapshot?, first: ManifestRead) async throws -> Bool {
+    func saveWithStableHead(_ item: Item, disk: inout ManifestSnapshot?, first: ManifestRead) async throws -> SaveResult {
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
         var acceptedFinalAttempt = false
         for attempt in 0..<3 {
@@ -86,11 +91,10 @@ extension ManifestSaveModel {
             // Check again on the publication worker, after acceptance and immediately before writing.
             guard let result = try await publish(item, disk: disk, head: head) else { continue }
             if result.headChanged {
-                item.report(SyncError.ingestIncomplete)
-                return result.published
+                return SaveResult(published: result.published, error: SyncError.ingestIncomplete)
             }
-            await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
-            return result.published
+            let error = await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
+            return SaveResult(published: result.published, error: error)
         }
         if acceptedFinalAttempt { throw SyncError.ingestIncomplete }
         throw failedPreSaveRebuild(SyncError.ingestIncomplete, item: item)

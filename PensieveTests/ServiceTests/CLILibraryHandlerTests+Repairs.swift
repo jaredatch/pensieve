@@ -195,7 +195,8 @@ extension CLILibraryHandlerTests {
         let root = h.paths.storeRoot
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root) }
-        h.runtime.library.regenerateManifest(.skillMetadata("foo", nil, nil), context: h.context)
+        let skill = try h.skill()
+        h.runtime.library.updateMetadata(skill, tags: skill.tags + ["stale-error"], scope: skill.scope, context: h.context)
         await h.runtime.library.manifestSaves?.waitUntilIdle()
         XCTAssertNotNil(h.runtime.library.error, "The window displays the real failed manifest save")
     }

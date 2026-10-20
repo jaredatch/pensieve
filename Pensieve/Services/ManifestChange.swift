@@ -63,7 +63,9 @@ enum ManifestChange {
     private func applySkill(to snapshot: inout ManifestSnapshot) -> Bool {
         switch self {
         case .createSkill(let overlay):
-            if !snapshot.skills.contains(where: { $0.slug == overlay.slug }) { snapshot.skills.append(overlay) }
+            if let index = snapshot.skills.firstIndex(where: { $0.slug == overlay.slug }) {
+                snapshot.skills[index] = overlay
+            } else { snapshot.skills.append(overlay) }
         case .skillMetadata(let slug, let tags, let scope):
             return updateMetadata(slug, tags: tags, scope: scope, in: &snapshot)
         case .deleteSkill(let slug):
@@ -108,9 +110,33 @@ struct RefusedManifestProjection {
     }
 
     func project(_ field: Field, onto snapshot: inout ManifestSnapshot) {
+        if case .change(let change) = field {
+            do { try change.validate(in: snapshot) } catch { return }
+            if case .createSkill(let original) = change {
+                projectCreate(original, onto: &snapshot)
+                return
+            }
+        }
         if let cachedLocal {
             apply(field, local: cachedLocal, onto: &snapshot)
-        } else if case .change(let change) = field { change.apply(to: &snapshot) }
+        } else {
+            switch field {
+            case .change(let change): change.apply(to: &snapshot)
+            case .intent(let intent): snapshot.deployIntents.removeAll { $0 == intent }
+            }
+        }
+    }
+
+    private func projectCreate(_ original: SkillOverlay, onto snapshot: inout ManifestSnapshot) {
+        let current: SkillOverlay
+        if let cachedLocal {
+            guard let local = cachedLocal.skills.first(where: { $0.slug == original.slug }) else { return }
+            current = local
+        } else { current = original }
+        // Compare stored values, including timestamp precision and set order, not slug presence.
+        if let durable = snapshot.skills.first(where: { $0.slug == current.slug }),
+           ManifestService.serializeSkillOverlay(durable) == ManifestService.serializeSkillOverlay(current) { return }
+        ManifestChange.createSkill(current).apply(to: &snapshot)
     }
 
     private func apply(_ field: Field, local: ManifestSnapshot, onto snapshot: inout ManifestSnapshot) {
@@ -121,7 +147,11 @@ struct RefusedManifestProjection {
             } else { snapshot.deployIntents.removeAll { $0 == intent } }
         case .change(let change):
             if case .categorySkill(let name, let slug, _) = change {
-                guard let record = local.categories.first(where: { $0.name == name }) else { return }
+                guard let record = local.categories.first(where: { $0.name == name }) else {
+                    // A newly read retirement field can name a category the window has never seen.
+                    if case .categorySkill(_, _, false) = change { change.apply(to: &snapshot) }
+                    return
+                }
                 let update = ManifestChange.categorySkill(name, slug, record.skillSlugs.contains(slug))
                 if !update.apply(to: &snapshot) { ManifestChange.createCategory(record).apply(to: &snapshot) }
             } else { applySkill(change, local: local, onto: &snapshot) }
@@ -130,17 +160,13 @@ struct RefusedManifestProjection {
 
     private func applySkill(_ change: ManifestChange, local: ManifestSnapshot, onto snapshot: inout ManifestSnapshot) {
         switch change {
-        case .createSkill(let original):
-            if let current = local.skills.first(where: { $0.slug == original.slug }) {
-                ManifestChange.createSkill(current).apply(to: &snapshot)
-            }
         case .deleteSkill(let slug):
             if !local.skills.contains(where: { $0.slug == slug }) { ManifestChange.deleteSkill(slug).apply(to: &snapshot) }
         case .skillMetadata(let slug, let tags, let scope):
             guard let current = local.skills.first(where: { $0.slug == slug }) else { return }
             let update = ManifestChange.skillMetadata(slug, tags == nil ? nil : current.tags, scope == nil ? nil : current.scope)
             if !update.apply(to: &snapshot) { ManifestChange.createSkill(current).apply(to: &snapshot) }
-        default: break
+        default: change.apply(to: &snapshot)
         }
     }
 }

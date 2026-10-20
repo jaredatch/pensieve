@@ -43,12 +43,29 @@ extension ManifestSaveTests {
         let path = h.root + "/manifest/manifest.yaml"
         let healthy = try h.files.readFile(at: path)
         try h.files.writeFile(at: path, content: "damaged")
+        await h.saves.refreshDamage()
+        XCTAssertTrue(h.saves.libraryDamaged)
+        var repaired = false
+        h.saves.didReadRepairedLibrary = {
+            repaired = true
+            let lock = SyncLock.tryAcquire(at: h.lockPath)
+            XCTAssertNotNil(lock, "The damaged-save exit must release before its repair callback")
+            do {
+                try NativeTestWork.run(container: h.context.container) { worker in
+                    _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: worker)
+                    XCTAssertEqual(Set(try worker.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name)),
+                                   ["Retained", "ZDelete"], "Repair callbacks must retain the edit awaiting retry")
+                }
+            } catch { XCTFail("Repair callback rebuild failed: " + error.localizedDescription) }
+            lock?.release()
+        }
         h.recording.afterReadFailure = {
             h.recording.afterReadFailure = nil
             try h.files.writeFile(at: path, content: healthy)
         }
         h.categories.rename(h.local, to: "Retained", context: h.context)
         await h.saves.waitUntilIdle()
+        XCTAssertTrue(repaired)
         XCTAssertEqual(h.saves.pendingCount, 0, "Readable refresh must retry the refused head without another event")
         XCTAssertFalse(h.saves.pausedForRepair)
         XCTAssertFalse(h.saves.showsDamageAlert)
@@ -139,4 +156,79 @@ extension ManifestSaveTests {
             "A second type probe could describe a different inode from the token's metadata")
     }
 
+    func checkRefusalReportCanAcquireLock() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        h.alpha.tags = ["refused"]
+        try h.context.save()
+        h.recording.failingWrites = 1
+        var reported = false
+        h.saves.submit(.skillMetadata("alpha", ["refused"], nil), context: h.context) { error in
+            reported = true
+            XCTAssertNotNil(error)
+            let lock = SyncLock.tryAcquire(at: h.lockPath)
+            XCTAssertNotNil(lock, "Refusal callbacks may start another lock-owning operation")
+            XCTAssertEqual(h.saves.refused.count, 1, "The refusal transfers before its report runs")
+            lock?.release()
+        }
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(reported)
+        try await checkCategoryCompletionCanAcquireLock()
+        for rebuildFails in [false, true] {
+            h.recording.failingRebuildSnapshots = rebuildFails ? 1 : 0
+            var completed = false
+            h.saves.submit(.skillMetadata("alpha", ["saved"], nil), context: h.context) { error in
+                completed = true
+                XCTAssertEqual(error != nil, rebuildFails)
+                let lock = SyncLock.tryAcquire(at: h.lockPath)
+                XCTAssertNotNil(lock, "A published save reports only after releasing its lock")
+                lock?.release()
+            }
+            await h.saves.waitUntilIdle()
+            XCTAssertTrue(completed)
+        }
+    }
+
+    private func checkCategoryCompletionCanAcquireLock() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let change = ManifestChange.renameCategory("Local", "Refused")
+        let edit = CategorySaveEdit(category: h.local, context: h.context, change: change)
+        h.local.name = "Refused"
+        try edit.save(in: h.context)
+        h.recording.failingWrites = 1
+        var reports = 0, reconciled = false
+        let report: (Error?) -> Void = { error in
+            reports += 1
+            XCTAssertNotNil(error)
+            XCTAssertEqual(h.local.name, "Local", "Undo lands before reporting")
+            let lock = SyncLock.tryAcquire(at: h.lockPath)
+            XCTAssertNotNil(lock, "Category refusal reports may start another lock-owning operation")
+            if lock != nil {
+                do {
+                    try NativeTestWork.run(container: h.context.container) { worker in
+                        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: worker)
+                        XCTAssertEqual(Set(try worker.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name)),
+                                       ["Local", "ZDelete"], "A callback's writer cannot project a refused category edit")
+                    }
+                } catch { XCTFail("Callback rebuild failed: " + error.localizedDescription) }
+            }
+            lock?.release()
+        }
+        h.saves.submit(change, context: h.context, categoryEdit: edit, reconcile: {
+            reconciled = true
+            let lock = SyncLock.tryAcquire(at: h.lockPath)
+            XCTAssertNotNil(lock, "Category reconciliation must run after the save releases its lock")
+            lock?.release()
+            return BatchResult()
+        }, report: report)
+        let dependent = ManifestChange.renameCategory("Refused", "Dependent")
+        let dependentEdit = CategorySaveEdit(category: h.local, context: h.context, change: dependent)
+        h.local.name = "Dependent"
+        try dependentEdit.save(in: h.context)
+        h.saves.submit(dependent, context: h.context, categoryEdit: dependentEdit, report: report)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(reports, 2, "The dependent refusal must also report after release")
+        XCTAssertTrue(reconciled)
+    }
 }

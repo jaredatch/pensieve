@@ -3,13 +3,14 @@ import SwiftData
 
 /// A refused skill field stays local until disk acknowledges its current value.
 /// The window owns this object; the ingest state receives only its plain projection.
-/// CategoryStore edits use local undo instead. Retirement still projects its category memberships.
+/// CategoryStore edits use local undo instead. Retirement uses a raw fallback until readable
+/// disk supplies its membership and intent fields, then acknowledges those fields independently.
 final class ManifestRefusedEdit {
     private typealias Field = RefusedManifestProjection.Field
     let id = UUID()
     private var registration: StoreIngestState?
     private var projection: RefusedManifestProjection {
-        RefusedManifestProjection(fields: fields ?? [], cachedLocal: cachedLocal)
+        RefusedManifestProjection(fields: fields ?? [.change(original)], cachedLocal: cachedLocal)
     }
 
     deinit { registration?.forgetRefused(id) }
@@ -62,12 +63,14 @@ final class ManifestRefusedEdit {
     }
 
     func refresh(durable: ManifestSnapshot) -> Bool {
-        if fields == nil { fields = retirementFields(durable: durable) }
         return acknowledge(durable: durable)
     }
 
     /// Publication can acknowledge cached fields without another main-context read.
     func acknowledge(durable: ManifestSnapshot) -> Bool {
+        // A validation refusal cannot become a saved report merely because projection skips it.
+        do { try original.validate(in: durable) } catch { return true }
+        if fields == nil { fields = retirementFields(durable: durable) }
         var remaining: [Field] = []
         for field in fields ?? [] {
             var probe = durable

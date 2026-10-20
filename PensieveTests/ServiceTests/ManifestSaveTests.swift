@@ -104,6 +104,11 @@ final class ManifestSaveTests: XCTestCase {
 
     func testPulledDeletionSkipsQueuedEditAndRefreshesWindow() async throws {
         try await checkAlreadyDurableCreateDoesNotSupplyRemovedTarget()
+        for peerCommitted in [false, true] {
+            for unreadableWindow in [false, true] {
+                try await checkRefusedCreateKeepsOverlay(unreadableWindow: unreadableWindow, peerCommitted: peerCommitted)
+            }
+        }
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
@@ -211,9 +216,13 @@ final class ManifestSaveTests: XCTestCase {
     private func checkAlreadyDurableCreateDoesNotSupplyRemovedTarget() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
-        let overlay = try XCTUnwrap(h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" })
+        h.alpha.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123456)
+        try h.context.save()
+        let local = try h.manifest.snapshot(from: h.context)
+        let overlay = try XCTUnwrap(local.skills.first { $0.slug == "alpha" })
+        try h.manifest.write(local, toRoot: h.root)
         h.recording.failingWrites = 1
-        h.saves.submit(.createSkill(overlay), context: h.context) { XCTAssertNotNil($0) }
+        h.saves.submit(.createSkill(overlay), context: h.context) { XCTAssertNil($0, "Already durable values report saved") }
         await h.saves.waitUntilIdle()
         XCTAssertTrue(h.saves.refused.isEmpty, "A create already present on disk has no unsaved fields to retain")
         var pulled = try h.manifest.read(fromRoot: h.root)
@@ -225,25 +234,6 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertNil(h.library.error, "A synced removal must skip the edit, not report an unsaved target")
         XCTAssertTrue(h.messages.lines.contains { $0.contains("target was removed by sync") })
         XCTAssertFalse(try h.manifest.read(fromRoot: h.root).skills.contains { $0.slug == "alpha" })
-    }
-
-    private func checkRefusalReportCanAcquireLock() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        h.alpha.tags = ["refused"]
-        try h.context.save()
-        h.recording.failingWrites = 1
-        var reported = false
-        h.saves.submit(.skillMetadata("alpha", ["refused"], nil), context: h.context) { error in
-            reported = true
-            XCTAssertNotNil(error)
-            let lock = SyncLock.tryAcquire(at: h.lockPath)
-            XCTAssertNotNil(lock, "Refusal callbacks may start another lock-owning operation")
-            XCTAssertEqual(h.saves.refused.count, 1, "The refusal transfers before its report runs")
-            lock?.release()
-        }
-        await h.saves.waitUntilIdle()
-        XCTAssertTrue(reported)
     }
 
     func testUnopenableLockReportsImmediatelyWithoutWaitingNotice() async throws {
