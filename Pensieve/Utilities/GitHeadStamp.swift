@@ -39,9 +39,9 @@ struct GitHeadStamp {
             let directory = privateRef ? git : common
             let path = directory + "/" + ref
             let type = try fileService.entryTypeWithoutFollowingLinks(at: path)
-            // Git treats dangling or directory symlinks as missing refs, without a packed fallback.
-            if type == .symlink, !fileService.fileExists(at: path) { return .unborn }
-            if type == .regular || type == .symlink {
+            // A symlink can name a Git ref chain even when its filesystem target is missing.
+            if type == .symlink { return .unreadable }
+            if type == .regular {
                 // A symbolic-ref chain is intentionally unresolved: callers must ingest first.
                 return Self.looseOID(try fileService.readFile(at: path), length: length).map(State.resolved) ?? .unreadable
             }

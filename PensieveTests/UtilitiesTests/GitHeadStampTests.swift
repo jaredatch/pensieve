@@ -225,17 +225,31 @@ extension GitHeadStampTests {
         let f = try HeadRepository(base: base + "/loose-kinds", shape: .folder)
         let path = f.common + "/refs/heads/main"
         try files.writeFile(at: f.common + "/oid", content: f.oid + "\n")
+        try files.writeFile(at: f.common + "/refs/heads/other", content: f.oid + "\n")
         for packed in [false, true] {
             if packed { try files.writeFile(at: f.common + "/packed-refs", content: f.oid + " refs/heads/main\n") }
             try files.deleteFile(at: path)
             try files.createDirectory(at: path)
             try assertOracle(f, label: "loose directory, packed=\(packed)")
             try files.deleteDirectory(at: path)
-            try files.createSymlink(at: path, pointingTo: "missing")
-            try assertOracle(f, label: "loose dangling link, packed=\(packed)")
-            try files.deleteFile(at: path)
-            try files.createSymlink(at: path, pointingTo: f.common + "/oid")
-            try assertOracle(f, label: "loose regular link, packed=\(packed)")
+            for (target, resolves) in [("refs/heads/missing", false), ("refs/heads/other", true),
+                                       ("missing", false), (f.common + "/oid", true)] {
+                try files.createSymlink(at: path, pointingTo: target)
+                let label = "loose symlink to \(target), packed=\(packed)"
+                let oracle = try TestPaths.git.run(["rev-parse", "--verify", "HEAD"], in: f.root)
+                XCTAssertEqual(oracle.exit, resolves ? 0 : 128, label)
+                XCTAssertEqual(oracle.stdout.trimmingCharacters(in: .newlines), resolves ? f.oid : "", label)
+                if !resolves {
+                    XCTAssertEqual(oracle.stderr.trimmingCharacters(in: .newlines), "fatal: Needed a single revision", label)
+                }
+                if target.hasPrefix("refs/") {
+                    XCTAssertEqual(try f.git(["symbolic-ref", "HEAD"]), target, label)
+                }
+                // Loose symlinks deliberately force ingestion, like text ref chains, even when Git resolves them.
+                XCTAssertEqual(GitHeadStamp().state(root: f.root), .unreadable, label)
+                try files.deleteFile(at: path)
+            }
+            try files.writeFile(at: path, content: f.oid + "\n")
         }
     }
 
