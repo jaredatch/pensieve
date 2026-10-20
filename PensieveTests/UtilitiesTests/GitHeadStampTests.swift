@@ -15,6 +15,7 @@ final class GitHeadStampTests: XCTestCase {
 
     func testRepositoryShapesAndHeadFormsMatchGit() throws {
         try NativeTestWork.run { [self] in
+            try assertConfiguredRepositories()
             for format in ["sha1", "sha256"] {
                 for shape in HeadRepository.Shape.allCases {
                     let fixture = try HeadRepository(base: base + "/" + format + shape.rawValue, shape: shape, format: format)
@@ -32,6 +33,7 @@ final class GitHeadStampTests: XCTestCase {
 
     func testGeneratedHeadAndLooseRefTextMatchesGit() throws {
         try NativeTestWork.run { [self] in
+            try assertRepositoryFormats()
             let f = try HeadRepository(base: base, shape: .folder)
             for ending in ["\n", "\r\n", ""] {
                 for body in ["ref: refs/heads/main", "ref:\trefs/heads/main", "ref:  refs/heads/main",
@@ -179,9 +181,53 @@ final class GitHeadStampTests: XCTestCase {
     }
 }
 
+extension GitHeadStampTests {
+    private func assertConfiguredRepositories() throws {
+        let sparse = try HeadRepository(base: base + "/sparse", shape: .folder)
+        _ = try sparse.git(["sparse-checkout", "init"])
+        XCTAssertEqual(try sparse.git(["config", "extensions.worktreeConfig"]), "true")
+        try assertOracle(sparse, label: "real sparse checkout")
+        let filtered = try HeadRepository(base: base + "/filtered", shape: .filtered)
+        XCTAssertEqual(try filtered.git(["config", "remote.origin.partialclonefilter"]), "blob:none")
+        try assertOracle(filtered, label: "real filtered clone")
+    }
+
+    private func assertRepositoryFormats() throws {
+        for format in ["sha1", "sha256"] {
+            let f = try HeadRepository(base: base + "/formats-" + format, shape: .folder, format: format)
+            let config = try files.readFile(at: f.common + "/config")
+            let settings = ["", "worktreeConfig = true", "preciousObjects = true", "partialClone = origin",
+                            "[extensions \"future\"]\nnoop = true", "[branch \"a]b\"]\nremote = origin",
+                            "noop", "noop-v1", "relativeWorktrees = true", "relativeWorktrees = false", "unknownExtension = true",
+                            "objectFormat = " + format, "refStorage = files",
+                            "compatObjectFormat = " + (format == "sha1" ? "sha256" : "sha1"),
+                            "objectFormat = " + format.uppercased(), "refStorage = FILES", "objectFormat = future",
+                            "refStorage = future", "worktreeConfig = garbage", "preciousObjects = garbage",
+                            "partialClone", "worktreeConfig = FALSE", "REFSTORAGE = files",
+                            "# comment\\\nrefStorage = FILES", "refStorage = fi\\\nles", "refStorage = \"files#future\"",
+                            "refStorage = \"files\" # comment", "objectFormat = \"" + format + "\" ; comment"]
+            for version in ["0", "1", "2"] {
+                for setting in settings {
+                    for head in ["main", "unborn"] {
+                        try files.writeFile(at: f.metadata + "/HEAD", content: "ref: refs/heads/" + head + "\n")
+                        try files.writeFile(at: f.common + "/config", content: config
+                            + "\n[CoRe]\nRepositoryFormatVersion = " + version + "\n[ExTeNsIoNs] # format\n" + setting + "\n")
+                        let label = "\(format) v\(version) \(setting) \(head)"
+                        if version == "1", setting.hasPrefix("compatObjectFormat") {
+                            // Compatibility hashing stays unsupported even on Git builds that can read it.
+                            let oracle = try TestPaths.git.run(["rev-parse", "--verify", "HEAD"], in: f.root)
+                            XCTAssertEqual(GitHeadStamp().state(root: f.root), .unreadable, label + ": " + oracle.stderr)
+                        } else { try assertOracle(f, label: label) }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Real repository layouts; git itself supplies the expected OID, never the stamp reader.
 struct HeadRepository {
-    enum Shape: String, CaseIterable { case folder, linkedFolder, relativeFile, absoluteFile, worktree, separate }
+    enum Shape: String, CaseIterable { case folder, linkedFolder, relativeFile, absoluteFile, worktree, separate, filtered }
     let root: String
     let metadata: String
     let common: String
@@ -191,14 +237,17 @@ struct HeadRepository {
         let files = FileService(), git = TestPaths.git
         root = base + "/store"
         try files.createDirectory(at: base)
-        let initial = shape == .worktree ? base + "/primary" : root
+        let initial = [.worktree, .filtered].contains(shape) ? base + "/primary" : root
         var arguments = ["init", "--initial-branch=main", "--object-format=" + format]
         if refFormat != "files" { arguments += ["--ref-format=" + refFormat] }
         if shape == .separate { arguments += ["--separate-git-dir", base + "/metadata"] }
         _ = try git.runOrThrow(arguments + [initial], in: nil)
         _ = try git.runOrThrow(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
                                "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "seed"], in: initial)
-        if shape == .worktree {
+        if shape == .filtered {
+            _ = try git.runOrThrow(["config", "uploadpack.allowFilter", "true"], in: initial)
+            _ = try git.runOrThrow(["clone", "--filter=blob:none", "file://" + initial, root], in: nil)
+        } else if shape == .worktree {
             _ = try git.runOrThrow(["checkout", "--detach"], in: initial)
             _ = try git.runOrThrow(["worktree", "add", root, "main"], in: initial)
         } else if [.linkedFolder, .relativeFile, .absoluteFile].contains(shape) {

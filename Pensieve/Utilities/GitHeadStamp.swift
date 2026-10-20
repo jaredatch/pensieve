@@ -69,29 +69,7 @@ struct GitHeadStamp {
     private func objectIDLength(common: String) throws -> Int {
         let path = common + "/config"
         guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return 40 }
-        let config = try fileService.readFile(at: path)
-        var extensions = false, length = 40
-        for line in config.components(separatedBy: .newlines) {
-            let value = line.trimmingCharacters(in: .whitespaces).lowercased()
-            if value.hasPrefix("[") {
-                extensions = value.range(of: #"^\[extensions\]\s*([#;].*)?$"#, options: .regularExpression) != nil
-                continue
-            }
-            guard extensions, !value.isEmpty, !value.hasPrefix("#"), !value.hasPrefix(";") else { continue }
-            let fields = value.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard fields.count == 2,
-                  fields[1].range(of: #"^(sha1|sha256|files|"(sha1|sha256|files)")\s*([#;].*)?$"#,
-                                  options: .regularExpression) != nil else { throw CocoaError(.fileReadCorruptFile) }
-            let setting = String(fields[1].prefix { $0 != "#" && $0 != ";" })
-                .trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            switch (fields[0], setting) {
-            case ("objectformat", "sha1"): length = 40
-            case ("objectformat", "sha256"): length = 64
-            case ("refstorage", "files"): break
-            default: throw CocoaError(.fileReadUnsupportedScheme)
-            }
-        }
-        return length
+        return try GitRepositoryFormat.objectIDLength(fileService.readFile(at: path))
     }
 
     private func packedState(ref: String, directory: String, length: Int) throws -> State {
@@ -197,5 +175,151 @@ struct GitHeadStamp {
             return nil
         }
         return candidate.lowercased()
+    }
+}
+
+/// Git 2.54's repository-format admission. Includes are not followed during Git's format scan.
+private struct GitRepositoryFormat {
+    var version = -1
+    var length = 40
+    var unknown = false
+    var v1Only = false
+    var refStorage = "files"
+    var compatibility = false
+
+    static func objectIDLength(_ config: String) throws -> Int {
+        var format = Self()
+        for (key, value) in try entries(config) {
+            if key == "core.repositoryformatversion" {
+                format.version = try integer(value)
+            } else if key.hasPrefix("extensions.") {
+                try format.extensionValue(String(key.dropFirst(11)), value: value)
+            }
+        }
+        guard format.version <= 1,
+              !(format.version == 0 && format.v1Only),
+              !(format.version >= 1 && format.unknown) else { throw CocoaError(.fileReadUnsupportedScheme) }
+        // Git discards extension settings when no repository format was declared.
+        if format.version < 0 { return 40 }
+        guard format.refStorage == "files", !format.compatibility else { throw CocoaError(.fileReadUnsupportedScheme) }
+        return format.length
+    }
+
+    private mutating func extensionValue(_ key: String, value: String?) throws {
+        v1Only = v1Only || ["objectformat", "refstorage", "compatobjectformat", "relativeworktrees", "noop-v1"].contains(key)
+        switch key {
+        case "objectformat", "compatobjectformat":
+            guard let value, ["sha1", "sha256"].contains(value) else { throw CocoaError(.fileReadCorruptFile) }
+            if key == "objectformat" { length = value == "sha1" ? 40 : 64 } else { compatibility = true }
+        case "refstorage":
+            guard let value, ["files", "reftable"].contains(value) else { throw CocoaError(.fileReadCorruptFile) }
+            refStorage = value
+        case "worktreeconfig", "preciousobjects", "relativeworktrees":
+            try Self.validateBoolean(value)
+        case "partialclone":
+            guard value != nil else { throw CocoaError(.fileReadCorruptFile) }
+        case "noop", "noop-v1": break
+        default: unknown = true
+        }
+    }
+
+    private static func validateBoolean(_ value: String?) throws {
+        if let value, !["", "true", "yes", "on", "false", "no", "off"].contains(value.lowercased()) {
+            _ = try integer(value)
+        }
+    }
+
+    private static func integer(_ value: String?) throws -> Int {
+        guard let value else { throw CocoaError(.fileReadCorruptFile) }
+        return try value.withCString { start in
+            var end: UnsafeMutablePointer<CChar>?
+            let number = strtoll(start, &end, 0)
+            guard let end, end != start else { throw CocoaError(.fileReadCorruptFile) }
+            let units: [String: Int64] = ["": 1, "k": 1024, "m": 1024 * 1024, "g": 1024 * 1024 * 1024]
+            guard let unit = units[String(cString: end).lowercased()] else { throw CocoaError(.fileReadCorruptFile) }
+            let (result, overflow) = number.multipliedReportingOverflow(by: unit)
+            guard !overflow, let result = Int32(exactly: result) else { throw CocoaError(.fileReadCorruptFile) }
+            return Int(result)
+        }
+    }
+
+    private static func entries(_ config: String) throws -> [(String, String?)] {
+        var section = ""
+        var entries: [(String, String?)] = []
+        for logical in configLines(config) {
+            var line = logical.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                guard let range = line.range(of: #"^\[[A-Za-z0-9.-]+([ \t]+"([^"\\]|\\.)*")?\]"#,
+                                             options: .regularExpression) else { throw CocoaError(.fileReadCorruptFile) }
+                let header = String(line[range].dropFirst().dropLast())
+                section = header.replacingOccurrences(of: #"[ \t]+"(.*)"$"#, with: ".$1", options: .regularExpression)
+                    .lowercased()
+                line = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            }
+            if line.isEmpty || line.hasPrefix("#") || line.hasPrefix(";") { continue }
+            guard !section.isEmpty,
+                  let keyRange = line.range(of: #"^[A-Za-z][A-Za-z0-9-]*"#, options: .regularExpression) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let key = String(line[keyRange]).lowercased()
+            let rest = String(line[keyRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            let value: String?
+            if rest.isEmpty || rest.hasPrefix("#") || rest.hasPrefix(";") { value = nil } else {
+                guard rest.hasPrefix("=") else { throw CocoaError(.fileReadCorruptFile) }
+                value = try configValue(String(rest.dropFirst()))
+            }
+            entries.append((section + "." + key, value))
+        }
+        return entries
+    }
+
+    private static func configLines(_ config: String) -> [String] {
+        var lines: [String] = [], line = ""
+        var quoted = false, escaped = false, comment = false
+        for character in config.replacingOccurrences(of: "\r\n", with: "\n") {
+            if character == "\n" {
+                if escaped && !comment {
+                    line.removeLast()
+                } else {
+                    lines.append(line)
+                    line = ""
+                    quoted = false
+                    comment = false
+                }
+                escaped = false
+                continue
+            }
+            line.append(character)
+            if comment { continue }
+            if escaped { escaped = false } else if character == "\\" { escaped = true } else if character == "\"" {
+                quoted.toggle()
+            } else if !quoted && (character == "#" || character == ";") { comment = true }
+        }
+        lines.append(line)
+        return lines
+    }
+
+    private static func configValue(_ text: String) throws -> String {
+        var quoted = false, escaped = false, result = "", whitespace = ""
+        for character in text {
+            if escaped {
+                let escapes: [Character: String] = ["n": "\n", "t": "\t", "b": "\u{8}", "\\": "\\", "\"": "\""]
+                guard let value = escapes[character] else { throw CocoaError(.fileReadCorruptFile) }
+                result += whitespace + value
+                whitespace = ""
+                escaped = false
+            } else if character == "\\" { escaped = true } else if character == "\"" {
+                result += whitespace
+                whitespace = ""
+                quoted.toggle()
+            } else if !quoted && (character == "#" || character == ";") { break } else if !quoted && character.isWhitespace {
+                if !result.isEmpty { whitespace += String(character) }
+            } else {
+                result += whitespace + String(character)
+                whitespace = ""
+            }
+        }
+        guard !quoted, !escaped else { throw CocoaError(.fileReadCorruptFile) }
+        return result
     }
 }

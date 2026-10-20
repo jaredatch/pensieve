@@ -113,7 +113,7 @@ extension SkillInstallServiceTests {
         }
         XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
         let restore = try headFault?.apply(root: f.app)
-        if headFault != nil { XCTAssertEqual(GitHeadStamp().state(root: f.app), .unreadable) }
+        try headFault?.assertUnreadable(root: f.app)
         defer { try? restore?() }
         if refuseScan {
             try await assertInstallRefusal(writer, files: files, service: service, source: source,
@@ -128,8 +128,33 @@ extension SkillInstallServiceTests {
         XCTAssertNotNil(try context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == slug }?.installedOrigin)
         XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name).sorted(), ["Added", "Kept"])
         try restore?()
+        if headFault == nil && !refuseScan {
+            try await assertFollowingInstallSkipsIngest(writer, fixture: f, service: service, source: source,
+                                                       container: container, files: files)
+        }
         try await assertWriterSync(f, container: container)
     }
+    private func assertFollowingInstallSkipsIngest(_ writer: String, fixture f: IncompleteIngestFixture,
+                                                   service: SkillInstallService, source: SkillFetchResult,
+                                                   container: ModelContainer, files: RebuildReadFileService) async throws {
+        let candidate = try XCTUnwrap(source.candidates.first)
+        try await BlockingWork.run {
+            try f.configureReadableFormat("v1")
+            let before = files.skillListings.value
+            let job = ModelContext(container)
+            switch writer {
+            case "install":
+                XCTAssertEqual(try service.install(candidate: candidate, renamedTo: "following", from: source,
+                                                   context: job), .installed(slug: "following"))
+            case "adopt":
+                _ = try service.adopt(existingSlug: "item", candidate: candidate, from: source, context: job)
+            default:
+                try service.update(existingSlug: "item", candidate: candidate, from: source, context: job)
+            }
+            XCTAssertEqual(files.skillListings.value, before, "An unchanged supported format must skip ingestion")
+        }
+    }
+
     private func assertWriterSync(_ f: IncompleteIngestFixture, container: ModelContainer) async throws {
         try await BlockingWork.run {
             guard case .synced = try f.engine(rebuild: StoreRebuildService()).sync(root: f.app,
