@@ -56,7 +56,6 @@ final class AppRuntime {
     private var didPerformLaunchWork = false
     private var didCompleteLaunchIngest = false
     private var didFinishInitialLaunchCallbacks = false
-
     private var didSignalLaunchIngest = false
     private var launchIngestHeadStamp: String?
     @ObservationIgnored var successfulLibraryReads = 0
@@ -323,14 +322,16 @@ private extension AppRuntime {
 extension AppRuntime {
     func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false, afterSync: SyncCycleResult? = nil) async {
         if afterRepair, successfulLibraryReads > 0 { return }
-        defer { if let afterSync { convergence.run(after: afterSync) } }
+        var performedBackfill = false
+        defer { if let afterSync, !performedBackfill { convergence.run(after: afterSync) } }
         if let afterSync { guard case .synced = afterSync else { return } }
         guard needsLaunchBackfillAfterCoordinator, library.manifestSaves?.libraryDamaged != true,
               library.manifestSaves?.requiresNewerVersion != true else { return }
         needsLaunchBackfillAfterCoordinator = false
         await BlockingWork.run { [container, launchBackfill] in launchBackfill(ModelContext(container)) }
         platformVM.refreshDeployIndex()
-        if afterRepair { convergence.runAfterLaunchIngest() }
+        performedBackfill = true
+        convergence.runAfterLaunchIngest()
     }
 
     /// The model excludes cycles until conflict resolution finishes. Git evidence remains ordered.

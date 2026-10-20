@@ -38,50 +38,107 @@ extension AppRuntimeTests {
     }
 
     func testOverlappingConflictCompletionAndCycleKeepLocalRepairBackfill() async throws {
-        for firstReadFinishesFirst in [true, false] {
-            let h = try ManifestSaveFixture()
-            defer { h.cleanup() }
-            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged at launch")
-            let backfills = Counter(), convergence = RepairLifecycleConvergence()
-            let runtime = try await launchRepairRuntime(h, backfills: backfills, convergence: convergence)
-            defer { runtime.commandServer?.stop(); runtime.library.stopWatching() }
-            await TestWait.until(failureMessage: "Launch damage read must finish") {
-                h.saves.damage != nil && h.saves.damageRefreshTask == nil
-            }
-            let first = TestWait.Gate(owner: self), second = TestWait.Gate(owner: self)
-            defer { first.open(); second.open() }
-            h.recording.afterReadFailure = { try first.wait() }
-            try runtime.beginConflictResolution()(.synced(pushed: false, warnings: [], completedAt: Date()))
-            await TestWait.until(failureMessage: "Conflict completion must hold its damage read") { first.waiterCount == 1 }
-            h.recording.afterReadFailure = { try second.wait() }
-            let cycle = Task { await runtime.syncModel.syncNowAndReport() }
-            await TestWait.until(failureMessage: "The next cycle must overlap the conflict completion read") {
-                second.waiterCount == 1
-            }
-            h.recording.afterReadFailure = nil
-            if firstReadFinishesFirst {
-                first.open()
-                await TestWait.until(failureMessage: "First disk read must return while the second stays held") {
-                    first.waiterCount == 0
+        for releasedBeforeRepair in 0...2 {
+            for conflictFinishesFirst in [true, false] {
+                for headAdvanced in [false, true] {
+                    try await checkOverlappingRepair(releasedBeforeRepair: releasedBeforeRepair,
+                        conflictFinishesFirst: conflictFinishesFirst, headAdvanced: headAdvanced)
                 }
-                second.open()
-            } else {
-                second.open()
-                await cycle.value
-                first.open()
             }
-            await cycle.value
-            await TestWait.until(failureMessage: "Conflict completion must finish") { runtime.paths.syncSteps.pendingCount == 0 }
-            XCTAssertEqual(backfills.value, 0, "Damage still defers launch backfill")
-            XCTAssertEqual(convergence.launches, 0)
-            h.saves.requestRepair()
-            await h.saves.replaceWithThisMac(context: h.context)
-            XCTAssertEqual(backfills.value, 1, "Local repair must retain the launch callback after overlapping outcomes")
-            XCTAssertEqual(convergence.launches, 1)
-            await runtime.applyLibrarySyncOutcome(.noRemote)
-            XCTAssertEqual(backfills.value, 1, "A later observation must not repeat the backfill")
-            XCTAssertEqual(convergence.launches, 1)
         }
+    }
+
+    private func checkOverlappingRepair(releasedBeforeRepair: Int, conflictFinishesFirst: Bool,
+                                        headAdvanced: Bool) async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged at launch")
+        let backfills = Counter(), convergence = RepairLifecycleConvergence(fixture: h)
+        let runtime = try await launchRepairRuntime(h, backfills: backfills, convergence: convergence,
+                                                   successfulCycle: true)
+        defer { runtime.commandServer?.stop(); runtime.library.stopWatching() }
+        let conflict = TestWait.Gate(owner: self), cycleRead = TestWait.Gate(owner: self)
+        defer { conflict.open(); releaseCycleReads(cycleRead) }
+        let cycle = try await holdOverlappingReads(h, runtime: runtime, conflict: conflict,
+                                                   cycleRead: cycleRead, headAdvanced: headAdvanced)
+        if releasedBeforeRepair > 0 {
+            await finishRepairOwner(conflictFirst: conflictFinishesFirst, conflict: conflict,
+                                    cycleRead: cycleRead, cycle: cycle, runtime: runtime)
+        }
+        if releasedBeforeRepair == 2 {
+            await finishRepairOwner(conflictFirst: !conflictFinishesFirst, conflict: conflict,
+                                    cycleRead: cycleRead, cycle: cycle, runtime: runtime)
+        }
+        XCTAssertEqual(backfills.value, 0, "Damage still defers launch backfill")
+        XCTAssertEqual(convergence.launches, 0)
+        let ledgerPassesBeforeRepair = convergence.ledgerPasses
+        h.saves.requestRepair()
+        await h.saves.replaceWithThisMac(context: h.context)
+        XCTAssertFalse(h.saves.libraryDamaged)
+        if releasedBeforeRepair < 2 {
+            XCTAssertEqual(backfills.value, 0, "A suspended successful owner must still own launch backfill")
+            XCTAssertEqual(convergence.launches, 0)
+            let conflictNext = releasedBeforeRepair == 0 ? conflictFinishesFirst : !conflictFinishesFirst
+            await finishRepairOwner(conflictFirst: conflictNext, conflict: conflict,
+                                    cycleRead: cycleRead, cycle: cycle, runtime: runtime)
+            XCTAssertEqual(backfills.value, 1, "The first released owner must backfill the repaired library")
+            XCTAssertEqual(convergence.launches, 1, "The backfill owner must run launch convergence")
+            XCTAssertEqual(convergence.ledgerPasses, ledgerPassesBeforeRepair + 1,
+                           "Launch backfill must force one ledger pass even without HEAD advancement")
+        }
+        conflict.open(); releaseCycleReads(cycleRead)
+        await cycle.value
+        await waitForConflictCompletion(runtime)
+        XCTAssertEqual(backfills.value, 1, "Local repair must retain the launch callback after overlapping outcomes")
+        XCTAssertEqual(convergence.launches, 1)
+        let conflictOwnsBackfill = (releasedBeforeRepair == 0 && conflictFinishesFirst) ||
+            (releasedBeforeRepair == 1 && !conflictFinishesFirst)
+        let separateAdvancedCycle = headAdvanced && !conflictOwnsBackfill
+        XCTAssertEqual(convergence.ledgerPasses, separateAdvancedCycle ? 2 : 1,
+                       "A backfill outcome must not also run its ordinary ledger reconcilers")
+        await runtime.applyLibrarySyncOutcome(.noRemote)
+        XCTAssertEqual(backfills.value, 1, "A later observation must not repeat the backfill")
+        XCTAssertEqual(convergence.launches, 1)
+    }
+
+    private func holdOverlappingReads(_ h: ManifestSaveFixture, runtime: AppRuntime, conflict: TestWait.Gate,
+                                      cycleRead: TestWait.Gate, headAdvanced: Bool) async throws -> Task<Void, Never> {
+        await TestWait.until(failureMessage: "Launch damage read must finish") {
+            h.saves.damage != nil && h.saves.damageRefreshTask == nil
+        }
+        h.recording.afterReadFailure = { try conflict.wait() }
+        try runtime.beginConflictResolution()(.synced(pushed: false, warnings: [], completedAt: Date(),
+                                                      headAdvanced: headAdvanced))
+        await TestWait.until(failureMessage: "Conflict completion must hold its damage read") { conflict.waiterCount == 1 }
+        h.recording.afterReadFailure = { try cycleRead.wait() }
+        let cycle = Task { await runtime.syncModel.syncNowAndReport() }
+        await TestWait.until(failureMessage: "A successful cycle must overlap conflict completion") { cycleRead.waiterCount == 2 }
+        h.recording.afterReadFailure = nil
+        // A later damage observation settles while both successful reads stay held. Each owner
+        // can then finish independently, so the chosen release order is also its completion order.
+        await runtime.applyLibrarySyncOutcome(.noRemote)
+        return cycle
+    }
+
+    private func finishRepairOwner(conflictFirst: Bool, conflict: TestWait.Gate, cycleRead: TestWait.Gate,
+                                   cycle: Task<Void, Never>, runtime: AppRuntime) async {
+        if conflictFirst {
+            conflict.open()
+            await waitForConflictCompletion(runtime)
+        } else {
+            releaseCycleReads(cycleRead)
+            await cycle.value
+        }
+    }
+
+    private func releaseCycleReads(_ gate: TestWait.Gate) {
+        // The verdict supersedes the old observation; the cycle also requests its own refresh.
+        gate.open()
+        gate.open()
+    }
+
+    private func waitForConflictCompletion(_ runtime: AppRuntime) async {
+        await TestWait.until(failureMessage: "Conflict completion must finish") { runtime.paths.syncSteps.pendingCount == 0 }
     }
 
     func testDamageLineAndRepairOfferFollowSyncOutcomesAndStateChanges() async throws {
@@ -146,7 +203,8 @@ extension AppRuntimeTests {
     }
 
     private func launchRepairRuntime(_ h: ManifestSaveFixture, backfills: Counter = Counter(),
-                                     convergence: PostSyncConverging? = nil) async throws -> AppRuntime {
+                                     convergence: PostSyncConverging? = nil,
+                                     successfulCycle: Bool = false) async throws -> AppRuntime {
         let paths = AppRuntimePaths(storeRoot: h.root, appSupportDir: h.root + "/support")
         let defaults = try isolatedDefaults("repair-lifecycle")
         defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
@@ -154,7 +212,14 @@ extension AppRuntimeTests {
         let runtime = try AppRuntime(container: h.context.container, library: h.library,
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }), defaults: defaults,
             launchBackfill: { _ in backfills.increment() }, hasRemoteConfigured: { false },
-            postSyncConvergence: convergence ?? RepairLifecycleConvergence(), launchIngestLockPath: h.lockPath, paths: paths)
+            postSyncConvergence: convergence ?? RepairLifecycleConvergence(), launchIngestLockPath: h.lockPath, paths: paths,
+            coordinatorConfigure: { coordinator in
+                guard successfulCycle else { return }
+                await coordinator.configure(engine: StatusOrderEngine(operation: { .synced(pushed: false, warnings: []) }),
+                    git: TestPaths.git, credentials: InMemoryCredentialStore(), root: h.root,
+                    audit: ConvergenceNullAudit(), machine: (identity: MachineIdentity(appSupportDir: paths.appSupportDir),
+                                                           stateService: TestPaths.stateService))
+            })
         await runtime.bootstrapTask.value
         await runtime.performLaunchWorkIfNeeded(context: h.context)
         XCTAssertTrue(runtime.launchWorkCompleted)
@@ -195,6 +260,18 @@ extension AppRuntimeTests {
 @MainActor
 private final class RepairLifecycleConvergence: PostSyncConverging {
     var launches = 0
-    func run(after result: SyncCycleResult) {}
-    func runAfterLaunchIngest() { launches += 1 }
+    private let recorder = ConvergenceRecorder()
+    private var delegate: PostSyncConvergence?
+    var ledgerPasses: Int { recorder.events.filter { $0 == "category" }.count }
+
+    init(fixture: ManifestSaveFixture? = nil) {
+        guard let fixture else { return }
+        delegate = PostSyncConvergence(root: fixture.root,
+            deployReconciler: ConvergenceRecordingDeploy(recorder: recorder), contextFactory: { fixture.context },
+            categoryReconciler: ConvergenceRecordingLedger(name: "category", recorder: recorder),
+            intentReconciler: ConvergenceRecordingLedger(name: "intent", recorder: recorder), auditLog: { _, _ in })
+    }
+
+    func run(after result: SyncCycleResult) { delegate?.run(after: result) }
+    func runAfterLaunchIngest() { launches += 1; delegate?.runAfterLaunchIngest() }
 }
