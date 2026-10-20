@@ -70,7 +70,7 @@ final class ManifestSaveModel {
     func submit(_ change: ManifestChange, context: ModelContext, categoryEdit: CategorySaveEdit? = nil,
                 reconcile: (() -> BatchResult)? = nil, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
-        refused.first { $0.context === context }?.observe(change)
+        for edit in refused where edit.context === context { edit.observe(change) }
         let manifest = manifest, files = files
         let item = Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context),
@@ -244,8 +244,8 @@ final class ManifestSaveModel {
                 do { locals[key] = try manifest.snapshot(from: edit.context) } catch {
                     log("Couldn't refresh a refused edit's presentation: " + error.localizedDescription)
                 }
-                edit.cache(local: locals[key])
             }
+            edit.cache(local: locals[key])
         }
         guard let durable else { return }
         refused = refused.filter { $0.acknowledge(durable: durable) }
