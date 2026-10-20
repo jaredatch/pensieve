@@ -212,21 +212,32 @@ __attribute__((constructor)) static void install(void) {
     def frontmost_detail(self):
         return subprocess.check_output([str(self.fixture), '--frontmost-detail'], text=True).strip()
 
-    def assert_launch_activation(self, state, frontmost, current, configuration, detail=''):
+    # On GitHub's macOS runner the launched app comes to the front even though the launch asks it not to,
+    # with Finder in front beforehand (#174). There only the request is checked; a real Mac checks both.
+    OBSERVES_ACTIVATION = os.environ.get('GITHUB_ACTIONS') != 'true'
+
+    def assert_launch_activation(self, state, frontmost, current, configuration, detail='', observe=None):
         receipt = f'frontmost pid before launch: {frontmost}; {detail}'
         self.assertFalse(configuration['activates'], receipt)
-        if int(frontmost) > 0:
+        if observe is None:
+            observe = self.OBSERVES_ACTIVATION
+        if observe and int(frontmost) > 0:
             self.assertFalse(state['active'], receipt)
             self.assertEqual(current, frontmost, receipt)
 
     def test_activation_assertions_distinguish_an_empty_desktop(self):
-        self.assert_launch_activation({'active': True}, '-1', '123', {'activates': False})
+        self.assert_launch_activation({'active': True}, '-1', '123', {'activates': False}, observe=True)
         for state, previous, current, configuration in [
                 ({'active': True}, '42', '42', {'activates': False}),
                 ({'active': False}, '42', '43', {'activates': False}),
                 ({'active': False}, '-1', '123', {'activates': True})]:
             with self.assertRaisesRegex(AssertionError, f'frontmost pid before launch: {previous}'):
-                self.assert_launch_activation(state, previous, current, configuration)
+                self.assert_launch_activation(state, previous, current, configuration, observe=True)
+
+    def test_activation_on_the_runner_checks_only_the_request(self):
+        self.assert_launch_activation({'active': True}, '42', '43', {'activates': False}, observe=False)
+        with self.assertRaisesRegex(AssertionError, 'frontmost pid before launch: 42'):
+            self.assert_launch_activation({'active': False}, '42', '42', {'activates': True}, observe=False)
 
     def test_launch_timeout_and_late_wrong_app_are_bounded(self):
         start = time.monotonic()

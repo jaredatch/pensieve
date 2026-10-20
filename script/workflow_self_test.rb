@@ -695,7 +695,7 @@ class WorkflowTests < Minitest::Test
   end
 
   def assert_ci_test_baseline_includes_wrapper_self_test
-    assert_operator CI_WORST_SECONDS.fetch('Test'), :>, 867, 'Test includes measured wrapper self-test work'
+    assert_operator CI_WORST_SECONDS.fetch('Test'), :>, CI_TEST_RUNNER_SECONDS, 'Test includes measured wrapper self-test work'
   end
 
   def test_ci_hygiene_baseline_includes_stability_probe
@@ -788,12 +788,15 @@ class WorkflowTests < Minitest::Test
     'CLI contract' => 28.872,
     'Release recovery' => 696.103
   }.freeze
+  # The suite's runner time: run 39458867579 hit the old 45-minute bound at 2,713 s with 2,635 of
+  # 3,037 results in, so the whole run is estimated at ceil(2,713 x 3,037 / 2,635) s.
+  CI_TEST_RUNNER_SECONDS = 3127
   CI_WORST_SECONDS = {
     'Checkout' => 2, 'Select Xcode 26' => 1, 'Install tools' => 3,
     'Generate Xcode project' => 1, 'Compute replay range' => 0,
     'Test public hygiene guard' => 156 + (CI_LOCAL_WORST_SECONDS.fetch('Hygiene added checks') * CI_RUNNER_FACTOR).ceil, 'Test workflow contracts' => [3, (CI_LOCAL_WORST_SECONDS.fetch('Workflow suite') * CI_RUNNER_FACTOR).ceil].max,
     'Test release recovery' => (CI_LOCAL_WORST_SECONDS.fetch('Release recovery') * CI_RUNNER_FACTOR).ceil, 'Test development build host selection' => 0,
-    'Test' => 867 + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Test CLI contract' => (CI_LOCAL_WORST_SECONDS.fetch('CLI contract') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
+    'Test' => CI_TEST_RUNNER_SECONDS + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Test CLI contract' => (CI_LOCAL_WORST_SECONDS.fetch('CLI contract') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
   }.freeze
 
   def ci_worst_seconds(job)
