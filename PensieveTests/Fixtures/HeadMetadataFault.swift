@@ -18,20 +18,7 @@ enum HeadMetadataFault: String, CaseIterable {
 
     func apply(root: String) throws -> () throws -> Void {
         let files = FileService()
-        if self == .reftable {
-            try NativeTestWork.run {
-                _ = try TestPaths.git.runOrThrow(["refs", "migrate", "--ref-format=reftable"], in: root)
-            }
-            var restored = false
-            return {
-                if !restored {
-                    try NativeTestWork.run {
-                        _ = try TestPaths.git.runOrThrow(["refs", "migrate", "--ref-format=files"], in: root)
-                    }
-                    restored = true
-                }
-            }
-        }
+        if self == .reftable { return try reftable(root: root) }
         if self == .unknownExtension {
             let path = root + "/.git/config", original = try files.readFile(at: path)
             try files.writeFile(at: path, content: original
@@ -63,6 +50,30 @@ enum HeadMetadataFault: String, CaseIterable {
             if files.fileExists(at: alias) { try files.deleteFile(at: alias) }
         }
     }
+
+    private func reftable(root: String) throws -> () throws -> Void {
+        let files = FileService(), entry = root + "/.git", saved = root + "-saved-ref-metadata"
+        try FileManager.default.moveItem(atPath: entry, toPath: saved)
+        let restore = {
+            if try files.entryExistsWithoutFollowingLinks(at: saved) {
+                if try files.entryExistsWithoutFollowingLinks(at: entry) { try files.deleteDirectory(at: entry) }
+                try FileManager.default.moveItem(atPath: saved, toPath: entry)
+            }
+        }
+        do {
+            try NativeTestWork.run {
+                _ = try TestPaths.git.runOrThrow(["init", "--ref-format=reftable", "--initial-branch=main", root], in: nil)
+                _ = try TestPaths.git.runOrThrow(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                    "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "fixture"], in: root)
+                XCTAssertEqual(try TestPaths.git.run(["rev-parse", "--verify", "HEAD"], in: root).exit, 0)
+            }
+        } catch {
+            try restore()
+            throw error
+        }
+        return restore
+    }
+
 }
 
 extension IncompleteIngestFixture {

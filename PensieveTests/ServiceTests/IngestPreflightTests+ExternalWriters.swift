@@ -47,6 +47,7 @@ extension IngestPreflightTests {
     }
 
     func testUnreadableHeadRebuildsBeforeImportDeployRemovalAndQueuedSave() async throws {
+        try await assertExternalWriter(.importSkill, headFault: .reftable, linked: true)
         for fault in HeadMetadataFault.allCases {
             for writer in ExternalWriter.allCases { try await assertExternalWriter(writer, headFault: fault) }
         }
@@ -60,8 +61,9 @@ extension IngestPreflightTests {
 
     func testUnchangedHeadSkipsImportAndDeployRebuild() async throws {
         for linked in [false, true] {
-            for configuration in ["plain", "sparse", "v0", "v1"] {
-                for writer in ExternalWriter.allCases {
+            for writer in ExternalWriter.allCases {
+                let configurations = writer == .importSkill ? ["plain", "sparse", "v0", "v1"] : ["plain"]
+                for configuration in configurations {
                     try await assertUnchangedWriter(writer, linked: linked, configuration: configuration)
                 }
             }

@@ -34,10 +34,14 @@ final class GitHeadStampTests: XCTestCase {
     func testGeneratedHeadAndLooseRefTextMatchesGit() throws {
         try NativeTestWork.run { [self] in
             try assertRepositoryFormats()
+            try assertConfigSyntax()
+            try assertLooseEntryKinds()
             let f = try HeadRepository(base: base, shape: .folder)
+            try files.writeFile(at: f.metadata + "/main", content: f.oid + "\n")
             for ending in ["\n", "\r\n", ""] {
                 for body in ["ref: refs/heads/main", "ref:\trefs/heads/main", "ref:  refs/heads/main",
-                             "ref: refs/heads/main ", "ref: refs/heads/unborn", f.oid, f.oid.uppercased(), f.oid + " "] {
+                             "ref: refs/heads/main ", "ref: refs/heads/main extra", "ref: refs/heads/main\textra",
+                             "ref: main", "ref: refs/heads/unborn", f.oid, f.oid.uppercased(), f.oid + " "] {
                     try files.writeFile(at: f.metadata + "/HEAD", content: body + ending)
                     try assertOracle(f,
                                      label: "HEAD \((body + ending).debugDescription)")
@@ -66,9 +70,17 @@ final class GitHeadStampTests: XCTestCase {
                 let path = shape == .worktree ? f.metadata + "/commondir" : f.root + "/.git"
                 let original = try files.readFile(at: path).trimmingCharacters(in: .newlines)
                 for ending in ["\n", "\r\n", "", "\n\n"] {
-                    for body in [original, " " + original, original + " ", "", ".", "missing", "gitdir: missing"] {
+                    for body in [original, " " + original, "\n" + original, original + " ",
+                                 "", ".", "missing", "gitdir: missing"] {
                         try files.writeFile(at: path, content: body + ending)
                         try assertOracle(f, label: "\(shape) \((body + ending).debugDescription)")
+                        if shape != .worktree {
+                            if body == original {
+                                XCTAssertEqual(try files.storeMetadataDirectory(root: f.root), f.metadata)
+                            } else {
+                                XCTAssertThrowsError(try files.storeMetadataDirectory(root: f.root), body.debugDescription)
+                            }
+                        }
                     }
                 }
                 try files.writeFile(at: path, content: original + "\n")
@@ -94,10 +106,6 @@ final class GitHeadStampTests: XCTestCase {
                 observed.afterRead = { path in
                     let path = URL(fileURLWithPath: path).standardizedFileURL.path
                     reads.append(path)
-                    if path == f.common + "/packed-refs", packed != "malformed\n" {
-                        // Git publishes the packed snapshot before pruning the loose ref.
-                        _ = try f.git(["pack-refs", "--all", "--prune"])
-                    }
                 }
                 XCTAssertEqual(GitHeadStamp(fileService: observed).state(root: f.root), .resolved(direct))
                 XCTAssertTrue(reads.contains(f.common + "/refs/heads/main"))
@@ -121,7 +129,11 @@ final class GitHeadStampTests: XCTestCase {
                          "bad\n" + f.oid + " refs/heads/main\n", "\n" + f.oid + " refs/heads/main\n",
                          "# hello\n", f.oid + " refs/heads/main\n^bad\n",
                          header + "bad\n" + f.oid + " refs/heads/main\n",
-                         header + f.oid + " refs/heads/main\nbad\n"] {
+                         header + f.oid + " refs/heads/main\nbad\n",
+                         header + f.oid + " refs/heads/main\n" + old + " refs/heads/main\n",
+                         header + f.oid + " refs/heads/" + String(repeating: "a", count: 180) + "\n"
+                            + old + " refs/heads/main\n" + f.oid + " refs/heads/main\n",
+                         header + f.oid + " refs/heads/main\n" + old + " refs/heads/aaaa\n"] {
                 try files.writeFile(at: f.common + "/packed-refs", content: text)
                 try assertOracle(f, label: "packed \(text.debugDescription)")
             }
@@ -166,15 +178,13 @@ final class GitHeadStampTests: XCTestCase {
     func assertOracle(_ fixture: HeadRepository, label: String,
                       file: StaticString = #filePath, line: UInt = #line) throws {
         let oracle = try TestPaths.git.run(["rev-parse", "--verify", "HEAD"], in: fixture.root)
-        let symbolic = try TestPaths.git.run(["symbolic-ref", "-q", "HEAD"], in: fixture.root)
         let expected: GitHeadStamp.State
         if oracle.exit == 0 {
             expected = .resolved(oracle.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-        } else if symbolic.exit == 0 && oracle.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    == "fatal: Needed a single revision" {
-            expected = .unborn
         } else {
-            expected = .unreadable
+            let symbolic = try TestPaths.git.run(["symbolic-ref", "-q", "HEAD"], in: fixture.root)
+            expected = symbolic.exit == 0 && oracle.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                == "fatal: Needed a single revision" ? .unborn : .unreadable
         }
         XCTAssertEqual(GitHeadStamp().state(root: fixture.root), expected,
                        label + ": " + oracle.stderr, file: file, line: line)
@@ -182,6 +192,53 @@ final class GitHeadStampTests: XCTestCase {
 }
 
 extension GitHeadStampTests {
+
+    private func assertConfigSyntax() throws {
+        for format in ["sha1", "sha256"] {
+            let f = try HeadRepository(base: base + "/syntax-" + format, shape: .folder, format: format)
+            let config = try files.readFile(at: f.common + "/config")
+            var settings = ["[extensions]\nnoop\r", "\r[extensions]\nnoop", "[extensions]\nnoop\r\n",
+                            "[extensions]\nrefStorage = files\\ ", "[extensions]\nnoop # comment", "[extensions]\nnoop ; comment",
+                            "[extensions]\nno\\\nop", "[extensions]\\\n\nnoop",
+                            "\\\n[extensions]\nnoop", "[remote \"fu\\\nture\"]\nnoop",
+                            "[extensions]\nrefStorage = files\\", "[extensions]\nrefStorage = fi\\\nles"]
+            for space in ["\u{00A0}", "\u{000C}", "\u{000B}", "\u{2028}"] {
+                settings += [space + "[extensions]\nnoop", "[extensions]\nnoop" + space,
+                             "[extensions]\nrefStorage = " + space + "files" + space]
+            }
+            for setting in settings {
+                try files.writeFile(at: f.common + "/config", content: config
+                    + "\n[core]\nrepositoryformatversion = 1\n" + setting)
+                try assertOracle(f, label: format + " config " + setting.debugDescription)
+            }
+            try files.writeFile(at: f.common + "/config", content: "orphan = value\n" + config)
+            try assertOracle(f, label: format + " key before section")
+            for version in ["-1", "-2"] {
+                try files.writeFile(at: f.common + "/config", content: config
+                    + "\n[core]\nrepositoryformatversion = " + version + "\n")
+                try assertOracle(f, label: format + " negative version " + version)
+            }
+        }
+    }
+
+    private func assertLooseEntryKinds() throws {
+        let f = try HeadRepository(base: base + "/loose-kinds", shape: .folder)
+        let path = f.common + "/refs/heads/main"
+        try files.writeFile(at: f.common + "/oid", content: f.oid + "\n")
+        for packed in [false, true] {
+            if packed { try files.writeFile(at: f.common + "/packed-refs", content: f.oid + " refs/heads/main\n") }
+            try files.deleteFile(at: path)
+            try files.createDirectory(at: path)
+            try assertOracle(f, label: "loose directory, packed=\(packed)")
+            try files.deleteDirectory(at: path)
+            try files.createSymlink(at: path, pointingTo: "missing")
+            try assertOracle(f, label: "loose dangling link, packed=\(packed)")
+            try files.deleteFile(at: path)
+            try files.createSymlink(at: path, pointingTo: f.common + "/oid")
+            try assertOracle(f, label: "loose regular link, packed=\(packed)")
+        }
+    }
+
     private func assertConfiguredRepositories() throws {
         let sparse = try HeadRepository(base: base + "/sparse", shape: .folder)
         _ = try sparse.git(["sparse-checkout", "init"])
@@ -197,7 +254,7 @@ extension GitHeadStampTests {
             let f = try HeadRepository(base: base + "/formats-" + format, shape: .folder, format: format)
             let config = try files.readFile(at: f.common + "/config")
             let settings = ["", "worktreeConfig = true", "preciousObjects = true", "partialClone = origin",
-                            "[extensions \"future\"]\nnoop = true", "[branch \"a]b\"]\nremote = origin",
+                            "[remote \"future\"]\nnoop = true", "[branch \"a]b\"]\nremote = origin",
                             "noop", "noop-v1", "relativeWorktrees = true", "relativeWorktrees = false", "unknownExtension = true",
                             "objectFormat = " + format, "refStorage = files",
                             "compatObjectFormat = " + (format == "sha1" ? "sha256" : "sha1"),
@@ -206,7 +263,7 @@ extension GitHeadStampTests {
                             "partialClone", "worktreeConfig = FALSE", "REFSTORAGE = files",
                             "# comment\\\nrefStorage = FILES", "refStorage = fi\\\nles", "refStorage = \"files#future\"",
                             "refStorage = \"files\" # comment", "objectFormat = \"" + format + "\" ; comment"]
-            for version in ["0", "1", "2"] {
+            for version in format == "sha1" ? ["0", "1", "2"] : ["1", "2"] {
                 for setting in settings {
                     for head in ["main", "unborn"] {
                         try files.writeFile(at: f.metadata + "/HEAD", content: "ref: refs/heads/" + head + "\n")

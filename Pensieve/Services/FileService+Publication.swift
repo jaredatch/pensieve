@@ -214,10 +214,7 @@ extension FileServiceProtocol {
         guard let type = try entryTypeWithoutFollowingLinks(at: metadata) else { return nil }
         let directory: String
         if type == .regular {
-            let text = try readFile(at: metadata).trimmingCharacters(in: .newlines)
-            guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileWriteUnknown) }
-            let target = String(text.dropFirst(8))
-            directory = PathSyntax.isAbsolute(target) ? target : root + "/" + target
+            directory = try GitDirectoryText.directory(try readFile(at: metadata), relativeTo: root)
         } else {
             guard type == .directory else { throw CocoaError(.fileReadUnknown) }
             directory = metadata
@@ -268,5 +265,24 @@ extension FileServiceProtocol {
         let location = try resolvedStoreLocation(root: parent.isEmpty ? "." : parent)
         let path = (location.path as NSString).appendingPathComponent((root as NSString).lastPathComponent)
         return (path, location.existingAncestor)
+    }
+}
+
+/// Pure Git control-text syntax shared by HEAD reads and writable-metadata admission.
+/// Callers retain their own directory, containment, permission and volume checks.
+enum GitDirectoryText {
+    static func directory(_ text: String, relativeTo root: String) throws -> String {
+        guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileReadCorruptFile) }
+        let target = trimLineEndings(String(text.dropFirst(8)))
+        guard !target.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        return PathSyntax.isAbsolute(target) ? target : root + "/" + target
+    }
+
+    static func trimLineEndings(_ text: String) -> String {
+        var result = text
+        while let last = result.unicodeScalars.last, last == "\n" || last == "\r" {
+            result.unicodeScalars.removeLast()
+        }
+        return result
     }
 }

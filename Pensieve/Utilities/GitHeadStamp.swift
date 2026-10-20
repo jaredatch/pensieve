@@ -38,7 +38,10 @@ struct GitHeadStamp {
             let privateRef = ["refs/bisect/", "refs/worktree/", "refs/rewritten/"].contains { PathSyntax.hasPrefix(ref, $0) }
             let directory = privateRef ? git : common
             let path = directory + "/" + ref
-            if try fileService.entryExistsWithoutFollowingLinks(at: path) {
+            let type = try fileService.entryTypeWithoutFollowingLinks(at: path)
+            // Git treats dangling or directory symlinks as missing refs, without a packed fallback.
+            if type == .symlink, !fileService.fileExists(at: path) { return .unborn }
+            if type == .regular || type == .symlink {
                 // A symbolic-ref chain is intentionally unresolved: callers must ingest first.
                 return Self.looseOID(try fileService.readFile(at: path), length: length).map(State.resolved) ?? .unreadable
             }
@@ -48,18 +51,14 @@ struct GitHeadStamp {
 
     private func metadataDirectory(_ entry: String, root: String) throws -> String {
         if try fileService.directoryExistsFollowingLinks(at: entry) { return entry }
-        let text = try fileService.readFile(at: entry)
-        guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileReadCorruptFile) }
-        let target = Self.trimLineEndings(String(text.dropFirst(8)))
-        guard !target.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
-        let path = Self.path(target, relativeTo: root)
+        let path = try GitDirectoryText.directory(try fileService.readFile(at: entry), relativeTo: root)
         guard try fileService.directoryExistsFollowingLinks(at: path) else { throw CocoaError(.fileNoSuchFile) }
         return path
     }
 
     private func commonDirectory(_ git: String) throws -> String {
         guard try fileService.entryExistsWithoutFollowingLinks(at: git + "/commondir") else { return git }
-        let target = Self.trimLineEndings(try fileService.readFile(at: git + "/commondir"))
+        let target = GitDirectoryText.trimLineEndings(try fileService.readFile(at: git + "/commondir"))
         guard !target.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
         let path = Self.path(target, relativeTo: git)
         guard try fileService.directoryExistsFollowingLinks(at: path) else { throw CocoaError(.fileNoSuchFile) }
@@ -121,8 +120,8 @@ struct GitHeadStamp {
         Array(record.dropFirst(length + 1).prefix { $0 != 10 })
     }
 
-    /// Packed files marked sorted are searched by byte position. This also keeps Git's
-    /// treatment of malformed records it never visits; peeled lines belong to their record.
+    /// Git searches by byte position. Unequal record lengths and duplicate ref names can
+    /// select a different OID than either a first match or a record-midpoint binary search.
     private static func packedOffset(ref: [UInt8], buffer: [UInt8], length: Int) -> Int? {
         var lower = 0, upper = buffer.count
         while lower < upper {
@@ -141,14 +140,6 @@ struct GitHeadStamp {
     }
 
     private static let gitWhitespace = CharacterSet(charactersIn: " \t\n\r\u{000B}\u{000C}")
-
-    private static func trimLineEndings(_ text: String) -> String {
-        var result = text
-        while let last = result.unicodeScalars.last, last == "\n" || last == "\r" {
-            result.unicodeScalars.removeLast()
-        }
-        return result
-    }
 
     private static func path(_ value: String, relativeTo base: String) -> String {
         PathSyntax.isAbsolute(value) ? value : base + "/" + value
@@ -199,8 +190,8 @@ private struct GitRepositoryFormat {
         guard format.version <= 1,
               !(format.version == 0 && format.v1Only),
               !(format.version >= 1 && format.unknown) else { throw CocoaError(.fileReadUnsupportedScheme) }
-        // Git discards extension settings when no repository format was declared.
-        if format.version < 0 { return 40 }
+        // Git discards extension settings only for its -1 sentinel, absent or explicitly set.
+        if format.version == -1 { return 40 }
         guard format.refStorage == "files", !format.compatibility else { throw CocoaError(.fileReadUnsupportedScheme) }
         return format.length
     }
@@ -247,24 +238,23 @@ private struct GitRepositoryFormat {
         var section = ""
         var entries: [(String, String?)] = []
         for logical in configLines(config) {
-            var line = logical.trimmingCharacters(in: .whitespaces)
+            var line = String(logical.unicodeScalars.drop(while: whitespace.contains))
             if line.hasPrefix("[") {
                 guard let range = line.range(of: #"^\[[A-Za-z0-9.-]+([ \t]+"([^"\\]|\\.)*")?\]"#,
                                              options: .regularExpression) else { throw CocoaError(.fileReadCorruptFile) }
                 let header = String(line[range].dropFirst().dropLast())
                 section = header.replacingOccurrences(of: #"[ \t]+"(.*)"$"#, with: ".$1", options: .regularExpression)
                     .lowercased()
-                line = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                line = String(line[range.upperBound...].unicodeScalars.drop(while: whitespace.contains))
             }
             if line.isEmpty || line.hasPrefix("#") || line.hasPrefix(";") { continue }
-            guard !section.isEmpty,
-                  let keyRange = line.range(of: #"^[A-Za-z][A-Za-z0-9-]*"#, options: .regularExpression) else {
+            guard let keyRange = line.range(of: #"^[A-Za-z][A-Za-z0-9-]*"#, options: .regularExpression) else {
                 throw CocoaError(.fileReadCorruptFile)
             }
             let key = String(line[keyRange]).lowercased()
-            let rest = String(line[keyRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            let rest = String(line[keyRange.upperBound...].drop { $0 == " " || $0 == "\t" })
             let value: String?
-            if rest.isEmpty || rest.hasPrefix("#") || rest.hasPrefix(";") { value = nil } else {
+            if rest.isEmpty { value = nil } else {
                 guard rest.hasPrefix("=") else { throw CocoaError(.fileReadCorruptFile) }
                 value = try configValue(String(rest.dropFirst()))
             }
@@ -273,18 +263,21 @@ private struct GitRepositoryFormat {
         return entries
     }
 
+    private static let whitespace = CharacterSet(charactersIn: " \t\r\n")
+
     private static func configLines(_ config: String) -> [String] {
         var lines: [String] = [], line = ""
-        var quoted = false, escaped = false, comment = false
+        var quoted = false, escaped = false, comment = false, value = false
         for character in config.replacingOccurrences(of: "\r\n", with: "\n") {
             if character == "\n" {
-                if escaped && !comment {
+                if escaped && !comment && value {
                     line.removeLast()
                 } else {
                     lines.append(line)
                     line = ""
                     quoted = false
                     comment = false
+                    value = false
                 }
                 escaped = false
                 continue
@@ -293,6 +286,7 @@ private struct GitRepositoryFormat {
             if comment { continue }
             if escaped { escaped = false } else if character == "\\" { escaped = true } else if character == "\"" {
                 quoted.toggle()
+            } else if !quoted && character == "=" { value = true
             } else if !quoted && (character == "#" || character == ";") { comment = true }
         }
         lines.append(line)
@@ -312,14 +306,15 @@ private struct GitRepositoryFormat {
                 result += whitespace
                 whitespace = ""
                 quoted.toggle()
-            } else if !quoted && (character == "#" || character == ";") { break } else if !quoted && character.isWhitespace {
+            } else if !quoted && (character == "#" || character == ";") { break
+            } else if !quoted && character.unicodeScalars.allSatisfy(Self.whitespace.contains) {
                 if !result.isEmpty { whitespace += String(character) }
             } else {
                 result += whitespace + String(character)
                 whitespace = ""
             }
         }
-        guard !quoted, !escaped else { throw CocoaError(.fileReadCorruptFile) }
+        guard !quoted else { throw CocoaError(.fileReadCorruptFile) }
         return result
     }
 }
