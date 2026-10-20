@@ -3,6 +3,40 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func checkRefusedFieldAcknowledgementDuringRetry() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        try NativeTestWork.run {
+            try TestPaths.git.initRepository(at: h.root)
+            XCTAssertTrue(try TestPaths.git.stageAllAndCommit(at: h.root, message: "seed"))
+        }
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: h.context)
+        h.recording.failingWrites = 1
+        h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .user, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertNotNil(h.library.error)
+        try NativeTestWork.run {
+            try h.files.writeFile(at: h.root + "/outside.txt", content: "force pre-save ingest")
+            XCTAssertTrue(try TestPaths.git.stageAllAndCommit(at: h.root, message: "outside change"))
+        }
+        var scans = 0
+        h.recording.afterRebuildSnapshot = {
+            scans += 1
+            guard scans <= 2 else { return }
+            var pulled = try h.manifest.read(fromRoot: h.root)
+            let index = try XCTUnwrap(pulled.skills.firstIndex { $0.slug == "alpha" })
+            pulled.skills[index].tags = scans == 1 ? ["kept"] : ["pulled-after-ack"]
+            try h.manifest.write(pulled, toRoot: h.root)
+            XCTAssertTrue(try TestPaths.git.stageAllAndCommit(at: h.root, message: "outside metadata \(scans)"))
+        }
+        h.categories.rename(h.local, to: "Saved", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(scans, 3)
+        XCTAssertNil(h.saves.categoryNotice)
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["pulled-after-ack"])
+        XCTAssertEqual(h.alpha.tags, ["pulled-after-ack"], "The retry read acknowledged the refusal before the next pull")
+    }
+
     func testDamageRefusalRetriesWhenRefreshFindsPeerRepair() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }

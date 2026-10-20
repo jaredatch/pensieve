@@ -3,9 +3,6 @@ import SwiftData
 
 extension ManifestSaveModel {
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
-    struct PreSaveIngest {
-        let verdict: HeadEditVerdict
-    }
 
     struct ManifestRead {
         let disk: ManifestSnapshot?
@@ -47,34 +44,48 @@ extension ManifestSaveModel {
     }
 
     @MainActor
-    func ingestBeforeSave(_ item: Item, disk: inout ManifestSnapshot?,
-                          head: GitHeadStamp.State) async throws -> PreSaveIngest {
+    func saveWithStableHead(_ item: Item, disk: inout ManifestSnapshot?, first: ManifestRead) async throws -> Bool {
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
-        do {
-            var before = head
-            for attempt in 0..<3 {
-                if attempt > 0 {
-                    let read = try await readCurrentManifest()
-                    disk = read.disk
-                    before = read.head
-                }
-                if disk == nil, ingest.needsRebuild { throw ManifestError.damaged }
-                let durable = try disk ?? item.fallback()
-                let observation = try await prepareRebuild(item, durable: durable)
-                // The bracket starts before the manifest read, not just before the skill scan.
-                guard observation.stable, before.oid == observation.before else { continue }
-                let verdict = try acceptRebuild(item, prepared: observation.value,
+        for attempt in 0..<3 {
+            // Read refusals have the same meaning on the first attempt and on a retry.
+            let read = attempt == 0 ? first : try await readCurrentManifest()
+            disk = read.disk
+            if disk == nil, ingest.needsRebuild { throw ManifestError.damaged }
+            refreshRefused(durable: disk)
+            var prepared: PreparedStoreRebuild?
+            var head = read.head.oid
+            if attempt > 0 || ingest.requiresRebuild(at: read.head) {
+                let before = read.head
+                let durable: ManifestSnapshot
+                let observation: StoreIngestState.Observation<PreparedStoreRebuild>
+                let verdict: HeadEditVerdict
+                do {
+                    durable = try disk ?? item.fallback()
+                    observation = try await prepareRebuild(item, durable: durable)
+                    // The bracket starts before the manifest read, not just before the skill scan.
+                    guard observation.stable, before.oid == observation.before else { continue }
+                    verdict = try acceptRebuild(item, prepared: observation.value,
                                                 durable: observation.value.snapshot, includingHeadEdit: true)
-                ingest.accept(observation, result: RebuildResult())
-                return PreSaveIngest(verdict: verdict)
+                    ingest.accept(observation, result: RebuildResult())
+                } catch { throw failedPreSaveRebuild(error, item: item) }
+                switch verdict {
+                case .ready(let scan): prepared = scan
+                case .refused(let error): throw error
+                }
+                head = observation.after
             }
-            throw SyncError.ingestIncomplete
-        } catch {
-            ingest.invalidate()
-            if case ManifestError.damaged = error { throw error }
-            let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
-            throw ManifestSaveError.rebuildFailed(cause, manifestSaved: item.wasHealed)
+            // Check again on the publication worker, after acceptance and immediately before writing.
+            guard let result = try await publish(item, disk: disk, head: head) else { continue }
+            await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
+            return result.published
         }
+        throw failedPreSaveRebuild(SyncError.ingestIncomplete, item: item)
+    }
+
+    private func failedPreSaveRebuild(_ error: Error, item: Item) -> ManifestSaveError {
+        StoreIngestState.shared(for: item.presentation.context.container).invalidate()
+        let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
+        return .rebuildFailed(cause, manifestSaved: item.wasHealed)
     }
 
     @MainActor

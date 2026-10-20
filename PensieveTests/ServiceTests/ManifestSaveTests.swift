@@ -198,6 +198,7 @@ final class ManifestSaveTests: XCTestCase {
             XCTAssertEqual(h.alpha.scope, .project, refusal)
             try await checkRefusedFieldAcknowledgement(h, window: window)
         }
+        try await checkRefusedFieldAcknowledgementDuringRetry()
         try await checkPresentationReadFailureAfterDurableWrite()
     }
 

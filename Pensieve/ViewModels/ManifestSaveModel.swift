@@ -127,24 +127,7 @@ final class ManifestSaveModel {
         do {
             heldLock = try await takeLock()
             let read = try await readCurrentManifest()
-            disk = read.disk
-            if disk == nil, StoreIngestState.shared(for: item.presentation.context.container).needsRebuild {
-                throw ManifestError.damaged
-            }
-            refreshRefused(durable: disk)
-            let ingest = StoreIngestState.shared(for: item.presentation.context.container)
-            let head = await BlockingWork.run { [files, root] in GitHeadStamp(fileService: files).state(root: root) }
-            var prepared: PreparedStoreRebuild?
-            if read.head != head || ingest.requiresRebuild(at: head) {
-                let outcome = try await ingestBeforeSave(item, disk: &disk, head: read.head)
-                switch outcome.verdict {
-                case .ready(let scan): prepared = scan
-                case .refused(let error): throw error
-                }
-            }
-            let result = try await publish(item, disk: disk)
-            await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
-            return .finished(result.published)
+            return .finished(try await saveWithStableHead(item, disk: &disk, first: read))
         } catch {
             if case ManifestError.damaged = error {
                 await refreshDamage()
@@ -171,8 +154,8 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
-        -> (snapshot: ManifestSnapshot, published: Bool) {
+    func publish(_ item: Item, disk: ManifestSnapshot?, head: String?) async throws
+        -> (snapshot: ManifestSnapshot, published: Bool)? {
         var saved = try disk ?? item.fallback()
         // A fallback publishes this context's whole window. Capture its queue membership before
         // awaiting the write; another context or an edit submitted during the write is not healed.
@@ -189,8 +172,13 @@ final class ManifestSaveModel {
                 return (saved, false)
             }
         }
-        let snapshot = saved, manifest = manifest, root = root
-        try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
+        let snapshot = saved, manifest = manifest, root = root, files = files
+        let published = try await BlockingWork.run {
+            guard GitHeadStamp(fileService: files).read(root: root) == head else { return false }
+            try manifest.write(snapshot, toRoot: root)
+            return true
+        }
+        guard published else { return nil }
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
         ingest.finish(item.id)
         for index in items.indices where healedItems.contains(items[index].id) {
@@ -222,7 +210,7 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func refreshRefused(durable: ManifestSnapshot?) {
+    func refreshRefused(durable: ManifestSnapshot?) {
         var locals: [ObjectIdentifier: ManifestSnapshot] = [:]
         var attempted: Set<ObjectIdentifier> = []
         for edit in refused {

@@ -4,27 +4,47 @@ import XCTest
 
 extension IngestPreflightTests {
     func testQueuedRenameRetriesMovingHeadAndPreservesOutsideManifestChange() async throws {
+        for timing in ["scan", "acceptance"] {
+            try await checkMovingHead(timing: timing)
+        }
+    }
+
+    private func checkMovingHead(timing: String) async throws {
         let fixture = try NativeTestWork.run {
-            try IncompleteIngestFixture(base: self.tempDir + "/moving-head")
+            try IncompleteIngestFixture(base: self.tempDir + "/moving-head-" + timing)
         }
         let context = try damageContext(fixture)
         try pullCategoryChange(fixture)
         let recording = RecordingSaveManifest()
-        var scans = 0
+        var scans = 0, commits = 0
         recording.afterRebuildSnapshot = {
             scans += 1
-            if scans == 1 { try self.commitOutsideCategory(fixture) }
+            if scans == 1, timing == "scan" {
+                try self.commitOutsideCategory(fixture)
+                commits += 1
+            }
         }
+        // The real acceptance save is after the scan's closing HEAD sample and before publication.
+        let observer = NotificationCenter.default.addObserver(forName: ModelContext.didSave,
+            object: context, queue: nil) { _ in
+            guard timing == "acceptance", scans == 1, commits == 0 else { return }
+            do {
+                try NativeTestWork.run { try self.commitOutsideCategory(fixture) }
+                commits += 1
+            } catch { XCTFail("Outside commit failed: \(error)") }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
         let saves = ManifestSaveModel(manifest: recording, root: fixture.app, lockPath: fixture.base + "/sync.lock")
         try renameKept(context, saves: saves)
         await saves.waitUntilIdle()
-        XCTAssertGreaterThan(scans, 1, "The first scan spans a real commit and cannot be used")
+        XCTAssertEqual(commits, 1, timing)
+        XCTAssertEqual(scans, 2, "One outside commit must retry within the three-attempt bound: " + timing)
         XCTAssertNil(saves.categoryNotice)
         XCTAssertEqual(saves.pendingCount, 0)
         XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app).categories.map(\.name),
-                       ["Added", "Outside", "Renamed"])
+                       ["Added", "Outside", "Renamed"], timing)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(),
-                       ["Added", "Outside", "Renamed"])
+                       ["Added", "Outside", "Renamed"], timing)
     }
 
     func testQueuedRenameRefusesPersistentHeadMovementWithoutWriting() async throws {
@@ -47,8 +67,7 @@ extension IngestPreflightTests {
         let saves = ManifestSaveModel(manifest: recording, root: fixture.app, lockPath: fixture.base + "/sync.lock")
         try renameKept(context, saves: saves)
         await saves.waitUntilIdle()
-        XCTAssertGreaterThan(scans, 0)
-        XCTAssertLessThanOrEqual(scans, 5, "Persistent movement must have a small fixed retry bound")
+        XCTAssertEqual(scans, 3, "Persistent movement must exhaust exactly three attempts")
         XCTAssertTrue(recording.writes.isEmpty)
         XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: fixture.app, files: fixture.files), before)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Deleted", "Kept"])
