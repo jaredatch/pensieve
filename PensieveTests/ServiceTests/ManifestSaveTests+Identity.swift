@@ -3,16 +3,6 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
-    func checkCreateCollisions() async throws {
-        try checkPeerOverlayWithoutCreate()
-        for peerCommitted in [false, true] {
-            for unreadableWindow in [false, true] {
-                try await checkRefusedCreateKeepsOverlay(unreadableWindow: unreadableWindow, peerCommitted: peerCommitted)
-            }
-        }
-        try await checkRefusedCreateKeepsOverlay(unreadableWindow: true, peerCommitted: true, writeFails: false)
-    }
-
     func checkPeerOverlayWithoutCreate() throws {
         let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
         let f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
@@ -70,8 +60,7 @@ extension ManifestSaveTests {
             XCTAssertEqual(h.library.readSkillDocument(h.alpha), document)
         }
     }
-    func checkRefusedCreateKeepsOverlay(unreadableWindow: Bool, peerCommitted: Bool,
-                                        writeFails: Bool = true) async throws {
+    func checkRefusedCreateAcknowledgesCurrentOverlay() async throws {
         let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
         let f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
         defer { try? f.files.deleteDirectory(at: base) }
@@ -84,65 +73,42 @@ extension ManifestSaveTests {
         skill.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123456)
         skill.tags = ["local"]
         skill.scope = .project
+        skill.cursorConfig = CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false)
+        skill.importedFrom = "cursor"
         try context.save()
         let overlay = try XCTUnwrap(f.manifest.snapshot(from: context).skills.first)
-        var peer = try f.manifest.read(fromRoot: f.app)
-        var different = overlay
-        different.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123)
-        different.tags = ["peer"]
-        different.scope = .user
-        different.origin = .imported(from: "claude")
-        peer.skills = [different]
-        peer.deployIntents = [DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
-            platformRaw: PlatformTarget.claudeCode.rawValue, projectKey: nil)]
-        try publishPeerOverlay(peer, fixture: f, committed: peerCommitted)
         let manifest = RecordingSaveManifest()
-        manifest.failingWrites = writeFails ? 1 : 0
-        manifest.failingSnapshots = unreadableWindow ? .max : 0
+        manifest.failingWrites = 1
         let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: base + "/sync.lock")
-        let held = try XCTUnwrap(SyncLock.tryAcquire(at: base + "/sync.lock"))
-        defer { held.release() }
-        var reports: [String] = []
-        saves.submit(.createSkill(overlay), context: context) { reports.append($0?.localizedDescription ?? "saved") }
-        if !peerCommitted { try assertPeerCreateRebuild(f, container: container, expected: peer) }
-        held.release()
+        saves.submit(.createSkill(overlay), context: context) { XCTAssertNotNil($0) }
         await saves.waitUntilIdle()
-        XCTAssertEqual(manifest.failingWrites, 0, "The failed-write fixture must reach the manifest write")
-        XCTAssertEqual(saves.refused.count, 1, "A different same-slug overlay is a collision, never a saved create")
-        XCTAssertEqual(reports.count, 1)
-        XCTAssertTrue(reports.first?.contains("item") == true)
-        XCTAssertTrue(reports.first?.contains("Another Mac already has") == true)
-        try assertPeerCreateRebuild(f, container: container, expected: peer)
+        XCTAssertEqual(saves.refused.count, 1)
+        skill.tags = ["current"]
+        skill.scope = .user
+        try context.save()
+        saves.submit(.skillMetadata("item", skill.tags, skill.scope), context: context) { XCTAssertNotNil($0) }
+        await saves.waitUntilIdle()
+        let current = try XCTUnwrap(f.manifest.snapshot(from: context).skills.first)
+        try publishRefusedCreate(f, container: container, expected: current)
         saves.refreshRefused(durable: try f.manifest.read(fromRoot: f.app))
-        try publishPeerCreate(f, container: container, expected: peer)
-        saves.refreshRefused(durable: try f.manifest.read(fromRoot: f.app))
-        XCTAssertEqual(saves.refused.count, 1, "A rebuilt peer row cannot acknowledge the submitted create")
-        XCTAssertEqual(reports.count, 1, "Rebuild, refresh and sync must not repeat the collision report")
+        XCTAssertTrue(saves.refused.isEmpty, "Publication of the current overlay acknowledges the refused create")
         XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
     }
 
-    private func assertPeerCreateRebuild(_ f: IncompleteIngestFixture, container: ModelContainer,
-                                         expected: ManifestSnapshot) throws {
+    private func publishRefusedCreate(_ f: IncompleteIngestFixture, container: ModelContainer,
+                                      expected: SkillOverlay) throws {
         try NativeTestWork.run(container: container) { worker in
             _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: f.app, context: worker)
-            let window = try f.manifest.snapshot(from: worker)
-            XCTAssertEqual(window.skills, expected.skills, "Queued and refused creates cannot replace the peer overlay")
-            XCTAssertEqual(window.deployIntents, expected.deployIntents)
-        }
-    }
-
-    private func publishPeerCreate(_ f: IncompleteIngestFixture, container: ModelContainer,
-                                   expected: ManifestSnapshot) throws {
-        try NativeTestWork.run(container: container) { worker in
+            XCTAssertEqual(try f.manifest.snapshot(from: worker).skills.first { $0.slug == "item" }, expected)
             guard case .synced = try f.engine(rebuild: StoreRebuildService()).sync(root: f.app,
-                message: "preserve peer create", credential: nil, context: worker) else {
-                return XCTFail("Sync must preserve the first writer's overlay")
+                message: "publish refused create", credential: nil, context: worker) else {
+                return XCTFail("The refused create must publish through sync")
             }
             let published = f.base + "/published"
             try f.git.clone(remote: f.remote, into: published, credential: nil)
-            let durable = try f.manifest.read(fromRoot: published)
-            XCTAssertEqual(durable.skills, expected.skills)
-            XCTAssertEqual(durable.deployIntents, expected.deployIntents)
+            var durable = expected
+            durable.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123)
+            XCTAssertEqual(try f.manifest.read(fromRoot: published).skills.first { $0.slug == "item" }, durable)
         }
     }
     private func publishPeerOverlay(_ snapshot: ManifestSnapshot, fixture: IncompleteIngestFixture, committed: Bool) throws {

@@ -138,10 +138,8 @@ final class ManifestSaveModel {
             } else {
                 let acknowledged = retainUnsaved(item, durable: disk)
                 outcome = .finished(acknowledged)
-                let refusal = disk.flatMap { item.change.conflictingCreate(in: $0) }
-                    .map { ManifestSaveError.skillAlreadyExists($0) as Error } ?? error
                 if case ManifestSaveError.rebuildFailed = error { report = { item.report(error) } } else {
-                    report = { item.report(item.wasHealed || acknowledged ? nil : refusal) }
+                    report = { item.report(item.wasHealed || acknowledged ? nil : error) }
                 }
             }
         }
@@ -207,9 +205,6 @@ final class ManifestSaveModel {
         guard let headChanged else { return nil }
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
         if headChanged { ingest.invalidate() }
-        if !item.wasHealed, let disk, let slug = item.change.conflictingCreate(in: disk) {
-            throw ManifestSaveError.skillAlreadyExists(slug)
-        }
         ingest.finish(item.id)
         for index in items.indices where healedItems.contains(items[index].id) {
             items[index].wasHealed = true
@@ -387,14 +382,12 @@ extension ManifestSaveModel {
 enum ManifestSaveError: LocalizedError {
     case rebuildFailed(String, manifestSaved: Bool)
     case unsavedTarget
-    case skillAlreadyExists(String)
     var errorDescription: String? {
         switch self {
         case .rebuildFailed(let message, let manifestSaved):
             (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
                 : "Rebuilding the local store failed: ") + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
-        case .skillAlreadyExists(let slug): "Another Mac already has a skill named “\(slug)”. This create could not be saved."
         }
     }
 }

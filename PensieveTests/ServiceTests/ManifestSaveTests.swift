@@ -104,7 +104,8 @@ final class ManifestSaveTests: XCTestCase {
 
     func testPulledDeletionSkipsQueuedEditAndRefreshesWindow() async throws {
         try await checkAlreadyDurableCreateDoesNotSupplyRemovedTarget()
-        try await checkCreateCollisions()
+        try checkPeerOverlayWithoutCreate()
+        try await checkRefusedCreateAcknowledgesCurrentOverlay()
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))

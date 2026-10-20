@@ -68,8 +68,6 @@ final class ManifestRefusedEdit {
 
     /// Publication can acknowledge cached fields without another main-context read.
     func acknowledge(durable: ManifestSnapshot) -> Bool {
-        // A collision projects nothing, but remains refused until the submitted values are durable.
-        if original.conflictingCreate(in: durable) != nil { return true }
         // A validation refusal cannot become a saved report merely because projection skips it.
         do { try original.validate(in: durable) } catch { return true }
         if fields == nil { fields = retirementFields(durable: durable) }
