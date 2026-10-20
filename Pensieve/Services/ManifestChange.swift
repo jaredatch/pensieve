@@ -8,7 +8,7 @@ enum ManifestChange {
     case categoryProject(String, String, Bool)
     case categorySkill(String, String, Bool)
     case createSkill(SkillOverlay)
-    case skillMetadata(String, [String]?, SkillScope?, cursor: CursorAdapterConfig?? = nil, origin: SkillOrigin? = nil)
+    case skillMetadata(String, [String]?, SkillScope?)
     case deleteSkill(String)
     case retireSkill(String)
 
@@ -64,8 +64,8 @@ enum ManifestChange {
         switch self {
         case .createSkill(let overlay):
             if !snapshot.skills.contains(where: { $0.slug == overlay.slug }) { snapshot.skills.append(overlay) }
-        case .skillMetadata(let slug, let tags, let scope, let cursor, let origin):
-            return updateMetadata(slug, tags: tags, scope: scope, cursor: cursor, origin: origin, in: &snapshot)
+        case .skillMetadata(let slug, let tags, let scope):
+            return updateMetadata(slug, tags: tags, scope: scope, in: &snapshot)
         case .deleteSkill(let slug):
             let count = snapshot.skills.count
             snapshot.skills.removeAll { $0.slug == slug }
@@ -79,13 +79,10 @@ enum ManifestChange {
     }
 
     private func updateMetadata(_ slug: String, tags: [String]?, scope: SkillScope?,
-                                cursor: CursorAdapterConfig??, origin: SkillOrigin?,
                                 in snapshot: inout ManifestSnapshot) -> Bool {
         guard let index = snapshot.skills.firstIndex(where: { $0.slug == slug }) else { return false }
         if let tags { snapshot.skills[index].tags = tags }
         if let scope { snapshot.skills[index].scope = scope }
-        if let cursor { snapshot.skills[index].cursor = cursor }
-        if let origin { snapshot.skills[index].origin = origin }
         return true
     }
 
@@ -139,10 +136,9 @@ struct RefusedManifestProjection {
             }
         case .deleteSkill(let slug):
             if !local.skills.contains(where: { $0.slug == slug }) { ManifestChange.deleteSkill(slug).apply(to: &snapshot) }
-        case .skillMetadata(let slug, let tags, let scope, let cursor, let origin):
+        case .skillMetadata(let slug, let tags, let scope):
             guard let current = local.skills.first(where: { $0.slug == slug }) else { return }
-            let update = ManifestChange.skillMetadata(slug, tags == nil ? nil : current.tags, scope == nil ? nil : current.scope,
-                cursor: cursor == nil ? nil : .some(current.cursor), origin: origin == nil ? nil : current.origin)
+            let update = ManifestChange.skillMetadata(slug, tags == nil ? nil : current.tags, scope == nil ? nil : current.scope)
             if !update.apply(to: &snapshot) { ManifestChange.createSkill(current).apply(to: &snapshot) }
         default: break
         }

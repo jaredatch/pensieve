@@ -21,20 +21,18 @@ extension IngestPreflightTests {
         }
     }
 
-    func testQueuedCursorSettingsSurviveOutsideCommitRebuildAndConflictFinish() async throws {
+    func testQueuedWindowEditsSurviveOutsideCommitRebuildAndConflictFinish() async throws {
         for conflict in [false, true] {
-            let f = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/cursor-\(conflict)") }
+            let f = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/window-\(conflict)") }
             let context = try damageContext(f)
             try f.manifest.write(f.manifest.snapshot(from: context), toRoot: f.app)
             let skill = try XCTUnwrap(context.fetch(FetchDescriptor<Skill>()).first)
-            let saves = ManifestSaveModel(manifest: f.manifest, root: f.app, lockPath: f.base + "/sync.lock")
-            let cursor = CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false)
-            skill.cursorConfig = cursor
-            skill.importedFrom = "cursor"
-            try context.save()
-            saves.submit(.skillMetadata("item", nil, nil, cursor: .some(cursor), origin: .imported(from: "cursor")),
-                         context: context) { XCTAssertNil($0) }
-            // No suspension: sync gets the lock while the metadata is still queued.
+            let library = queuedLibrary(f, context: context)
+            let saves = try XCTUnwrap(library.manifestSaves)
+            let category = try XCTUnwrap(context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Kept" })
+            library.updateMetadata(skill, tags: ["window"], scope: .project, context: context)
+            CategoryStore(manifestSaves: saves).setSkill(skill, inCategory: category, assigned: true, context: context)
+            // No suspension: sync gets the lock while both window edits are still queued.
             try NativeTestWork.run(container: context.container) { worker in
                 if conflict { try f.changePeer(conflict: true) }
                 try f.files.writeFile(at: f.app + "/skills/item/SKILL.md",
@@ -60,14 +58,20 @@ extension IngestPreflightTests {
                 let published = f.base + "/published"
                 try f.git.clone(remote: f.remote, into: published, credential: nil)
                 let overlay = try XCTUnwrap(f.manifest.read(fromRoot: published).skills.first)
-                XCTAssertEqual(overlay.cursor, cursor)
-                XCTAssertEqual(overlay.origin, .imported(from: "cursor"))
+                XCTAssertEqual(overlay.tags, ["window"])
+                XCTAssertEqual(overlay.scope, .project)
+                XCTAssertEqual(try f.manifest.read(fromRoot: published).categories.first { $0.name == "Kept" }?.skillSlugs,
+                               ["item"])
                 XCTAssertEqual(try f.files.readFile(at: published + "/skills/item/asset.txt"), "uncommitted outside asset")
             }
-            XCTAssertEqual(saves.pendingCount, 1)
-            XCTAssertEqual(skill.cursorConfig, cursor)
+            XCTAssertEqual(saves.pendingCount, 2)
+            XCTAssertEqual(skill.tags, ["window"])
+            XCTAssertEqual(skill.scope, .project)
+            XCTAssertEqual(category.skillSlugs, ["item"])
             await saves.waitUntilIdle()
             XCTAssertTrue(saves.refused.isEmpty)
+            XCTAssertNil(library.error)
+            XCTAssertNil(saves.categoryNotice)
         }
     }
 

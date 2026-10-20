@@ -9,7 +9,7 @@ final class ManifestRefusedEdit {
     let id = UUID()
     private var registration: StoreIngestState?
     private var projection: RefusedManifestProjection {
-        RefusedManifestProjection(fields: fields ?? [.change(original)], cachedLocal: cachedLocal)
+        RefusedManifestProjection(fields: fields ?? [], cachedLocal: cachedLocal)
     }
 
     deinit { registration?.forgetRefused(id) }
@@ -31,12 +31,10 @@ final class ManifestRefusedEdit {
         self.context = context
         original = change
         switch change {
-        case .skillMetadata(let slug, let tags, let scope, let cursor, let origin):
+        case .skillMetadata(let slug, let tags, let scope):
             fields = []
             if tags != nil { fields?.append(.change(.skillMetadata(slug, tags, nil))) }
             if scope != nil { fields?.append(.change(.skillMetadata(slug, nil, scope))) }
-            if let cursor { fields?.append(.change(.skillMetadata(slug, nil, nil, cursor: .some(cursor)))) }
-            if let origin { fields?.append(.change(.skillMetadata(slug, nil, nil, origin: origin))) }
         case .retireSkill: break
         default: fields = [.change(change)]
         }
@@ -58,7 +56,7 @@ final class ManifestRefusedEdit {
 
     func suppliesTarget(for edit: ManifestRefusedEdit) -> Bool {
         switch (original, edit.original) {
-        case (.createSkill(let skill), .skillMetadata(let slug, _, _, _, _)): return skill.slug == slug
+        case (.createSkill(let skill), .skillMetadata(let slug, _, _)): return skill.slug == slug
         default: return false
         }
     }

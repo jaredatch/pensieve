@@ -22,13 +22,15 @@ extension ConflictResolutionModelTests {
         sync.apply(.conflicted(["skills/item/SKILL.md"]))
         let model = ConflictResolutionModel(engine: engine, git: fixture.git, credentials: IngestEmptyCredentials(),
             root: fixture.app, steps: SyncStepModel(), onResolutionStarted: { { sync.apply($0) } })
-        let saves = try await refuseCursorMetadata(fixture, container: container)
+        let (context, saves) = try await refuseWindowMetadata(fixture, container: container)
         defer { withExtendedLifetime(saves) {} }
+        try importCursorWithFailedOverlay(fixture, context: context)
         await model.loadAndReport(container: container)
         let groups = try readyGroups(from: model.phase)
-        let inspected = try XCTUnwrap(try fixture.manifest.read(fromRoot: fixture.app).skills.first { $0.slug == "item" })
+        let inspected = try XCTUnwrap(try fixture.manifest.read(fromRoot: fixture.app).skills.first { $0.slug == "imported" })
         XCTAssertEqual(inspected.cursor, CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false))
         XCTAssertEqual(inspected.origin, .imported(from: "cursor"))
+        try assertRefusedMetadataPublished(fixture)
         XCTAssertEqual(groups.flatMap(\.items).map(\.path), ["skills/item/SKILL.md"])
         model.choose("skill:item", .thisMachine)
         rebuild.failWhenAddedCategoryExists = true
@@ -44,35 +46,65 @@ extension ConflictResolutionModelTests {
         XCTAssertEqual(model.phase, .empty, "retry inspection finishes the already resolved rebase")
         XCTAssertFalse(sync.isConflicted)
         try NativeTestWork.run { try fixture.assertRemoteCategories() }
-        let retried = try XCTUnwrap(try fixture.manifest.read(fromRoot: fixture.app).skills.first { $0.slug == "item" })
+        let retried = try XCTUnwrap(try fixture.manifest.read(fromRoot: fixture.app).skills.first { $0.slug == "imported" })
         XCTAssertEqual(retried.cursor, CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false))
         XCTAssertEqual(retried.origin, .imported(from: "cursor"))
+        try assertRefusedMetadataPublished(fixture)
         try NativeTestWork.run(container: container) { context in
             guard case .synced = try engine.sync(root: fixture.app, message: "ordinary", credential: nil,
                                                  context: context) else { return XCTFail("ordinary sync stayed blocked") }
         }
     }
 
-    private func refuseCursorMetadata(_ fixture: IncompleteIngestFixture,
-                                      container: ModelContainer) async throws -> ManifestSaveModel {
-        // Submit the saved metadata through the production queue and refuse its manifest write.
+    private func refuseWindowMetadata(_ fixture: IncompleteIngestFixture,
+                                      container: ModelContainer) async throws -> (ModelContext, ManifestSaveModel) {
         let context = ModelContext(container)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
-        let cursor = CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false)
-        skill.cursorConfig = cursor
-        skill.importedFrom = "cursor"
-        try context.save()
         let manifest = RecordingSaveManifest()
         manifest.failingWrites = 1
         let saves = ManifestSaveModel(manifest: manifest, root: fixture.app, lockPath: fixture.base + "/sync.lock")
-        var refusal: Error?
-        saves.submit(.skillMetadata("item", nil, nil, cursor: .some(cursor), origin: .imported(from: "cursor")),
-                     context: context) { refusal = $0 }
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app),
+            fileWatchService: FileWatchService(rootDir: fixture.app + "/skills"), manifestRoot: fixture.app, manifestSaves: saves)
+        library.updateMetadata(skill, tags: ["refused"], scope: .project, context: context)
         await saves.waitUntilIdle()
-        XCTAssertNotNil(refusal)
+        XCTAssertNotNil(library.error)
         XCTAssertEqual(saves.refused.count, 1)
         XCTAssertTrue(manifest.writes.isEmpty)
-        return saves
+        return (context, saves)
+    }
+
+    private func importCursorWithFailedOverlay(_ f: IncompleteIngestFixture, context: ModelContext) throws {
+        let scanner = ImportScanner(fileService: f.files, claudeSkillsDir: f.base + "/claude",
+            grokSkillsDir: f.base + "/grok", cursorRulesDir: f.base + "/cursor",
+            codexSkillsDir: f.base + "/codex", storeRoot: f.app)
+        let manifest = RecordingSaveManifest()
+        manifest.failingWrites = 1
+        let importer = ImportViewModel(scanner: scanner,
+            skillStore: SkillStore(fileService: f.files, baseDir: f.app + "/skills", storeRoot: f.app),
+            lockPath: f.base + "/sync.lock", manifestService: manifest, manifestRoot: f.app)
+        importer.discoveredSkills = [DiscoveredSkill(name: "Imported", body: "imported body", sourcePlatform: "cursor",
+            sourcePath: f.base + "/cursor/imported.mdc", skillDescription: "Imported",
+            cursorConfig: CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false))]
+        importer.selectedSkills = [f.base + "/cursor/imported.mdc"]
+        importer.importSelected(context: context)
+        XCTAssertEqual(importer.importedSkillCount, 1)
+        XCTAssertTrue(importer.error?.contains("updating the sync manifest failed") == true)
+        XCTAssertTrue(manifest.writes.isEmpty)
+        XCTAssertFalse(try f.manifest.read(fromRoot: f.app).skills.contains { $0.slug == "imported" })
+        let imported = try XCTUnwrap(context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "imported" })
+        XCTAssertEqual(imported.cursorConfig, CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false))
+        XCTAssertEqual(imported.importedFrom, "cursor")
+        // Inspection must rebuild this commit while the imported skill still has no overlay.
+        try NativeTestWork.run {
+            _ = try f.git.stageAllAndCommit(at: f.app, message: "outside commit after import")
+        }
+    }
+
+    private func assertRefusedMetadataPublished(_ f: IncompleteIngestFixture) throws {
+        let item = try XCTUnwrap(f.manifest.read(fromRoot: f.app).skills.first { $0.slug == "item" })
+        XCTAssertEqual(item.tags, ["refused"])
+        XCTAssertEqual(item.scope, .project)
     }
 
     func testRefusedMetadataSurvivesInspectionRebuildAndRetiresAfterAcknowledgement() async throws {

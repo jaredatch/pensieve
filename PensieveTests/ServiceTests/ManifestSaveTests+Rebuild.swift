@@ -30,6 +30,7 @@ extension ManifestSaveTests {
     }
 
     func testFallbackHealAcknowledgesRetirementAndShowsLaterPull() async throws {
+        try await checkUnpublishedRetirementPreservesPeerAdditions()
         for corrupt in [false, true] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }
@@ -69,6 +70,48 @@ extension ManifestSaveTests {
             XCTAssertTrue(h.local.skillSlugs.contains("alpha"), "A healed retirement must not hide a later pull")
             XCTAssertTrue(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).contains { $0.skillSlug == "alpha" })
         }
+    }
+
+    private func checkUnpublishedRetirementPreservesPeerAdditions() async throws {
+        let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
+        let f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
+        defer { try? f.files.deleteDirectory(at: base) }
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        try NativeTestWork.run(container: container) { context in
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: f.app, context: context)
+        }
+        let context = ModelContext(container)
+        let manifest = RecordingSaveManifest()
+        let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: base + "/sync.lock")
+        let original = try f.manifest.read(fromRoot: f.app)
+        try f.files.deleteDirectory(at: f.app + "/manifest")
+        manifest.failingWrites = 1
+        saves.submit(.retireSkill("item"), context: context) { XCTAssertNotNil($0) }
+        await saves.waitUntilIdle()
+        XCTAssertEqual(saves.refused.count, 1)
+        try f.manifest.write(original, toRoot: f.app)
+        let peerIntent = DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
+                                            platformRaw: "codex", projectKey: nil)
+        try NativeTestWork.run(container: container) { worker in
+            var peer = try f.manifest.read(fromRoot: f.peer)
+            peer.categories.append(CategoryRecord(name: "Peer membership", projectKeys: [], skillSlugs: ["item"]))
+            peer.deployIntents.append(peerIntent)
+            try f.manifest.write(peer, toRoot: f.peer)
+            _ = try f.git.stageAllAndCommit(at: f.peer, message: "peer membership and intent")
+            try f.git.push(at: f.peer, credential: nil)
+            _ = try f.git.fastForwardOnly(at: f.app, credential: nil)
+            let engine = f.engine(rebuild: StoreRebuildService())
+            guard case .synced = try engine.sync(root: f.app, message: "preserve peer additions",
+                credential: nil, context: worker, prepare: { context in
+                    try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: f.app, context: context)
+                }) else { return XCTFail("Sync must publish the rebuilt window") }
+            let published = base + "/published"
+            try f.git.clone(remote: f.remote, into: published, credential: nil)
+            let disk = try f.manifest.read(fromRoot: published)
+            XCTAssertTrue(disk.categories.contains { $0.name == "Peer membership" && $0.skillSlugs == ["item"] })
+            XCTAssertTrue(disk.deployIntents.contains(peerIntent), "An unobserved retirement cannot remove a peer's intent")
+        }
+        withExtendedLifetime(saves) {}
     }
 
     func testDeletingPulledCategoryRetiresItsRefusedMembership() async throws {

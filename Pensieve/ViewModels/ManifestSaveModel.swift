@@ -143,10 +143,15 @@ final class ManifestSaveModel {
                 if disk != nil {
                     item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
                 }
-                if let disk { _ = item.presentation.refresh(durable: disk) }
-                item.presentation.retain()
-                refused.append(item.presentation)
+                if disk.map({ item.presentation.refresh(durable: $0) }) ?? true {
+                    item.presentation.retain()
+                    refused.append(item.presentation)
+                } else {
+                    StoreIngestState.shared(for: item.presentation.context.container).finish(item.id)
+                }
             }
+            finishStagedRefusals()
+            heldLock?.release()
             if case ManifestSaveError.rebuildFailed = error { item.report(error) } else {
                 item.report(item.wasHealed ? nil : error)
             }
