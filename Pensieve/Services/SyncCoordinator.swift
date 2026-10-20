@@ -133,13 +133,29 @@ actor SyncCoordinator {
             cycleError = error
             if let recovery = error as? ManifestRecoveryFailure {
                 result = .manifestDamaged(ManifestError.damaged.localizedDescription + ". "
-                    + authentication.reporting(recovery.underlying).localizedDescription)
+                    + Self.recoveryCause(authentication.reporting(recovery.underlying)))
             } else {
                 result = Self.cycleFailure(authentication.reporting(error))
             }
         }
         Self.recordAudit(for: result, error: cycleError, audit: audit)
         return result
+    }
+
+    /// The cycle carries git's cause, while recordAudit retains argv and the complete diagnostic.
+    private static func recoveryCause(_ error: Error) -> String {
+        let detail: String
+        if case let GitError.commandFailed(_, _, stderr, _) = error {
+            detail = stderr
+        } else {
+            detail = error.localizedDescription
+        }
+        let line = DisplayTextSanitizer.sanitize(detail).components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+            ?? "Git could not complete the sync."
+        // Git quotes paths containing spaces. Handle those before unquoted absolute paths.
+        return line.replacingOccurrences(of: #"['"](?:file://)?/[^'"]*['"]|(?<![^\s'"])(?:file://)?/[^\s'"]+"#,
+                                         with: "…", options: .regularExpression)
     }
 
     private func ingestIfNeeded(context: ModelContext, stamp: GitHeadStamp.State) throws -> RebuildResult? {

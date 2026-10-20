@@ -145,7 +145,20 @@ extension IngestPreflightTests {
             XCTAssertEqual(status.result, "failed")
             XCTAssertTrue(status.detail.contains(authentication ? "Authentication failed" : "missing.git"), status.detail)
             guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
-            XCTAssertTrue(message.contains(authentication ? "access token" : "missing.git"), message)
+            XCTAssertTrue(message.contains(authentication ? "access token" : "does not appear to be a git repository"),
+                          message)
+            XCTAssertFalse(message.contains("git -C"), message)
+            XCTAssertFalse(message.contains("fetch origin main"), message)
+            XCTAssertFalse(message.contains(h.f.app), message)
+            XCTAssertFalse(message.contains(h.f.base), message)
+            XCTAssertFalse(message.contains("missing.git"), message)
+            XCTAssertFalse(message.contains("\n"), message)
+            XCTAssertFalse(message.contains("Please make sure"), message)
+            if !authentication {
+                XCTAssertTrue(status.detail.contains("fetch origin main"), status.detail)
+                XCTAssertTrue(status.detail.contains(h.f.app), status.detail)
+                XCTAssertTrue(status.detail.contains("Please make sure"), status.detail)
+            }
         }
     }
 
