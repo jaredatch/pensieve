@@ -26,8 +26,11 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
         try wrapped.prepareStoreRules(at: root, files: files)
     }
 
-    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String) throws -> Bool {
-        try wrapped.localCommitMatches(outputs, from: parent, to: head, at: root)
+    func hasUncommittedChanges(at path: String) -> Bool { wrapped.hasUncommittedChanges(at: path) }
+
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String,
+                            at root: String) throws -> Bool {
+        try wrapped.localCommitMatches(expected, from: parent, to: head, at: root)
     }
 
     func probeUsability() throws -> GitUsability { try wrapped.probeUsability() }

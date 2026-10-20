@@ -136,8 +136,6 @@ extension IngestPreflightTests {
     }
 
     func queuedLibrary(_ f: IncompleteIngestFixture, context: ModelContext) -> SkillLibraryViewModel {
-        let saves = ManifestSaveModel(manifest: f.manifest, root: f.app, lockPath: f.base + "/sync.lock", waitSeconds: 0.01)
-        return SkillLibraryViewModel(skillStore: SkillStore(fileService: f.files, baseDir: f.app + "/skills", storeRoot: f.app),
-            fileWatchService: FileWatchService(rootDir: f.app + "/skills"), manifestRoot: f.app, manifestSaves: saves)
+        f.queuedLibrary()
     }
 }

@@ -77,7 +77,8 @@ extension IngestPreflightTests {
 
     func testUnknownPathsAndChangedCycleOutputsDoNotAdvanceAdmission() async throws {
         for operation in ["sync", "inspect"] {
-            for edit in ["asset", "unknown", "delete", "rename", "mode", "manifest", "control"] {
+            for edit in ["asset", "unknown", "delete", "rename", "mode", "manifest", "control",
+                         "machine-symlink", "machine-gitlink"] {
                 let f = try NativeTestWork.run {
                     try IncompleteIngestFixture(base: self.tempDir + "/shape-\(operation)-\(edit)")
                 }
@@ -96,9 +97,14 @@ extension IngestPreflightTests {
                         }
                     }())
                     XCTAssertNotEqual(GitHeadStamp().read(root: f.app), before, edit)
+                    if edit == "machine-gitlink" {
+                        let tree = try f.git.runOrThrow(["-C", f.app, "ls-tree", "HEAD", "machines/submodule"], in: nil)
+                        XCTAssertTrue(tree.stdout.hasPrefix("160000 commit "), "The commit must really carry the gitlink")
+                    }
                 }
                 XCTAssertFalse(StoreIngestState.shared(for: context.container).needsRebuild)
-                try await runFollowingWriter("import", fixture: f, context: context, expectsRebuild: true)
+                try await runFollowingWriter("import", fixture: f, context: context,
+                                             expectsRebuild: true, label: operation + "/" + edit)
             }
         }
     }
@@ -115,6 +121,17 @@ extension IngestPreflightTests {
         case "mode":
             let path = root + "/.gitattributes"
             try f.files.writeExecutableFile(at: path, content: f.files.readFile(at: path))
+        case "machine-symlink":
+            try f.files.createSymlink(at: root + "/machines/link", pointingTo: "elsewhere")
+        case "machine-gitlink":
+            let nested = root + "/machines/submodule"
+            try f.files.createDirectory(at: nested)
+            try f.git.initRepository(at: nested)
+            try f.files.writeFile(at: nested + "/body.txt", content: "nested observation is not a file")
+            _ = try f.git.stageAllAndCommit(at: nested, message: "nested")
+            let head = try XCTUnwrap(f.git.headSHA(at: nested))
+            _ = try f.git.runOrThrow(["-C", root, "update-index", "--add", "--cacheinfo",
+                                      "160000", head, "machines/submodule"], in: nil)
         case "manifest":
             var changed = try f.manifest.read(fromRoot: root)
             changed.skills[0].tags = ["outside"]
@@ -192,7 +209,7 @@ extension IngestPreflightTests {
     }
 
     private func runFollowingWriter(_ writer: String, fixture f: IncompleteIngestFixture,
-                                    context: ModelContext, expectsRebuild: Bool) async throws {
+                                    context: ModelContext, expectsRebuild: Bool, label: String = "") async throws {
         let skill = try XCTUnwrap(context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "item" })
         let manifest = WriterIngestManifest()
         if writer == "queue" {
@@ -212,7 +229,7 @@ extension IngestPreflightTests {
                 skill: skill, platform: .codex, context: context)
         }
         if writer != "queue" {
-            XCTAssertEqual(manifest.reads, expectsRebuild ? 1 : 0, "The next writer's ingest read")
+            XCTAssertEqual(manifest.reads, expectsRebuild ? 1 : 0, "The next writer's ingest read: " + label)
         }
         XCTAssertEqual(manifest.writes, 1)
     }

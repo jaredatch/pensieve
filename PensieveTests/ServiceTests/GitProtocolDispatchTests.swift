@@ -62,12 +62,18 @@ final class GitProtocolDispatchTests: XCTestCase {
         XCTAssertEqual(forwarded.calls, ["abortRebase(at,refusedFolder)"])
     }
 
+    private func assertLocalCommitDispatch(_ service: GitServiceProtocol) {
+        XCTAssertFalse(service.hasUncommittedChanges(at: "fixture"))
+        let expected = GitTreeExpectation(files: [:], deletablePaths: [], deletablePrefixes: [], ignoredPrefixes: [])
+        expectCalled("localCommitMatches(_,from,to,at)",
+            try service.localCommitMatches(expected, from: "parent", to: "head", at: "fixture"))
+    }
+
     func testGitServiceProtocolDispatchesConflictAndHistoryWitnesses() throws {
         assertRefusedFolderForwarding()
         let operations = GitDispatchOperations()
         let service: GitServiceProtocol = operations
-        expectCalled("localCommitMatches(_,from,to,at)",
-            try service.localCommitMatches([:], from: "parent", to: "head", at: "fixture"))
+        assertLocalCommitDispatch(service)
         let entry = ConflictEntry(mode: "100644", objectID: "object", bytes: Data())
         expectCalled("preflightStoreUpdate(at,credential)",
             try service.preflightStoreUpdate(at: "fixture", credential: .sshAgent))
@@ -93,7 +99,7 @@ final class GitProtocolDispatchTests: XCTestCase {
         _ = service.log(forPath: "fixture", at: "fixture", limit: 1)
         XCTAssertEqual(service.show(sha: "fixture", path: "fixture", at: "fixture"), "selected version")
         XCTAssertEqual(operations.calls, [
-            "localCommitMatches(_,from,to,at)", "preflightStoreUpdate(at,credential)",
+            "hasUncommittedChanges(at)", "localCommitMatches(_,from,to,at)", "preflightStoreUpdate(at,credential)",
             "pullRebase(at,credential)",
             "pullRebase(at,fetchedRevision)",
             "push(at,credential)",

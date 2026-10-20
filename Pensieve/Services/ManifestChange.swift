@@ -101,17 +101,16 @@ struct RefusedManifestProjection {
         case intent(DeployIntentRecord)
     }
     let fields: [Field]
-    let cachedLocal: ManifestSnapshot?
 
-    func project(onto snapshot: inout ManifestSnapshot) {
-        for field in fields { project(field, onto: &snapshot) }
+    func project(onto snapshot: inout ManifestSnapshot, cachedLocal: ManifestSnapshot?) {
+        for field in fields { project(field, onto: &snapshot, cachedLocal: cachedLocal) }
     }
 
-    func project(_ field: Field, onto snapshot: inout ManifestSnapshot) {
+    func project(_ field: Field, onto snapshot: inout ManifestSnapshot, cachedLocal: ManifestSnapshot?) {
         if case .change(let change) = field {
             do { try change.validate(in: snapshot) } catch { return }
             if case .createSkill(let original) = change {
-                projectCreate(original, onto: &snapshot)
+                projectCreate(original, onto: &snapshot, cachedLocal: cachedLocal)
                 return
             }
         }
@@ -125,7 +124,8 @@ struct RefusedManifestProjection {
         }
     }
 
-    private func projectCreate(_ original: SkillOverlay, onto snapshot: inout ManifestSnapshot) {
+    private func projectCreate(_ original: SkillOverlay, onto snapshot: inout ManifestSnapshot,
+                               cachedLocal: ManifestSnapshot?) {
         let current: SkillOverlay
         if let cachedLocal {
             guard let local = cachedLocal.skills.first(where: { $0.slug == original.slug }) else { return }

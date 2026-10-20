@@ -103,9 +103,6 @@ final class ManifestSaveTests: XCTestCase {
     }
 
     func testPulledDeletionSkipsQueuedEditAndRefreshesWindow() async throws {
-        try await checkAlreadyDurableCreateDoesNotSupplyRemovedTarget()
-        try checkPeerOverlayWithoutCreate()
-        try await checkRefusedCreateAcknowledgesCurrentOverlay()
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
@@ -201,16 +198,11 @@ final class ManifestSaveTests: XCTestCase {
             XCTAssertEqual(h.alpha.scope, .project, refusal)
             try await checkRefusedFieldAcknowledgement(h, window: window)
         }
-        try await checkRefusalRefreshAndReporting()
-    }
-
-    private func checkRefusalRefreshAndReporting() async throws {
         try await checkRefusedFieldAcknowledgementDuringRetry()
         try await checkPresentationReadFailureAfterDurableWrite()
-        try await checkRefusalReportCanAcquireLock()
     }
 
-    private func checkAlreadyDurableCreateDoesNotSupplyRemovedTarget() async throws {
+    func testAlreadyDurableCreateDoesNotSupplyRemovedTarget() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         h.alpha.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123456)
@@ -218,10 +210,23 @@ final class ManifestSaveTests: XCTestCase {
         let local = try h.manifest.snapshot(from: h.context)
         let overlay = try XCTUnwrap(local.skills.first { $0.slug == "alpha" })
         try h.manifest.write(local, toRoot: h.root)
+        var nudges = 0
+        h.saves.didSave = { nudges += 1 }
         h.recording.failingWrites = 1
         h.saves.submit(.createSkill(overlay), context: h.context) { XCTAssertNil($0, "Already durable values report saved") }
         await h.saves.waitUntilIdle()
         XCTAssertTrue(h.saves.refused.isEmpty, "A create already present on disk has no unsaved fields to retain")
+        XCTAssertEqual(nudges, 0, "Acknowledging durable values publishes nothing and must not nudge sync")
+        h.recording.failingWrites = 1
+        h.library.updateMetadata(h.alpha, tags: h.alpha.tags, scope: h.alpha.scope, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error)
+        XCTAssertEqual(nudges, 0, "A no-op metadata refusal publishes nothing")
+        h.recording.failingRebuildSnapshots = 1
+        StoreIngestState.shared(for: h.context.container).invalidate()
+        h.saves.submit(.skillMetadata("alpha", nil, nil), context: h.context) { XCTAssertNotNil($0) }
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(nudges, 0, "A failed rebuild must not count as saved")
         var pulled = try h.manifest.read(fromRoot: h.root)
         pulled.skills.removeAll { $0.slug == "alpha" }
         try h.manifest.write(pulled, toRoot: h.root)

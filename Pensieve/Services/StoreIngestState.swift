@@ -17,7 +17,28 @@ final class StoreIngestState {
         let categoryWindow: UUID?
     }
     private var edits: [QueuedEdit] = []
-    private var refused: [(id: UUID, projection: RefusedManifestProjection)] = []
+    private struct RefusedEdit {
+        let id: UUID
+        var projection: RefusedManifestProjection
+        let local: RefusedManifestContext
+    }
+    private final class WeakContext {
+        weak var value: RefusedManifestContext?
+        init(_ value: RefusedManifestContext) { self.value = value }
+    }
+    private var refused: [RefusedEdit] = []
+    private var refusedContexts: [ObjectIdentifier: WeakContext] = [:]
+
+    func refusedContext(for context: ModelContext) -> RefusedManifestContext {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = ObjectIdentifier(context)
+        if let value = refusedContexts[key]?.value { return value }
+        refusedContexts = refusedContexts.filter { $0.value.value != nil }
+        let value = RefusedManifestContext()
+        refusedContexts[key] = WeakContext(value)
+        return value
+    }
 
     static func shared(for container: ModelContainer) -> StoreIngestState {
         registryLock.lock()
@@ -73,7 +94,7 @@ final class StoreIngestState {
     }
 
     /// Transfer a failed queue item without a gap in its projection. Updates retain FIFO order.
-    func retainRefused(_ projection: RefusedManifestProjection, id: UUID) {
+    func retainRefused(_ projection: RefusedManifestProjection, id: UUID, local: RefusedManifestContext) {
         lock.lock()
         defer { lock.unlock() }
         edits.removeAll { $0.id == id }
@@ -82,7 +103,7 @@ final class StoreIngestState {
         } else if let index = refused.firstIndex(where: { $0.id == id }) {
             refused[index].projection = projection
         } else {
-            refused.append((id, projection))
+            refused.append(RefusedEdit(id: id, projection: projection, local: local))
         }
     }
 
@@ -99,7 +120,13 @@ final class StoreIngestState {
         let retainedEdits = refused
         lock.unlock()
         var projected = snapshot
-        for edit in retainedEdits { edit.projection.project(onto: &projected) }
+        var locals: [ObjectIdentifier: ManifestSnapshot] = [:]
+        var sampled: Set<ObjectIdentifier> = []
+        for edit in retainedEdits {
+            let key = ObjectIdentifier(edit.local)
+            if sampled.insert(key).inserted { locals[key] = edit.local.snapshot }
+            edit.projection.project(onto: &projected, cachedLocal: locals[key])
+        }
         var retained: Set<UUID> = []
         for edit in changes {
             let change = edit.change
@@ -189,4 +216,26 @@ struct StoreIngestFailure: LocalizedError {
         }
     }
     var errorDescription: String? { "Rebuilding the local store failed: " + cause }
+}
+
+/// One context's last readable values, shared by its refused field lists. No SwiftData crosses workers.
+final class RefusedManifestContext {
+    private let lock = NSLock()
+    private var local: ManifestSnapshot?
+
+    var snapshot: ManifestSnapshot? { lock.withLock { local } }
+
+    func cache(_ snapshot: ManifestSnapshot?) {
+        guard let snapshot else { return }
+        lock.withLock { local = snapshot }
+    }
+
+    func observe(_ change: ManifestChange) {
+        lock.withLock {
+            if var snapshot = local {
+                change.apply(to: &snapshot)
+                local = snapshot
+            }
+        }
+    }
 }

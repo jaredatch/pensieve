@@ -70,7 +70,7 @@ final class ManifestSaveModel {
     func submit(_ change: ManifestChange, context: ModelContext, categoryEdit: CategorySaveEdit? = nil,
                 reconcile: (() -> BatchResult)? = nil, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
-        for edit in refused where edit.context === context { edit.observe(change) }
+        refused.first { $0.context === context }?.observe(change)
         let manifest = manifest, files = files
         let item = Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context),
@@ -100,8 +100,7 @@ final class ManifestSaveModel {
             if case .retry = outcome { continue }
             if case .finished(let saved) = outcome { savedAny = saved || savedAny }
             if pausedForRepair { break }
-            let finished = items.removeFirst()
-            StoreIngestState.shared(for: finished.presentation.context.container).finish(finished.id)
+            items.removeFirst()
             pendingCount = items.count
             isWaiting = false
         }
@@ -127,7 +126,7 @@ final class ManifestSaveModel {
             heldLock = try await takeLock()
             let read = try await readCurrentManifest()
             let result = try await saveWithStableHead(item, disk: &disk, first: read)
-            outcome = .finished(result.published)
+            outcome = .finished(result.published && result.error == nil)
             report = { item.report(result.error) }
         } catch {
             if case ManifestError.damaged = error {
@@ -137,7 +136,7 @@ final class ManifestSaveModel {
                 stageCategoryRefusal(item, durable: disk, error: error)
             } else {
                 let acknowledged = retainUnsaved(item, durable: disk)
-                outcome = .finished(acknowledged)
+                outcome = .finished(false)
                 if case ManifestSaveError.rebuildFailed = error { report = { item.report(error) } } else {
                     report = { item.report(item.wasHealed || acknowledged ? nil : error) }
                 }
@@ -164,15 +163,16 @@ final class ManifestSaveModel {
     @MainActor
     private func retainUnsaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
         guard !item.wasHealed else { return false }
-        if durable != nil {
+        if let durable {
+            // A rejected command is not durable merely because its projection is a no-op.
+            do { try item.change.validate(in: durable) } catch { return false }
             item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
         }
-        if durable.map({ item.presentation.refresh(durable: $0) }) ?? true {
+        if durable.map({ item.presentation.acknowledge(durable: $0) }) ?? true {
             item.presentation.retain()
             refused.append(item.presentation)
             return false
         }
-        StoreIngestState.shared(for: item.presentation.context.container).finish(item.id)
         return true
     }
 
@@ -244,11 +244,11 @@ final class ManifestSaveModel {
                 do { locals[key] = try manifest.snapshot(from: edit.context) } catch {
                     log("Couldn't refresh a refused edit's presentation: " + error.localizedDescription)
                 }
+                edit.cache(local: locals[key])
             }
-            edit.cache(local: locals[key])
         }
         guard let durable else { return }
-        refused = refused.filter { $0.refresh(durable: durable) }
+        refused = refused.filter { $0.acknowledge(durable: durable) }
     }
 
     @MainActor

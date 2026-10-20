@@ -6,7 +6,13 @@ enum GitDispatchCalled: Error, Equatable { case operation(String) }
 final class GitDispatchOperations: GitServiceProtocol, FastForwardGitService,
                                 SkillInstallGitServing, UpdateCheckGitServing, UpstreamHistoryGitServing {
     var calls: [String] = []
-    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String) throws -> Bool {
+    func hasUncommittedChanges(at path: String) -> Bool {
+        calls.append("hasUncommittedChanges(at)")
+        return false
+    }
+
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String,
+                            at root: String) throws -> Bool {
         calls.append("localCommitMatches(_,from,to,at)")
         throw GitDispatchCalled.operation("localCommitMatches(_,from,to,at)")
     }

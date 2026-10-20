@@ -6,6 +6,8 @@ import Foundation
 /// Optional manifest-build and skill-listing refusals exercise publication and scan failures.
 /// Other I/O delegates to FileService; the double supplies no rebuild or merge result.
 final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
+    private var containedReads: [String] = []
+    var containedRegularReadPaths: [String] { lock.withLock { containedReads } }
     let entryObservations = Counter()
     let headReads = Counter()
     let skillListings = Counter()
@@ -49,7 +51,8 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
         try wrapped.readRegularFileHeader(at: path, maximumBytes: maximumBytes)
     }
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
-        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)
+        lock.withLock { containedReads.append(path) }
+        return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)
     }
     func writeFile(at path: String, content: String) throws {
         if refuseReplacement && path.contains(".manifest-build-") { throw CocoaError(.fileWriteNoPermission) }

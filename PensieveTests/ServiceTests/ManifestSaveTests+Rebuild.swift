@@ -29,7 +29,7 @@ extension ManifestSaveTests {
         }
     }
 
-    func testFallbackHealAcknowledgesRetirementAndShowsLaterPull() async throws {
+    func testRefusedRetirementSurvivesRebuild() async throws {
         for missingManifest in [false, true] {
             for unreadableWindow in [false, true] {
                 try await checkRefusedRetirementSurvivesRebuild(missingManifest: missingManifest,
@@ -38,6 +38,9 @@ extension ManifestSaveTests {
         }
         try await checkRefusedRetirementSurvivesRebuild(missingManifest: true, unreadableWindow: false,
                                                       readBeforeRebuild: true)
+    }
+
+    func testFallbackHealAcknowledgesRetirementAndShowsLaterPull() async throws {
         for corrupt in [false, true] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }

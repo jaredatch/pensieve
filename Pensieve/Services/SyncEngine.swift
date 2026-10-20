@@ -153,7 +153,8 @@ struct SyncEngine: SyncEngineProtocol {
         // 2. Install the union-merge driver + ignore rules (idempotent) so the pull below auto-merges
         //    concurrent list edits instead of emitting conflict markers.
         try ensureSyncAttributes(root: root)
-        let localCommit = try? SyncLocalCommit(root: root, files: fileService)
+        let localCommit = try? SyncLocalCommit(root: root, files: fileService,
+                                                capture: gitService.hasUncommittedChanges(at: root))
         // 3. Commit (false when nothing changed locally).
         let committed = try gitService.stageAllAndCommit(at: root, message: message)
         localCommit?.record(from: admittedParent, to: headStamp.read(root: root), root: root,
@@ -326,7 +327,8 @@ struct SyncEngine: SyncEngineProtocol {
         let admittedParent = stamp.read(root: root)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
-        let localCommit = try? SyncLocalCommit(root: root, files: fileService)
+        let localCommit = try? SyncLocalCommit(root: root, files: fileService,
+                                                capture: gitService.hasUncommittedChanges(at: root))
         let committed = try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
                                                              credential: credential, fetchedRevision: incoming)
         localCommit?.record(from: admittedParent, to: stamp.read(root: root), root: root,

@@ -3,7 +3,7 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
-    func checkPeerOverlayWithoutCreate() throws {
+    func testPeerOverlayWithoutCreate() throws {
         let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
         let f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
         defer { try? f.files.deleteDirectory(at: base) }
@@ -60,7 +60,7 @@ extension ManifestSaveTests {
             XCTAssertEqual(h.library.readSkillDocument(h.alpha), document)
         }
     }
-    func checkRefusedCreateAcknowledgesCurrentOverlay() async throws {
+    func testRefusedCreateAcknowledgesCurrentOverlay() async throws {
         let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
         let f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
         defer { try? f.files.deleteDirectory(at: base) }
@@ -80,9 +80,12 @@ extension ManifestSaveTests {
         let manifest = RecordingSaveManifest()
         manifest.failingWrites = 1
         let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: base + "/sync.lock")
-        saves.submit(.createSkill(overlay), context: context) { XCTAssertNotNil($0) }
+        var createReports = 0
+        saves.submit(.createSkill(overlay), context: context) { createReports += 1; XCTAssertNotNil($0) }
         await saves.waitUntilIdle()
         XCTAssertEqual(saves.refused.count, 1)
+        XCTAssertEqual(manifest.failingWrites, 0, "The create must reach its failing write")
+        XCTAssertEqual(createReports, 1)
         skill.tags = ["current"]
         skill.scope = .user
         try context.save()
@@ -111,7 +114,7 @@ extension ManifestSaveTests {
             XCTAssertEqual(try f.manifest.read(fromRoot: published).skills.first { $0.slug == "item" }, durable)
         }
     }
-    private func publishPeerOverlay(_ snapshot: ManifestSnapshot, fixture: IncompleteIngestFixture, committed: Bool) throws {
+    func publishPeerOverlay(_ snapshot: ManifestSnapshot, fixture: IncompleteIngestFixture, committed: Bool) throws {
         try fixture.manifest.write(snapshot, toRoot: committed ? fixture.peer : fixture.app)
         guard committed else { return }
         try NativeTestWork.run {

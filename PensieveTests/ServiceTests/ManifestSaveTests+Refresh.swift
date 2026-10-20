@@ -3,6 +3,35 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func testRefusedFieldsShareTheLatestSnapshotOfTheirContext() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        h.alpha.tags = ["retained"]
+        try h.context.save()
+        h.recording.failingWrites = 1
+        h.saves.submit(.skillMetadata("alpha", ["retained"], nil), context: h.context) { XCTAssertNotNil($0) }
+        await h.saves.waitUntilIdle()
+        let other = ManifestSaveModel(manifest: h.recording, root: h.root, lockPath: h.lockPath)
+        h.alpha.scope = .project
+        try h.context.save()
+        h.recording.failingWrites = 1
+        other.submit(.skillMetadata("alpha", nil, .project), context: h.context) { XCTAssertNotNil($0) }
+        await other.waitUntilIdle()
+        XCTAssertEqual(h.saves.refused.count, 1)
+        XCTAssertEqual(other.refused.count, 1)
+        h.alpha.scope = .user
+        try h.context.save()
+        h.saves.refreshRefused(durable: nil)
+        try NativeTestWork.run(container: h.context.container) { worker in
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: worker)
+            let row = try XCTUnwrap(worker.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "alpha" })
+            XCTAssertEqual(row.tags, ["retained"])
+            XCTAssertEqual(row.scope, .user, "Refused fields for one context must use its latest shared snapshot")
+        }
+        other.refreshRefused(durable: try h.manifest.snapshot(from: h.context))
+        XCTAssertTrue(other.refused.isEmpty)
+    }
+
     func checkRefusedFieldAcknowledgementDuringRetry() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
@@ -156,7 +185,7 @@ extension ManifestSaveTests {
             "A second type probe could describe a different inode from the token's metadata")
     }
 
-    func checkRefusalReportCanAcquireLock() async throws {
+    func testRefusalReportCanAcquireLock() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         h.alpha.tags = ["refused"]
@@ -173,10 +202,10 @@ extension ManifestSaveTests {
         }
         await h.saves.waitUntilIdle()
         XCTAssertTrue(reported)
-        try await checkCategoryCompletionCanAcquireLock()
         for rebuildFails in [false, true] {
             h.recording.failingRebuildSnapshots = rebuildFails ? 1 : 0
-            var completed = false
+            var completed = false, nudges = 0
+            h.saves.didSave = { nudges += 1 }
             h.saves.submit(.skillMetadata("alpha", ["saved"], nil), context: h.context) { error in
                 completed = true
                 XCTAssertEqual(error != nil, rebuildFails)
@@ -186,10 +215,11 @@ extension ManifestSaveTests {
             }
             await h.saves.waitUntilIdle()
             XCTAssertTrue(completed)
+            XCTAssertEqual(nudges, rebuildFails ? 0 : 1, "An error report must not also announce a successful save")
         }
     }
 
-    private func checkCategoryCompletionCanAcquireLock() async throws {
+    func testCategoryCompletionCanAcquireLock() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         let change = ManifestChange.renameCategory("Local", "Refused")

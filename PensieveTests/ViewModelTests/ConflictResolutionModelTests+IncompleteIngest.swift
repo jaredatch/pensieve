@@ -63,9 +63,7 @@ extension ConflictResolutionModelTests {
         let manifest = RecordingSaveManifest()
         manifest.failingWrites = 1
         let saves = ManifestSaveModel(manifest: manifest, root: fixture.app, lockPath: fixture.base + "/sync.lock")
-        let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app),
-            fileWatchService: FileWatchService(rootDir: fixture.app + "/skills"), manifestRoot: fixture.app, manifestSaves: saves)
+        let library = fixture.queuedLibrary(manifestSaves: saves)
         library.updateMetadata(skill, tags: ["refused"], scope: .project, context: context)
         await saves.waitUntilIdle()
         XCTAssertNotNil(library.error)
@@ -124,9 +122,7 @@ extension ConflictResolutionModelTests {
         let manifest = RecordingSaveManifest()
         manifest.failingWrites = 1
         let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: base + "/sync.lock")
-        let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: f.files, baseDir: f.app + "/skills", storeRoot: f.app),
-            fileWatchService: FileWatchService(rootDir: f.app + "/skills"), manifestRoot: f.app, manifestSaves: saves)
+        let library = f.queuedLibrary(manifestSaves: saves)
         library.updateMetadata(skill, tags: ["refused"], scope: .project, context: context)
         await saves.waitUntilIdle()
         XCTAssertNotNil(library.error)

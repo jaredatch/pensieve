@@ -704,6 +704,7 @@
 		936801A6C95E28BC72181CF3 /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B7BBA01BAD96A00F1F78F4 /* SyncCoordinator.swift */; };
 		93987F80E0C98B1CF71E6D44 /* CLIConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8125795188ED9E3756E9001 /* CLIConfirmation.swift */; };
 		93BAB06F87087C55F6486682 /* GitService+FastForward.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5190F0DD4C3BB93BBC33E64D /* GitService+FastForward.swift */; };
+		93C912600C3C652912BDBC14 /* IngestPreflightTests+CommitCost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3977331D32D67E28F92B99B4 /* IngestPreflightTests+CommitCost.swift */; };
 		93D14E06BF7B61A1B99D27CA /* ExportSkillCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0742561320EC34E60E14F571 /* ExportSkillCommand.swift */; };
 		93D2DEE897A9A56713E9EA1A /* ManifestService+Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B48F13F7D2A4AFD1ABC7569 /* ManifestService+Snapshot.swift */; };
 		93D5639E6DAB8ED9617E29BE /* SkillPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EB11B3B995579BE9DE142B3 /* SkillPreviewView.swift */; };
@@ -1168,6 +1169,7 @@
 		F011F0C041B71BC8A7447345 /* ViewChangesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 692CF9016E8363DE74D588CB /* ViewChangesWindow.swift */; };
 		F0C739B71D19E6D0ECD47F8A /* sample-skill-basic.md in Resources */ = {isa = PBXBuildFile; fileRef = 620197669FB94664CD525E9E /* sample-skill-basic.md */; };
 		F0CB00B187E22342DB9D054D /* SyncConflict.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC06152804D881B3C854B62C /* SyncConflict.swift */; };
+		F0ED39C72E3B69A7BF793856 /* ManifestSaveTests+Creates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BE14B8DAB8A5EECB4660FDF /* ManifestSaveTests+Creates.swift */; };
 		F0FBDB6636A8A81232A9D76B /* FrontmatterTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13178A2CFA56187F7972A218 /* FrontmatterTrustTests.swift */; };
 		F100CEE7D1EDF974C411D4F4 /* SkillDeploymentsTab+Primitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58F10B50612F23A737CA4DB /* SkillDeploymentsTab+Primitives.swift */; };
 		F128BA83A0023B66FD7A7261 /* SkillHistoryPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E7E298FD3885226AD4C9CC1 /* SkillHistoryPresentationTests.swift */; };
@@ -1285,10 +1287,10 @@
 		2A5D7B61082192659FBC2FEA /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 6;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
 			files = (
-				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
+				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1307,10 +1309,10 @@
 		93E582B3BFE204FAFE24F297 /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Helpers;
-			dstSubfolderSpec = 1;
+			dstPath = "";
+			dstSubfolderSpec = 6;
 			files = (
-				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
+				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1565,6 +1567,7 @@
 		393144452346EE9563389760 /* WaitingRemovalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitingRemovalStore.swift; sourceTree = "<group>"; };
 		3931B2C3E14E2EBEFB446451 /* IntentReconcilerProjectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentReconcilerProjectTests.swift; sourceTree = "<group>"; };
 		394E2551ADDA208065EF4852 /* UpstreamHistoryCacheAdmissionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryCacheAdmissionTests.swift; sourceTree = "<group>"; };
+		3977331D32D67E28F92B99B4 /* IngestPreflightTests+CommitCost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IngestPreflightTests+CommitCost.swift"; sourceTree = "<group>"; };
 		39A6881788BC4629D6FEF6BB /* SyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSettingsView.swift; sourceTree = "<group>"; };
 		39A7E54850E00238E1B092E9 /* TagDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetailView.swift; sourceTree = "<group>"; };
 		39E5EB08E606B0445D892A58 /* DesignTokens+UpdateReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DesignTokens+UpdateReview.swift"; sourceTree = "<group>"; };
@@ -1794,6 +1797,7 @@
 		6B9A58C9B9EA224FFBC9D348 /* RepoUpdateCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoUpdateCursor.swift; sourceTree = "<group>"; };
 		6BAFA8F1F0D2C3328C943D94 /* IngestPreflightTests+QueuedEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IngestPreflightTests+QueuedEdits.swift"; sourceTree = "<group>"; };
 		6BBEE483695B2A1592A74339 /* UpstreamHistoryRefreshTests+Remount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpstreamHistoryRefreshTests+Remount.swift"; sourceTree = "<group>"; };
+		6BE14B8DAB8A5EECB4660FDF /* ManifestSaveTests+Creates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestSaveTests+Creates.swift"; sourceTree = "<group>"; };
 		6C5B74C0A8F1923D5FABCE41 /* MarkdownEditorHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorHostTests.swift; sourceTree = "<group>"; };
 		6CA8D283F6493072A5AC35FF /* ManifestDeployIntentWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDeployIntentWriterTests.swift; sourceTree = "<group>"; };
 		6D126244CE2548A7ED1F9E27 /* ManifestLockRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestLockRegressionTests.swift; sourceTree = "<group>"; };
@@ -3598,6 +3602,7 @@
 				9371AD41852D05C988A5A1C8 /* IngestPreflightIntegrationTests.swift */,
 				2345201BA90E4F7068E97AE4 /* IngestPreflightTests.swift */,
 				027D5DA2546E1910ECF82B5A /* IngestPreflightTests+CLIInstall.swift */,
+				3977331D32D67E28F92B99B4 /* IngestPreflightTests+CommitCost.swift */,
 				99857BDBD92B67CC9A80794D /* IngestPreflightTests+Damage.swift */,
 				8EE391F4F438EA907224F3AD /* IngestPreflightTests+ExternalWriters.swift */,
 				477B2CF67FDFA26F0406299E /* IngestPreflightTests+Incomplete.swift */,
@@ -3641,6 +3646,7 @@
 				205AB8063954A0E3DC02A52A /* ManifestRetirementTests.swift */,
 				762F39D70E981D9B9252529E /* ManifestRetirementTests+Concurrency.swift */,
 				C5AE7B2FED73B10880A5EB1B /* ManifestSaveTests.swift */,
+				6BE14B8DAB8A5EECB4660FDF /* ManifestSaveTests+Creates.swift */,
 				523DAF80147B5602D6A3FE46 /* ManifestSaveTests+DamageRegressions.swift */,
 				FCD4D4701590F1BD9128001B /* ManifestSaveTests+Identity.swift */,
 				0F97F5C09A7A1977FAD180E1 /* ManifestSaveTests+Rebuild.swift */,
@@ -4364,6 +4370,7 @@
 				BB8853E7354286F64E398FA8 /* IngestPreflightIntegrationTests.swift in Sources */,
 				E34A1FA84CB1CAD25D3CFBE2 /* IngestPreflightTestSupport.swift in Sources */,
 				F4CC25C1350108471ADDFF50 /* IngestPreflightTests+CLIInstall.swift in Sources */,
+				93C912600C3C652912BDBC14 /* IngestPreflightTests+CommitCost.swift in Sources */,
 				84E6E8518AE652E25B11A773 /* IngestPreflightTests+Damage.swift in Sources */,
 				D4C45E48D39D39AB634B6683 /* IngestPreflightTests+ExternalWriters.swift in Sources */,
 				83026506271AEEF5B7F0654A /* IngestPreflightTests+Incomplete.swift in Sources */,
@@ -4419,6 +4426,7 @@
 				5A77314A7F4E78D797BE21A9 /* ManifestRetirementTests+Concurrency.swift in Sources */,
 				8B1E1325112777192C6BEBA0 /* ManifestRetirementTests.swift in Sources */,
 				E0C60026E0262CCE8B9C4C83 /* ManifestSaveFixture.swift in Sources */,
+				F0ED39C72E3B69A7BF793856 /* ManifestSaveTests+Creates.swift in Sources */,
 				6A010CE6F0B2EE8A12F56E37 /* ManifestSaveTests+DamageRegressions.swift in Sources */,
 				A9B0F886ECE4682F1B0E6F2F /* ManifestSaveTests+Identity.swift in Sources */,
 				6B4322CBAF82224213651CCD /* ManifestSaveTests+Rebuild.swift in Sources */,

@@ -1,26 +1,50 @@
+import CryptoKit
 import Foundation
 
+/// The caller owns path policy; Git only verifies the resulting tree and regular-file bytes.
+struct GitTreeExpectation {
+    let files: [Data: Data]
+    let deletablePaths: Set<Data>
+    let deletablePrefixes: [Data]
+    let ignoredPrefixes: [Data]
+}
+
 extension GitServiceProtocol {
-    /// Unmodeled git services cannot certify a commit. This only forfeits the ingest skip.
+    /// Unmodeled services conservatively capture and decline certification.
     @_disfavoredOverload
-    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String) throws -> Bool {
+    func hasUncommittedChanges(at path: String) -> Bool { true }
+
+    func hasUncommittedChanges(at path: String, file: StaticString = #fileID, line: UInt = #line) -> Bool {
+        GitThreadGuard.withCallSite(file: file, line: line) {
+            let operation: (String) -> Bool = self.hasUncommittedChanges
+            return operation(path)
+        }
+    }
+
+    @_disfavoredOverload
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String,
+                            at root: String) throws -> Bool {
         false
     }
 
-    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String,
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String, at root: String,
                             file: StaticString = #fileID, line: UInt = #line) throws -> Bool {
         try GitThreadGuard.withCallSite(file: file, line: line) {
-            let operation: ([Data: Data], String, String, String) throws -> Bool = self.localCommitMatches
-            return try operation(outputs, parent, head, root)
+            let operation: (GitTreeExpectation, String, String, String) throws -> Bool = self.localCommitMatches
+            return try operation(expected, parent, head, root)
         }
     }
 }
 
 extension GitService {
-    /// Compare the resulting tree with the admitted tree, including a conflict collapse that
-    /// rewrote commit ancestry. Raw NUL records retain deletions, mode changes and both rename sides.
     @_disfavoredOverload
-    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String) throws -> Bool {
+    func hasUncommittedChanges(at path: String) -> Bool { !isWorktreeClean(at: path) }
+
+    /// Compare trees across ordinary commits and rewritten ancestry. Raw NUL records preserve paths.
+    @_disfavoredOverload
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String,
+                            at root: String) throws -> Bool {
+        if parent == head { return true }
         let args = ["-C", root, "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames",
                     "--ignore-submodules=none", "-z", parent, head, "--"]
         let output = try runData(args, in: nil)
@@ -28,31 +52,35 @@ extension GitService {
         let records = output.stdout.split(separator: 0, omittingEmptySubsequences: false)
         guard records.last?.isEmpty == true, records.count % 2 == 1 else { return false }
         for index in stride(from: 0, to: records.count - 1, by: 2) {
-            guard try localChangeMatches(metadata: Data(records[index]), path: Data(records[index + 1]),
-                                         outputs: outputs, root: root) else { return false }
+            guard localChangeMatches(metadata: Data(records[index]), path: Data(records[index + 1]),
+                                     expected: expected) else { return false }
         }
         return true
     }
 
-    private func localChangeMatches(metadata: Data, path: Data, outputs: [Data: Data], root: String) throws -> Bool {
-        let components = path.split(separator: 0x2F)
-        // Machine observations do not feed the library rebuild.
-        if components.count > 1, components.first == Data("machines".utf8) { return true }
+    private func localChangeMatches(metadata: Data, path: Data, expected: GitTreeExpectation) -> Bool {
         let fields = metadata.split(separator: 0x20)
-        guard fields.count == 5 else { return false }
-        guard let mode = String(bytes: fields[1], encoding: .utf8) else { return false }
-        let isManifest = components.count > 1 && components.first == Data("manifest".utf8)
-        let isControl = [".gitattributes", ".gitignore", StoreIgnoreRules.receiptFile].contains { Data($0.utf8) == path }
-        guard isManifest || isControl else { return false }
-        if mode == "000000" {
-            guard outputs[path] == nil else { return false }
-            return true
+        guard fields.count == 5, fields[0].first == 0x3A,
+              let oldMode = String(bytes: fields[0].dropFirst(), encoding: .utf8),
+              let mode = String(bytes: fields[1], encoding: .utf8) else { return false }
+        if expected.ignoredPrefixes.contains(where: { path.starts(with: $0) }) {
+            // Neither side of an ignored observation may be a link, gitlink or executable.
+            return [oldMode, mode].allSatisfy { $0 == "000000" || $0 == "100644" }
         }
-        guard mode == "100644", let expected = outputs[path] else { return false }
-        guard let object = String(bytes: fields[3], encoding: .utf8) else { return false }
-        let blob = try runData(["-C", root, "cat-file", "blob", object], in: nil)
-        guard blob.exit == 0, blob.stdout == expected else { return false }
-        return true
+        if mode == "000000" {
+            return expected.files[path] == nil && (expected.deletablePaths.contains(path)
+                || expected.deletablePrefixes.contains { path.starts(with: $0) })
+        }
+        guard mode == "100644", let bytes = expected.files[path],
+              let object = String(bytes: fields[3], encoding: .utf8) else { return false }
+        let blob = Data("blob \(bytes.count)\0".utf8) + bytes
+        // --no-abbrev returns the repository's full object IDs, including SHA-256 repositories.
+        let digest: [UInt8]
+        switch object.utf8.count {
+        case 40: digest = Array(Insecure.SHA1.hash(data: blob))
+        case 64: digest = Array(SHA256.hash(data: blob))
+        default: return false
+        }
+        return digest.map { String(format: "%02x", $0) }.joined() == object
     }
-
 }

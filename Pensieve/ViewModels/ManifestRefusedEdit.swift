@@ -10,7 +10,7 @@ final class ManifestRefusedEdit {
     let id = UUID()
     private var registration: StoreIngestState?
     private var projection: RefusedManifestProjection {
-        RefusedManifestProjection(fields: fields ?? [.change(original)], cachedLocal: cachedLocal)
+        RefusedManifestProjection(fields: fields ?? [.change(original)])
     }
 
     deinit { registration?.forgetRefused(id) }
@@ -21,15 +21,16 @@ final class ManifestRefusedEdit {
     }
 
     private func updateRegistration() {
-        registration?.retainRefused(projection, id: id)
+        registration?.retainRefused(projection, id: id, local: local)
     }
     let context: ModelContext
     private let original: ManifestChange
     private var fields: [Field]?
-    private var cachedLocal: ManifestSnapshot?
+    private let local: RefusedManifestContext
 
     init(_ change: ManifestChange, context: ModelContext) {
         self.context = context
+        local = StoreIngestState.shared(for: context.container).refusedContext(for: context)
         original = change
         switch change {
         case .skillMetadata(let slug, let tags, let scope):
@@ -42,17 +43,12 @@ final class ManifestRefusedEdit {
     }
 
     func cache(local: ManifestSnapshot?) {
-        if let local { cachedLocal = local }
-        updateRegistration()
+        self.local.cache(local)
     }
 
     /// Keep the last readable local snapshot current while a later projection read is unavailable.
     func observe(_ change: ManifestChange) {
-        if var local = cachedLocal {
-            change.apply(to: &local)
-            cachedLocal = local
-            updateRegistration()
-        }
+        local.observe(change)
     }
 
     func suppliesTarget(for edit: ManifestRefusedEdit) -> Bool {
@@ -62,19 +58,14 @@ final class ManifestRefusedEdit {
         }
     }
 
-    func refresh(durable: ManifestSnapshot) -> Bool {
-        return acknowledge(durable: durable)
-    }
-
     /// Publication can acknowledge cached fields without another main-context read.
     func acknowledge(durable: ManifestSnapshot) -> Bool {
-        // A validation refusal cannot become a saved report merely because projection skips it.
-        do { try original.validate(in: durable) } catch { return true }
         if fields == nil { fields = retirementFields(durable: durable) }
+        let cachedLocal = local.snapshot
         var remaining: [Field] = []
         for field in fields ?? [] {
             var probe = durable
-            projection.project(field, onto: &probe)
+            projection.project(field, onto: &probe, cachedLocal: cachedLocal)
             if probe != durable { remaining.append(field) }
         }
         fields = remaining
@@ -83,7 +74,7 @@ final class ManifestRefusedEdit {
     }
 
     func project(onto displayed: inout ManifestSnapshot) {
-        projection.project(onto: &displayed)
+        projection.project(onto: &displayed, cachedLocal: local.snapshot)
     }
 
     /// A category deleted before retirement may be restored by undo afterward.
@@ -96,7 +87,8 @@ final class ManifestRefusedEdit {
             }) { continue }
             // Current local values still win. An acknowledged field or a later reassignment
             // must not be retired again just because another retirement field remains refused.
-            if cachedLocal?.categories.first(where: { $0.name == category.name })?.skillSlugs.contains(slug) == true { continue }
+            let current = local.snapshot?.categories.first { $0.name == category.name }
+            if current?.skillSlugs.contains(slug) == true { continue }
             category.skillSlugs.removeAll { $0 == slug }
         }
     }
