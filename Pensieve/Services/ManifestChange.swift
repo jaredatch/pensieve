@@ -28,6 +28,16 @@ enum ManifestChange {
         if let taken = CategoryName.takenName(new, among: others) { throw CategoryNameError.taken(taken) }
     }
 
+    /// A create claims an absent slug; rebuilding a peer row cannot acknowledge that claim.
+    func conflictingCreate(in snapshot: ManifestSnapshot) -> String? {
+        guard case .createSkill(let requested) = self,
+              let durable = snapshot.skills.first(where: { $0.slug == requested.slug }),
+              ManifestService.serializeSkillOverlay(durable) != ManifestService.serializeSkillOverlay(requested) else {
+            return nil
+        }
+        return requested.slug
+    }
+
     /// False means the target is absent. The queue still publishes idempotent deletions.
     @discardableResult
     func apply(to snapshot: inout ManifestSnapshot) -> Bool {
@@ -63,9 +73,7 @@ enum ManifestChange {
     private func applySkill(to snapshot: inout ManifestSnapshot) -> Bool {
         switch self {
         case .createSkill(let overlay):
-            if let index = snapshot.skills.firstIndex(where: { $0.slug == overlay.slug }) {
-                snapshot.skills[index] = overlay
-            } else { snapshot.skills.append(overlay) }
+            if !snapshot.skills.contains(where: { $0.slug == overlay.slug }) { snapshot.skills.append(overlay) }
         case .skillMetadata(let slug, let tags, let scope):
             return updateMetadata(slug, tags: tags, scope: scope, in: &snapshot)
         case .deleteSkill(let slug):
