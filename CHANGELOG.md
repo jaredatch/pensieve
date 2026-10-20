@@ -49,6 +49,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- A category rename now survives another tool committing to the library while it saves.
+
 - Installs and imports work when your library folder is a symbolic link, including a link to another volume.
 
 - If saving a new project fails, Pensieve cleans up its new identity marker when it can. Retrying reuses any marker left behind, and simultaneous adds share one registration.

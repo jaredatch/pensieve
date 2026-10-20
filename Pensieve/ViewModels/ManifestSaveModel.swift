@@ -126,7 +126,8 @@ final class ManifestSaveModel {
         }
         do {
             heldLock = try await takeLock()
-            disk = try await readCurrentManifest()
+            let read = try await readCurrentManifest()
+            disk = read.disk
             if disk == nil, StoreIngestState.shared(for: item.presentation.context.container).needsRebuild {
                 throw ManifestError.damaged
             }
@@ -134,8 +135,8 @@ final class ManifestSaveModel {
             let ingest = StoreIngestState.shared(for: item.presentation.context.container)
             let head = await BlockingWork.run { [files, root] in GitHeadStamp(fileService: files).state(root: root) }
             var prepared: PreparedStoreRebuild?
-            if ingest.requiresRebuild(at: head) {
-                let outcome = try await ingestBeforeSave(item, disk: disk)
+            if read.head != head || ingest.requiresRebuild(at: head) {
+                let outcome = try await ingestBeforeSave(item, disk: &disk, head: read.head)
                 switch outcome.verdict {
                 case .ready(let scan): prepared = scan
                 case .refused(let error): throw error
@@ -217,15 +218,6 @@ final class ManifestSaveModel {
                 continue
             }
             pending.change.apply(to: &snapshot)
-        }
-    }
-
-    @MainActor
-    private func readCurrentManifest() async throws -> ManifestSnapshot? {
-        let manifest = manifest, root = root, files = files
-        return try await BlockingWork.run {
-            let read = try ManifestService.classifiedRead(using: manifest, root: root, files: files)
-            return read.missing ? nil : read.snapshot
         }
     }
 
