@@ -145,8 +145,7 @@ extension IngestPreflightTests {
             XCTAssertEqual(status.result, "failed")
             XCTAssertTrue(status.detail.contains(authentication ? "Authentication failed" : "missing.git"), status.detail)
             guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
-            XCTAssertTrue(message.contains(authentication ? "access token" : "does not appear to be a git repository"),
-                          message)
+            XCTAssertEqual(message, "The synced library file is damaged")
             XCTAssertFalse(message.contains("git -C"), message)
             XCTAssertFalse(message.contains("fetch origin main"), message)
             XCTAssertFalse(message.contains(h.f.app), message)
@@ -180,7 +179,7 @@ extension IngestPreflightTests {
             from: h.f.files.readData(at: h.f.base + "/audit/daemon-status.json"))
         XCTAssertTrue(status.detail.contains("skills/item/.env"), status.detail)
         guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
-        XCTAssertTrue(message.contains("skills/item/.env"), message)
+        XCTAssertEqual(message, "The synced library file is damaged")
     }
 
     private func peerRepairHarness(path: String = "manifest.yaml", committed: Bool = true,
