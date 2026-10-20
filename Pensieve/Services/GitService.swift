@@ -797,8 +797,9 @@ extension GitService {
 
     /// Native abort runs first. Validate its exact obstruction before discarding anything.
     private func finishRefusedAbort(_ failure: Error, paths: [String], permittedFolder: String, root: String) throws {
-        let blocked = ConflictAbortBlocked(paths: paths.isEmpty ? [permittedFolder] : paths, underlying: failure)
-        guard !paths.isEmpty, paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw blocked }
+        guard !paths.isEmpty else { throw failure }
+        let blocked = ConflictAbortBlocked(paths: paths, underlying: failure)
+        guard paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw blocked }
         do {
             let original = try conflictTree(revision: rebaseOriginalCommit(at: root), root: root, path: permittedFolder)
             let incoming = try conflictTree(revision: "HEAD", root: root, path: permittedFolder)

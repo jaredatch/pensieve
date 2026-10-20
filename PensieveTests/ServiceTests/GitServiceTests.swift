@@ -528,6 +528,20 @@ extension GitServiceTests {
             // Pull on B conflicts.
             XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
             XCTAssertEqual(try git.conflictedFiles(at: b), ["README.md"])
+            // A held index makes native abort fail without naming an obstructing folder.
+            let indexLock = b + "/.git/index.lock"
+            try FileService().writeFile(at: indexLock, content: "held by another git process")
+            var nativeMessage: String?
+            XCTAssertThrowsError(try git.abortRebase(at: b)) { error in
+                nativeMessage = error.localizedDescription
+                XCTAssertTrue(error.localizedDescription.contains("index.lock"))
+            }
+            XCTAssertThrowsError(try git.abortRebase(at: b, refusedFolder: "README.md")) { error in
+                XCTAssertEqual(error.localizedDescription, nativeMessage,
+                    "An unrelated abort failure must retain git's diagnostic without invented folder advice")
+                XCTAssertFalse(error is ConflictAbortBlocked)
+            }
+            try FileService().deleteFile(at: indexLock)
             // Abort restores B to its pre-pull state — nothing lost, no conflicted files.
             try git.abortRebase(at: b)
             XCTAssertEqual(try git.runOrThrow(["-C", b, "rev-parse", "--is-inside-work-tree"], in: nil).stdout, "true\n")

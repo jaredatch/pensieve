@@ -129,11 +129,11 @@ extension CategorySaveUndoTests {
             XCTAssertTrue(h.recording.writes.isEmpty)
             return
         }
-        let notice = try XCTUnwrap(try XCTUnwrap(h.saves.categoryNotice, scenario).messages.last)
+        let notice = try XCTUnwrap(try XCTUnwrap(h.saves.categoryNotice, scenario).messages.first)
         if scenario == "rename-dependent-published-lock" {
             let burst = try XCTUnwrap(h.saves.categoryNotice)
             XCTAssertEqual(burst.messages.count, 2)
-            XCTAssertTrue(burst.messages[0].contains("so it was undone."))
+            XCTAssertTrue(burst.messages[1].contains("so it was undone."))
             XCTAssertEqual(burst.title, "Category changes couldn't be saved")
         }
         let gone = scenario == "rename-schema-gone"

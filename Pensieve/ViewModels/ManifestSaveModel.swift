@@ -37,11 +37,14 @@ final class ManifestSaveModel {
     var pausedForRepair = false
     var hasActiveSaves: Bool { pendingCount > 0 && !pausedForRepair }
     @ObservationIgnored var refused: [ManifestRefusedEdit] = []
-    @ObservationIgnored private var categoryMessages: [CategorySaveNotice.Entry] = []
+    typealias OrderedCategoryNotice = (order: Int, entry: CategorySaveNotice.Entry)
+    @ObservationIgnored private var nextOrder = 0
+    @ObservationIgnored private var categoryMessages: [OrderedCategoryNotice] = []
     @ObservationIgnored var stagedRefusals: [UUID: () -> Void] = [:]
     @ObservationIgnored var worker: Task<Void, Never>?
 
     struct Item {
+        let order: Int
         var id: UUID { presentation.id }
         var wasHealed = false
         let change: ManifestChange
@@ -73,13 +76,14 @@ final class ManifestSaveModel {
         precondition(Thread.isMainThread)
         for edit in refused where edit.context === context { edit.observe(change) }
         let manifest = manifest, files = files
-        let item = Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
+        let item = Item(order: nextOrder, change: change, categoryEdit: categoryEdit, reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context),
             fallback: { try manifest.snapshot(from: context) },
             accept: { prepared, snapshot in
                 try StoreRebuildService(fileService: files, manifestService: manifest)
                     .accept(prepared, snapshot: snapshot, context: context)
             }, report: report)
+        nextOrder += 1
         items.append(item)
         StoreIngestState.shared(for: context.container).enqueue(change, id: item.id, categoryWindow: categoryEdit?.windowID)
         pendingCount = items.count
@@ -108,7 +112,8 @@ final class ManifestSaveModel {
         worker = nil
         isWaiting = false
         if !categoryMessages.isEmpty {
-            categoryNotice = CategorySaveNotice(entries: (categoryNotice?.entries ?? []) + categoryMessages)
+            categoryNotice = CategorySaveNotice(entries: (categoryNotice?.entries ?? [])
+                + categoryMessages.sorted { $0.order < $1.order }.map(\.entry))
             categoryMessages = []
         }
         if savedAny { didSave() }
@@ -284,7 +289,7 @@ extension ManifestSaveModel {
     private func categoryIsSaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
         // A successful heal published this item already. Later disk changes cannot revoke it.
         if item.wasHealed { return true }
-        // Otherwise only a read from this attempt can establish that the edited field is saved.
+        // Otherwise this attempt’s disk read or prepared rebuild snapshot must show the edited field is saved.
         guard let edit = item.categoryEdit, let durable else { return false }
         return edit.isSaved(in: durable)
     }
@@ -307,7 +312,7 @@ extension ManifestSaveModel {
         guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return {} }
         if categoryIsSaved(item, durable: durable) {
             return {
-                self.categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
+                self.categoryMessages.append((item.order, CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved)))
                 item.report(nil)
             }
         }
@@ -338,7 +343,7 @@ extension ManifestSaveModel {
 
     @MainActor
     private func restoreCategories(_ affected: [Item], reason: Error) -> () -> Void {
-        var notices: [CategorySaveNotice.Entry] = []
+        var notices: [OrderedCategoryNotice] = []
         var reports: [() -> Void] = []
         for (index, item) in affected.enumerated().reversed() {
             guard let edit = item.categoryEdit else { continue }
@@ -347,12 +352,12 @@ extension ManifestSaveModel {
             do {
                 let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
-                notices.append(CategorySaveNotice.entry(edit: edit,
-                    error: restored == .saved ? reason : error, outcome: restored))
+                notices.append((item.order, CategorySaveNotice.entry(edit: edit,
+                    error: restored == .saved ? reason : error, outcome: restored)))
                 wasKept = restored == .saved
             } catch {
-                notices.append(CategorySaveNotice.Entry(
-                    text: "Couldn't restore “\(edit.name)”: " + error.localizedDescription, wasKept: false))
+                notices.append((item.order, CategorySaveNotice.Entry(
+                    text: "Couldn't restore “\(edit.name)”: " + error.localizedDescription, wasKept: false)))
                 log("Category undo failed: " + error.localizedDescription)
             }
             reports.append { item.report(wasKept ? nil : error) }

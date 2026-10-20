@@ -190,6 +190,7 @@
 		2D0E23A80657B148317D818A /* AddProjectModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AECAD009551D08455EB1A164 /* AddProjectModelTests.swift */; };
 		2D3720B3866D417745B46D93 /* GitServiceProtocol+CallSite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A4E55D8594D4A3D2246E93A /* GitServiceProtocol+CallSite.swift */; };
 		2D3C6D8FAD78C8E11E68A193 /* SyncSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D3BC09531A2966A236787F1 /* SyncSetupView.swift */; };
+		2D5F710E759B059B34B5F3C9 /* AppRuntimeTests+RepairLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7090E43C1693A2FA1907B7E /* AppRuntimeTests+RepairLifecycle.swift */; };
 		2D70678E11E0E616EACEA17D /* UnifiedDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2EEA01AD4B4683C5E4470D9 /* UnifiedDiffTests.swift */; };
 		2D80514C8B8AD25AE9D353C5 /* ProjectRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6A3097F52770F69A510EC3 /* ProjectRegistrationTests.swift */; };
 		2DB5A55D3CE41A92B0FA7562 /* VendorTemporaryDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281D38DC513CA0C26676E423 /* VendorTemporaryDirectory.swift */; };
@@ -1291,10 +1292,10 @@
 		2A5D7B61082192659FBC2FEA /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 6;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
 			files = (
-				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
+				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1313,10 +1314,10 @@
 		93E582B3BFE204FAFE24F297 /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Helpers;
-			dstSubfolderSpec = 1;
+			dstPath = "";
+			dstSubfolderSpec = 6;
 			files = (
-				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
+				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -2169,6 +2170,7 @@
 		C6458425F1979F3FF7AD0596 /* FileService+Publication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FileService+Publication.swift"; sourceTree = "<group>"; };
 		C6466486E8CCB88077D6B11A /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
 		C6798CCD9744E35660346064 /* ManifestDeployIntentConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDeployIntentConcurrencyTests.swift; sourceTree = "<group>"; };
+		C7090E43C1693A2FA1907B7E /* AppRuntimeTests+RepairLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRuntimeTests+RepairLifecycle.swift"; sourceTree = "<group>"; };
 		C737EFF3958C41171365BE86 /* CategorySaveUndoTests+ExternalChanges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CategorySaveUndoTests+ExternalChanges.swift"; sourceTree = "<group>"; };
 		C81B7C307CF3AA4E0DA2749B /* InstalledSkillHistoryPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledSkillHistoryPresentation.swift; sourceTree = "<group>"; };
 		C865730C5207869E6328902C /* ProjectDirectoryConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDirectoryConcurrencyTests.swift; sourceTree = "<group>"; };
@@ -3043,6 +3045,7 @@
 				971374ADC4255A7E20661F1A /* AppRuntimePathsTests+SyncServices.swift */,
 				34AE964E408C75C9CAEBE319 /* AppRuntimeTests.swift */,
 				3B9306503C2E03506EC07766 /* AppRuntimeTests+CategorySaveNotice.swift */,
+				C7090E43C1693A2FA1907B7E /* AppRuntimeTests+RepairLifecycle.swift */,
 				AF7481D9F4E5C34E13FCA469 /* AppRuntimeTests+Support.swift */,
 				89EE8FDBC2B3EA7163E97C1F /* AppRuntimeUpdateCheckTests.swift */,
 				6B893B2BAD1A939B4EFC5BFA /* BatchTests.swift */,
@@ -4178,6 +4181,7 @@
 				E78678A376F8684BF85916E8 /* AppRuntimeSyncRecoveryTests+Probe.swift in Sources */,
 				B7EA3F1C89F20E57BE187C30 /* AppRuntimeSyncRecoveryTests.swift in Sources */,
 				2A5B6FBDAAAFD46702A907FB /* AppRuntimeTests+CategorySaveNotice.swift in Sources */,
+				2D5F710E759B059B34B5F3C9 /* AppRuntimeTests+RepairLifecycle.swift in Sources */,
 				99EA9AC474A853A580E1829D /* AppRuntimeTests+Support.swift in Sources */,
 				02C0D9BFCE2863CF6E4C064A /* AppRuntimeTests.swift in Sources */,
 				72C03CDE0BAAD8C3D641AC5A /* AppRuntimeUpdateCheckTests.swift in Sources */,

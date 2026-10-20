@@ -29,12 +29,23 @@ final class AppRuntimeTests: XCTestCase {
         // read. A slow host (GitHub's runner) can still be reading here, and the footer stays up until it lands.
         await harness.runtime.bootstrapTask.value
         XCTAssertFalse(harness.runtime.syncModel.showsFooter(saves: h.saves))
+        let healthy = try h.files.readFile(at: h.root + "/manifest/manifest.yaml")
         try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged while inactive")
         host.rootView = content(.active)
         await TestWait.until(failureMessage: "Activating the window must discover damage without a mounted footer") {
             h.saves.libraryDamaged
         }
         XCTAssertEqual(h.saves.pendingCount, 0)
+        await TestWait.until(failureMessage: "Activation must render the damage line and supply a repair offer") {
+            self.hasDamageLine(host) && h.saves.damage != nil
+        }
+        host.rootView = content(.inactive)
+        await Task.yield()
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: healthy)
+        host.rootView = content(.active)
+        await TestWait.until(failureMessage: "Activation must retire externally repaired damage") {
+            !h.saves.libraryDamaged && h.saves.damage == nil && !self.hasDamageLine(host)
+        }
     }
 
     func testDamageRecoveryRunsOnlyDamageDeferredLaunchWorkOnceOffMain() async throws {

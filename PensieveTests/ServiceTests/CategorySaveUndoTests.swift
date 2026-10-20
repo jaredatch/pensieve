@@ -33,6 +33,39 @@ final class CategorySaveUndoTests: XCTestCase {
         try await checkRefusalAfterPulledDeletion(fields: ["name"])
     }
 
+    func testRefusedCategoryNoticesFollowQueueOrderAcrossIndependentAndDependentEdits() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let queued = (0..<8).map { Pensieve.Category(name: "Queued \($0)") }
+        for category in queued { h.context.insert(category) }
+        try h.context.save()
+        try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { held.release() }
+        h.library.updateMetadata(h.alpha, tags: ["head edit"], scope: .user, context: h.context)
+        var peer = try h.manifest.read(fromRoot: h.root)
+        for (index, category) in queued.enumerated() {
+            let name = "Taken \(index)"
+            h.categories.rename(category, to: name, context: h.context)
+            peer.categories.append(CategoryRecord(name: name, projectKeys: ["peer"], skillSlugs: []))
+        }
+        // Dependent undos run in reverse, but their notices still follow submission order,
+        // even when independent edits intervene between the parent and its child.
+        for (index, category) in queued.enumerated() {
+            h.categories.rename(category, to: "Dependent \(index)", context: h.context)
+        }
+        try h.manifest.write(peer, toRoot: h.root)
+        held.release()
+        await h.saves.waitUntilIdle()
+        let messages = try XCTUnwrap(h.saves.categoryNotice).messages
+        let expected = (0..<8).map { "Queued \($0)" } + (0..<8).map { "Taken \($0)" }
+        XCTAssertEqual(messages.count, expected.count)
+        for (message, name) in zip(messages, expected) {
+            XCTAssertTrue(message.contains("“\(name)”"), "Expected \(name) in queue order, got: \(message)")
+        }
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories, peer.categories.sorted { $0.name < $1.name })
+    }
+
     func testRefusedCreateAndDependentRenameLeaveNoCategory() async throws {
         let h = try ManifestSaveFixture(unopenableLock: true)
         defer { h.cleanup() }

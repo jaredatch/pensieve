@@ -59,6 +59,7 @@ final class AppRuntime {
 
     private var didSignalLaunchIngest = false
     private var launchIngestHeadStamp: String?
+    @ObservationIgnored var successfulLibraryReads = 0
     private var needsLaunchBackfillAfterCoordinator = false
     private var forceLaunchPreflight = false
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
@@ -321,6 +322,7 @@ private extension AppRuntime {
 
 extension AppRuntime {
     func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false, afterSync: SyncCycleResult? = nil) async {
+        if afterRepair, successfulLibraryReads > 0 { return }
         defer { if let afterSync { convergence.run(after: afterSync) } }
         if let afterSync { guard case .synced = afterSync else { return } }
         guard needsLaunchBackfillAfterCoordinator, library.manifestSaves?.libraryDamaged != true,

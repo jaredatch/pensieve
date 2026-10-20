@@ -11,12 +11,13 @@ extension AppRuntime {
 
     func applyLibrarySyncOutcome(_ result: SyncCycleResult) async {
         let saves = library.manifestSaves
-        let repaired = saves?.didReadRepairedLibrary
-        // A successful cycle owns convergence after its recovery read.
-        if case .synced = result { saves?.didReadRepairedLibrary = {} }
+        // Successful cycles own convergence after the read. Count overlapping owners without
+        // replacing the permanent repair callback while either one is suspended.
+        let successful: Bool = if case .synced = result { true } else { false }
+        if successful { successfulLibraryReads += 1 }
+        defer { if successful { successfulLibraryReads -= 1 } }
         library.applySyncCycleOutcome(result)
         await saves?.refreshAndRetry()
-        if let repaired { saves?.didReadRepairedLibrary = repaired }
         await performDeferredLaunchBackfillIfNeeded(afterSync: result)
     }
 
