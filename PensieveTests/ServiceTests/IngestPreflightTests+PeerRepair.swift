@@ -4,9 +4,12 @@ import XCTest
 
 extension IngestPreflightTests {
     func testPeerRepairResumesWaitingEditsWithoutLocalRepair() async throws {
-        for path in PeerRepairHarness.damagePaths {
-            let h = try await peerRepairHarness(path: path)
+        let cases = PeerRepairHarness.damagePaths.map { ($0, false) } + [("manifest.yaml", true)]
+        for (path, untrackedCategories) in cases {
+            let h = try await peerRepairHarness(path: path, untrackedCategories: untrackedCategories)
             defer { h.close() }
+            let finderFile = h.f.app + "/manifest/categories/.DS_Store"
+            try h.f.files.writeFile(at: finderFile, content: "Finder metadata\n")
             try h.publishRepair()
             let result = await h.cycle()
             guard case .synced(_, _, _, _, let pulled) = result else {
@@ -128,13 +131,15 @@ extension IngestPreflightTests {
         await h.assertRefusedUnchanged()
     }
 
-    private func peerRepairHarness(path: String = "manifest.yaml", committed: Bool = true) async throws -> PeerRepairHarness {
+    private func peerRepairHarness(path: String = "manifest.yaml", committed: Bool = true,
+                                   untrackedCategories: Bool = false) async throws -> PeerRepairHarness {
         let f = try NativeTestWork.run {
             try IncompleteIngestFixture(base: self.tempDir + "/" + UUID().uuidString)
         }
         let h = try PeerRepairHarness(f: f, context: damageContext(f))
         await h.runtime.bootstrapTask.value
         try NativeTestWork.run {
+            if untrackedCategories { try f.files.deleteDirectory(at: f.app + "/manifest/categories") }
             // The manifest writer leaves these containers even when their tracked files are absent.
             for directory in ["categories", "skills", "deploys"] {
                 try f.files.createDirectory(at: f.app + "/manifest/" + directory)

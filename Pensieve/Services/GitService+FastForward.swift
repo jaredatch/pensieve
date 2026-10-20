@@ -21,13 +21,27 @@ extension GitService {
         if difference.exit == 1 { return false }
         guard difference.exit == 0 else { throw commandError(difference, args: ["-C", path] + args) }
         let untracked = try store.runOrThrow(["ls-files", "--others", "--directory", "-z", "--", ":(literal)manifest"])
-        // Git cannot record the empty containers ManifestService writes. An extra child can
-        // affect parsing (even an empty deploy directory), so only empty containers are equivalent.
+        // Git can collapse an untracked container into one entry. Inspect its children using
+        // the same rule as individually listed additions; empty writer containers also match.
         let containers = ["manifest/categories/", "manifest/skills/", "manifest/deploys/"]
         return try untracked.stdout.split(separator: "\0").allSatisfy { entry in
-            guard containers.contains(String(entry)) else { return false }
-            return try fileService.listDirectory(at: path + "/" + entry).isEmpty
+            let entry = String(entry)
+            if isIgnoredManifestAddition(entry) { return true }
+            guard containers.contains(entry) else { return false }
+            return try fileService.listDirectory(at: path + "/" + entry).allSatisfy {
+                isIgnoredManifestAddition(entry + $0)
+            }
         }
+    }
+
+    private func isIgnoredManifestAddition(_ path: String) -> Bool {
+        guard StoreExclusions.isExcludedFile(Data(path.utf8)) else { return false }
+        let parts = PathSyntax.components(path)
+        guard parts.first == "manifest", parts.count >= 2 else { return false }
+        // Root exclusions are not schema/projects files. Category and skill readers skip
+        // non-YAML entries; deploy readers validate all entries, including excluded names.
+        if parts.count == 2 { return true }
+        return (parts[1] == "categories" || parts[1] == "skills") && !parts[2].hasSuffix(".yaml")
     }
 
     /// True iff the worktree has no uncommitted changes sync would stage. New nested repositories
