@@ -17,6 +17,7 @@ final class StoreIngestState {
         let categoryWindow: UUID?
     }
     private var edits: [QueuedEdit] = []
+    private var refused: [(id: UUID, projection: RefusedManifestProjection)] = []
 
     static func shared(for container: ModelContainer) -> StoreIngestState {
         registryLock.lock()
@@ -43,8 +44,8 @@ final class StoreIngestState {
         }
     }
 
-    /// The caller just committed its own snapshot under sync.lock, on the admitted parent.
-    /// This changes commit identity without introducing unseen store content.
+    /// The caller verified the commit against its cycle-owned outputs under sync.lock.
+    /// Unseen changes leave the old HEAD recorded without marking ingestion incomplete.
     func recordLocalCommit(from parent: String?, to head: String?) {
         lock.lock()
         defer { lock.unlock() }
@@ -71,12 +72,34 @@ final class StoreIngestState {
         edits.removeAll { $0.id == id }
     }
 
+    /// Transfer a failed queue item without a gap in its projection. Updates retain FIFO order.
+    func retainRefused(_ projection: RefusedManifestProjection, id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        edits.removeAll { $0.id == id }
+        if projection.fields.isEmpty {
+            refused.removeAll { $0.id == id }
+        } else if let index = refused.firstIndex(where: { $0.id == id }) {
+            refused[index].projection = projection
+        } else {
+            refused.append((id, projection))
+        }
+    }
+
+    func forgetRefused(_ id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        refused.removeAll { $0.id == id }
+    }
+
     /// Plain edits cross contexts; SwiftData objects remain on their owning executor.
     func projectingEdits(onto snapshot: ManifestSnapshot) -> (snapshot: ManifestSnapshot, retainedWindows: Set<UUID>) {
         lock.lock()
         let changes = edits
+        let retainedEdits = refused
         lock.unlock()
         var projected = snapshot
+        for edit in retainedEdits { edit.projection.project(onto: &projected) }
         var retained: Set<UUID> = []
         for edit in changes {
             let change = edit.change

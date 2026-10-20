@@ -9,6 +9,7 @@ import Foundation
 final class AllowlistedRemoteGit: GitServiceProtocol {
     private let wrapped: GitServiceProtocol
     private let acceptedRemote: String
+    var beforeLocalCommit: ((String) throws -> Void)?
 
     init(wrapping wrapped: GitServiceProtocol, acceptedRemote: String = "https://fixture.test/x.git") {
         self.wrapped = wrapped
@@ -16,11 +17,17 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     }
 
     func scopedToStore(_ root: String) -> GitServiceProtocol {
-        AllowlistedRemoteGit(wrapping: wrapped.scopedToStore(root), acceptedRemote: acceptedRemote)
+        let scoped = AllowlistedRemoteGit(wrapping: wrapped.scopedToStore(root), acceptedRemote: acceptedRemote)
+        scoped.beforeLocalCommit = beforeLocalCommit
+        return scoped
     }
 
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
         try wrapped.prepareStoreRules(at: root, files: files)
+    }
+
+    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String) throws -> Bool {
+        try wrapped.localCommitMatches(outputs, from: parent, to: head, at: root)
     }
 
     func probeUsability() throws -> GitUsability { try wrapped.probeUsability() }
@@ -43,7 +50,8 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     }
     @discardableResult
     func stageAllAndCommit(at path: String, message: String) throws -> Bool {
-        try wrapped.stageAllAndCommit(at: path, message: message)
+        try beforeLocalCommit?(path)
+        return try wrapped.stageAllAndCommit(at: path, message: message)
     }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         try wrapped.pullRebase(at: path, credential: credential)
@@ -80,7 +88,9 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     func stagePath(_ path: String, at root: String) throws { try wrapped.stagePath(path, at: root) }
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool {
-        try wrapped.collapseToSingleCommit(at: root, message: message, credential: credential, fetchedRevision: fetchedRevision)
+        try beforeLocalCommit?(root)
+        return try wrapped.collapseToSingleCommit(at: root, message: message,
+                                                  credential: credential, fetchedRevision: fetchedRevision)
     }
     func hasCommitsToPush(at path: String) throws -> Bool { try wrapped.hasCommitsToPush(at: path) }
     func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {

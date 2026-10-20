@@ -41,7 +41,7 @@ final class ManifestSaveModel {
     @ObservationIgnored var worker: Task<Void, Never>?
 
     struct Item {
-        let id = UUID()
+        var id: UUID { presentation.id }
         var wasHealed = false
         let change: ManifestChange
         let categoryEdit: CategorySaveEdit?
@@ -139,11 +139,12 @@ final class ManifestSaveModel {
                 refuseCategory(item, durable: disk, error: error)
                 return .finished(false)
             }
-            heldLock?.release()
             if !item.wasHealed {
                 if disk != nil {
                     item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
                 }
+                if let disk { _ = item.presentation.refresh(durable: disk) }
+                item.presentation.retain()
                 refused.append(item.presentation)
             }
             if case ManifestSaveError.rebuildFailed = error { item.report(error) } else {

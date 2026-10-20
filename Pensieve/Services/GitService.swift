@@ -101,6 +101,8 @@ struct GitRemoteReferences: Equatable {
 protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading {
     func scopedToStore(_ root: String) -> GitServiceProtocol
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws
+    @_disfavoredOverload
+    func localCommitMatches(_ outputs: [Data: Data], from parent: String, to head: String, at root: String) throws -> Bool
 
     @_disfavoredOverload
     func initRepository(at path: String) throws

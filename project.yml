@@ -133,6 +133,7 @@ targets:
       - path: Pensieve/Services/GitServiceProtocol+CallSite.swift
       - path: Pensieve/Services/FastForwardGitService+CallSite.swift
       - path: Pensieve/Services/StoreGitOperation+CallSite.swift
+      - path: Pensieve/Services/GitService+LocalCommit.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
@@ -206,6 +207,7 @@ targets:
       - path: Pensieve/Services/GitServiceProtocol+CallSite.swift
       - path: Pensieve/Services/FastForwardGitService+CallSite.swift
       - path: Pensieve/Services/StoreGitOperation+CallSite.swift
+      - path: Pensieve/Services/GitService+LocalCommit.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift

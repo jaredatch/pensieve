@@ -153,10 +153,11 @@ struct SyncEngine: SyncEngineProtocol {
         // 2. Install the union-merge driver + ignore rules (idempotent) so the pull below auto-merges
         //    concurrent list edits instead of emitting conflict markers.
         try ensureSyncAttributes(root: root)
+        let localCommit = try? SyncLocalCommit(root: root, files: fileService)
         // 3. Commit (false when nothing changed locally).
         let committed = try gitService.stageAllAndCommit(at: root, message: message)
-        StoreIngestState.shared(for: context.container)
-            .recordLocalCommit(from: admittedParent, to: headStamp.read(root: root))
+        localCommit?.record(from: admittedParent, to: headStamp.read(root: root), root: root,
+                            git: gitService, state: StoreIngestState.shared(for: context.container))
 
         // 4. Pull with rebase. A body/overlay conflict is NOT ours to resolve here: abort (restoring the
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
@@ -325,10 +326,11 @@ struct SyncEngine: SyncEngineProtocol {
         let admittedParent = stamp.read(root: root)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
+        let localCommit = try? SyncLocalCommit(root: root, files: fileService)
         let committed = try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
                                                              credential: credential, fetchedRevision: incoming)
-        StoreIngestState.shared(for: context.container)
-            .recordLocalCommit(from: admittedParent, to: stamp.read(root: root))
+        localCommit?.record(from: admittedParent, to: stamp.read(root: root), root: root,
+                            git: gitService, state: StoreIngestState.shared(for: context.container))
         return committed
     }
 
