@@ -87,6 +87,14 @@ extension FileServiceProtocol {
 }
 
 extension FileServiceProtocol {
+    /// Store-owned containers may be absent, but a present entry must be a real directory.
+    /// Links above the store root still resolve normally; links inside it are never admitted.
+    func storeContainerExists(at path: String) throws -> Bool {
+        guard let type = try entryTypeWithoutFollowingLinks(at: path) else { return false }
+        guard type == .directory else { throw CocoaError(.fileReadUnsupportedScheme) }
+        return true
+    }
+
     /// Compare one directory entry with its resolved parent. Missing leaves inherit the parent's
     /// spelling, so links in ancestors and /private aliases resolve identically on both sides.
     func isRealpathContained(_ path: String) -> Bool {

@@ -183,6 +183,9 @@ private final class ListingCountingFileService: FileServiceProtocol {
     func contentsHash(at path: String) throws -> String { try base.contentsHash(at: path) }
 
     func realPath(at path: String) -> String { base.realPath(at: path) }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try base.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }

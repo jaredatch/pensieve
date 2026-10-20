@@ -127,6 +127,9 @@ private struct InjectedListingFileService: FileServiceProtocol {
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
 
     func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
 }

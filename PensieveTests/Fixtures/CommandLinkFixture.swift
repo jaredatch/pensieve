@@ -126,6 +126,9 @@ final class LeafReadSwappingFileService: FileServiceProtocol {
     func isRegularFile(at path: String) -> Bool { base.isRegularFile(at: path) }
     func contentsHash(at path: String) throws -> String { try base.contentsHash(at: path) }
 
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try base.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }

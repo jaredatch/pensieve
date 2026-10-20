@@ -30,7 +30,7 @@ struct GitHeadStamp {
             guard try fileService.directoryExistsFollowingLinks(at: common + "/objects"),
                   try fileService.directoryExistsFollowingLinks(at: common + "/refs") else { return .unreadable }
             let length = try objectIDLength(common: common)
-            let head = try fileService.readFile(at: git + "/HEAD")
+            let head = try readText(at: git + "/HEAD")
             guard head.hasPrefix("ref:") else { return Self.looseOID(head, length: length).map(State.resolved) ?? .unreadable }
             let ref = String(head.dropFirst(4)).trimmingCharacters(in: Self.gitWhitespace)
             guard Self.validRef(ref) else { return .unreadable }
@@ -40,25 +40,33 @@ struct GitHeadStamp {
             let path = directory + "/" + ref
             let type = try fileService.entryTypeWithoutFollowingLinks(at: path)
             // A symlink can name a Git ref chain even when its filesystem target is missing.
-            if type == .symlink { return .unreadable }
+            if type == .symlink || type == .other { return .unreadable }
             if type == .regular {
                 // A symbolic-ref chain is intentionally unresolved: callers must ingest first.
-                return Self.looseOID(try fileService.readFile(at: path), length: length).map(State.resolved) ?? .unreadable
+                return Self.looseOID(try readText(at: path), length: length).map(State.resolved) ?? .unreadable
             }
             return try packedState(ref: ref, directory: common, length: length)
         } catch { return .unreadable }
     }
 
+    /// Small pointers and refs get 64 KiB, config 1 MiB, and packed refs 16 MiB.
+    /// A special node, link, invalid UTF-8 or oversized file leaves HEAD unresolved.
+    private func readText(at path: String, maximumBytes: Int = 64 * 1_024) throws -> String {
+        let data = try fileService.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        guard let text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadInapplicableStringEncoding) }
+        return text
+    }
+
     private func metadataDirectory(_ entry: String, root: String) throws -> String {
         if try fileService.directoryExistsFollowingLinks(at: entry) { return entry }
-        let path = try GitDirectoryText.directory(try fileService.readFile(at: entry), relativeTo: root)
+        let path = try GitDirectoryText.directory(try readText(at: entry), relativeTo: root)
         guard try fileService.directoryExistsFollowingLinks(at: path) else { throw CocoaError(.fileNoSuchFile) }
         return path
     }
 
     private func commonDirectory(_ git: String) throws -> String {
         guard try fileService.entryExistsWithoutFollowingLinks(at: git + "/commondir") else { return git }
-        let target = GitDirectoryText.trimLineEndings(try fileService.readFile(at: git + "/commondir"))
+        let target = GitDirectoryText.trimLineEndings(try readText(at: git + "/commondir"))
         guard !target.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
         let path = Self.path(target, relativeTo: git)
         guard try fileService.directoryExistsFollowingLinks(at: path) else { throw CocoaError(.fileNoSuchFile) }
@@ -68,13 +76,13 @@ struct GitHeadStamp {
     private func objectIDLength(common: String) throws -> Int {
         let path = common + "/config"
         guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return 40 }
-        return try GitRepositoryFormat.objectIDLength(fileService.readFile(at: path))
+        return try GitRepositoryFormat.objectIDLength(readText(at: path, maximumBytes: 1_024 * 1_024))
     }
 
     private func packedState(ref: String, directory: String, length: Int) throws -> State {
         let path = directory + "/packed-refs"
         guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return .unborn }
-        let bytes = Array(try fileService.readFile(at: path).utf8)
+        let bytes = Array(try readText(at: path, maximumBytes: 16 * 1_024 * 1_024).utf8)
         if bytes.isEmpty { return .unborn }
         guard bytes.last == 10 else { throw CocoaError(.fileReadCorruptFile) }
         let records = try Self.packedRecords(bytes, length: length)

@@ -30,6 +30,9 @@ struct ReverseListingFileService: FileServiceProtocol {
     }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
 
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
@@ -120,6 +123,9 @@ final class RecordingVendorFileService: FileServiceProtocol {
         try wrapped.replaceItem(at: path, with: sourcePath)
     }
 
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
@@ -167,6 +173,9 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
 
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 

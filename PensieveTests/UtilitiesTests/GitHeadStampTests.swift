@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import Pensieve
@@ -142,6 +143,8 @@ final class GitHeadStampTests: XCTestCase {
 
     func testAbsentRepositoryAndUnresolvedMetadataStayDistinct() throws {
         try NativeTestWork.run { [self] in
+            try assertUnsafeMetadataRefused()
+            try assertOversizedMetadataRefused()
             XCTAssertEqual(GitHeadStamp().state(root: base), .noRepository)
             let f = try HeadRepository(base: base, shape: .relativeFile)
             try files.writeFile(at: f.root + "/.git", content: "gitdir: missing\n")
@@ -341,4 +344,56 @@ struct HeadRepository {
     func git(_ arguments: [String]) throws -> String {
         try TestPaths.git.runOrThrow(arguments, in: root).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+extension GitHeadStampTests {
+    /// Intercept only the unsafe text API before it opens a special node. Bounded reads use
+    /// real descriptors, so the pre-fix reader fails promptly instead of hanging or exhausting RAM.
+    private func assertUnsafeMetadataRefused() throws {
+        let observed = RebuildReadFileService()
+        observed.beforeUnboundedRead = { path in
+            XCTFail("HEAD metadata must use bounded no-follow reads: " + path)
+            throw CocoaError(.fileReadNoPermission)
+        }
+        let fifoRoot = base + "/fifo"
+        try files.createDirectory(at: fifoRoot)
+        XCTAssertEqual(mkfifo(fifoRoot + "/.git", 0o600), 0)
+        XCTAssertEqual(GitHeadStamp(fileService: observed).state(root: fifoRoot), .unreadable)
+        let fixture = try HeadRepository(base: base + "/unsafe", shape: .worktree)
+        for path in [fixture.root + "/.git", fixture.metadata + "/HEAD", fixture.metadata + "/commondir",
+                     fixture.common + "/config",
+                     fixture.common + "/refs/heads/main", fixture.common + "/packed-refs"] {
+            let original = files.fileExists(at: path) ? try files.readFile(at: path) : nil
+            if original != nil { try files.deleteFile(at: path) }
+            let loose = fixture.common + "/refs/heads/main"
+            let packed = path.hasSuffix("/packed-refs")
+            if packed { try files.deleteFile(at: loose) }
+            try files.createSymlink(at: path, pointingTo: "/dev/zero")
+            XCTAssertEqual(GitHeadStamp(fileService: observed).state(root: fixture.root), .unreadable, path)
+            try files.deleteFile(at: path)
+            XCTAssertEqual(mkfifo(path, 0o600), 0)
+            XCTAssertEqual(GitHeadStamp(fileService: observed).state(root: fixture.root), .unreadable, path)
+            try files.deleteFile(at: path)
+            if let original { try files.writeFile(at: path, content: original) }
+            if packed { try files.writeFile(at: loose, content: fixture.oid + "\n") }
+        }
+    }
+    private func assertOversizedMetadataRefused() throws {
+        let fixture = try HeadRepository(base: base + "/oversized", shape: .folder)
+        _ = try fixture.git(["pack-refs", "--all", "--prune"])
+        let config = try files.readFile(at: fixture.common + "/config")
+        let packed = fixture.oid + " refs/heads/main\n"
+        for (name, prefix, suffix, limit) in [
+            ("HEAD", fixture.oid, "", 64 * 1_024),
+            ("config", config + "\n#", "", 1_024 * 1_024),
+            ("packed-refs", "# pack-refs with: ", "\n" + packed, 16 * 1_024 * 1_024)
+        ] {
+            let path = fixture.common + "/" + name
+            let original = try files.readFile(at: path)
+            try files.writeFile(at: path, content: prefix + String(repeating: " ", count: limit) + suffix)
+            XCTAssertEqual(GitHeadStamp().state(root: fixture.root), .unreadable, name)
+            try files.writeFile(at: path, content: original)
+        }
+    }
+
 }

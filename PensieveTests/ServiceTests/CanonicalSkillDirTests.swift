@@ -34,12 +34,13 @@ final class CanonicalSkillDirTests: XCTestCase {
 
     func testLinkedStoreAcceptsNewAndExactlySpelledFolders() throws {
         let linked = tempDir + "/linked"
-        try fileService.createSymlink(at: linked, pointingTo: baseDir)
-        for base in [try XCTUnwrap(baseDir), linked] {
+        try fileService.createSymlink(at: linked, pointingTo: tempDir)
+        for base in [try XCTUnwrap(baseDir), linked + "/skills"] {
             for slug in ["missing", "MiXeD", "café", "cafe\u{301}"] {
                 XCTAssertEqual(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService), base + "/" + slug)
                 try fileService.createDirectory(at: base + "/" + slug)
                 XCTAssertEqual(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService), base + "/" + slug)
+                try fileService.deleteDirectory(at: base + "/" + slug)
             }
         }
     }
@@ -47,7 +48,7 @@ final class CanonicalSkillDirTests: XCTestCase {
     func testPlainAndLinkedStoreRejectEscapesAtReadAndWriteBoundary() throws {
         let linked = tempDir + "/linked"
         let outside = tempDir + "/outside"
-        try fileService.createSymlink(at: linked, pointingTo: baseDir)
+        try fileService.createSymlink(at: linked, pointingTo: tempDir)
         try fileService.writeFile(at: outside + "/SKILL.md", content: "precious")
         try fileService.createSymlink(at: baseDir + "/victim", pointingTo: outside)
         try fileService.createSymlink(at: baseDir + "/dangling", pointingTo: outside + "/missing")
@@ -55,7 +56,7 @@ final class CanonicalSkillDirTests: XCTestCase {
         for leaf in ["victim", "dangling", "loop"] {
             XCTAssertFalse(fileService.isRealpathContained(try fileService.resolveRealPath(at: baseDir) + "/" + leaf), leaf)
         }
-        for base in [try XCTUnwrap(baseDir), linked] {
+        for base in [try XCTUnwrap(baseDir), linked + "/skills"] {
             let store = SkillStore(fileService: fileService, baseDir: base, storeRoot: tempDir)
             for slug in ["victim", "dangling", "loop", "..", ".", "", "victim/child"] {
                 XCTAssertNil(SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService))
@@ -69,6 +70,21 @@ final class CanonicalSkillDirTests: XCTestCase {
         XCTAssertEqual(chmod(inaccessible, 0), 0)
         defer { XCTAssertEqual(chmod(inaccessible, 0o700), 0) }
         XCTAssertFalse(fileService.isRealpathContained(inaccessible + "/child"), "Unresolvable is not absent")
+    }
+
+    func testLinkedSkillsContainerRefusesReadsWritesAndDeletion() throws {
+        let outside = tempDir + "/outside"
+        try fileService.writeFile(at: outside + "/victim/SKILL.md", content: "precious")
+        try fileService.deleteDirectory(at: baseDir)
+        try fileService.createSymlink(at: baseDir, pointingTo: outside)
+        let store = SkillStore(fileService: fileService, baseDir: baseDir, storeRoot: tempDir)
+        XCTAssertNil(SkillStore.safeSkillDirectory(slug: "victim", base: baseDir, fileService: fileService))
+        XCTAssertThrowsError(try store.listSkills())
+        XCTAssertThrowsError(try store.readBody(directoryName: "victim"))
+        XCTAssertThrowsError(try store.writeBody(directoryName: "victim", body: "changed"))
+        XCTAssertThrowsError(try store.prepareImport())
+        XCTAssertThrowsError(try store.deleteSkill(directoryName: "victim"))
+        XCTAssertEqual(try fileService.readFile(at: outside + "/victim/SKILL.md"), "precious")
     }
 
     func testSymlinkedSlugDirReturnsNil() throws {
@@ -98,7 +114,7 @@ final class CanonicalSkillDirTests: XCTestCase {
     /// any filesystem access. Because the realpath-containment line also rejects `..`/`.`/empty, the
     /// end-to-end nil tests above cannot distinguish the component guard from that backstop (verified:
     /// removing only the component guard leaves them green). This pins the component guard on its own
-    /// — the FileService traps if `isSymlink` is ever reached, so dropping the guard (falling through
+    /// — the FileService traps entry-type and symlink probes, so dropping the guard (falling through
     /// to the FS) turns this red for every input, including `..`/`.`/empty.
     func testComponentGuardShortCircuitsBeforeFilesystemAccess() {
         let trap = TrapOnSymlinkFileService()
@@ -111,9 +127,13 @@ final class CanonicalSkillDirTests: XCTestCase {
     }
 }
 
-/// A `FileServiceProtocol` whose `isSymlink` fails the test if it is ever called — used to prove the
+/// A `FileServiceProtocol` whose entry-type and symlink probes fail the test — used to prove the
 /// component guard in `SkillStore.safeSkillDirectory` short-circuits before touching the filesystem.
 private struct TrapOnSymlinkFileService: FileServiceProtocol {
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        XCTFail("component guard must reject before any filesystem access — entry type called for \(path)")
+        return .directory
+    }
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws {}
     func writeExecutableFile(at path: String, content: String) throws {}

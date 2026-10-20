@@ -4,6 +4,7 @@ import Foundation
 /// Holds sampled SKILL.md reads at the real filesystem boundary. Main-thread reads are recorded
 /// without blocking, so the owner can diagnose an actor regression without wedging its test host.
 /// Optional manifest-build and skill-listing refusals exercise publication and scan failures.
+/// The optional pre-read hook can refuse unbounded text opens before they reach a special node.
 /// Other I/O delegates to FileService; the double supplies no rebuild or merge result.
 final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     private var containedReads: [String] = []
@@ -16,6 +17,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
         entryObservations.increment()
         return try wrapped.entryObservation(at: path)
     }
+    var beforeUnboundedRead: ((String) throws -> Void)?
     var afterRead: ((String) throws -> Void)?
     var refuseReplacement = false
     var refuseSkillListing = false
@@ -30,6 +32,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func hold(_ gates: [TestWait.Gate]) { lock.withLock { self.gates = gates } }
 
     func readFile(at path: String) throws -> String {
+        try beforeUnboundedRead?(path)
         if path.hasSuffix("/HEAD") { headReads.increment() }
         let value = try wrapped.readFile(at: path)
         try afterRead?(path)
@@ -45,7 +48,10 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func readData(at path: String) throws -> Data { try wrapped.readData(at: path) }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
-        return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        if path.hasSuffix("/HEAD") { headReads.increment() }
+        let data = try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        try afterRead?(path)
+        return data
     }
     func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
         try wrapped.readRegularFileHeader(at: path, maximumBytes: maximumBytes)

@@ -4,6 +4,35 @@ import XCTest
 
 extension StoreRebuildServiceTests {
     @MainActor
+    func testLinkedStoreContainersRefuseIngestWithoutChangingRows() throws {
+        try writeSkillFile(slug: "victim", name: "Original", description: "Original")
+        try writeManifest(skills: [overlay("victim")])
+        let snapshot = try manifest.read(fromRoot: tempDir)
+        for container in ["skills", "manifest"] {
+            let path = tempDir + "/" + container
+            let outside = tempDir + "/outside-" + container
+            try FileManager.default.moveItem(atPath: path, toPath: outside)
+            try fileService.createSymlink(at: path, pointingTo: outside)
+            for suppliedSnapshot in [false, true] {
+                let context = try makeContext()
+                context.insert(Skill(name: "Preserved", skillDescription: "Local", directoryName: "victim"))
+                context.insert(Skill(name: "Absent", skillDescription: "Local", directoryName: "absent"))
+                context.insert(Pensieve.Category(name: "Preserved category"))
+                try context.save()
+                let result = suppliedSnapshot
+                    ? service.rebuild(snapshot: snapshot, fromRoot: tempDir, context: context, manifestIsAuthoritative: true)
+                    : service.rebuild(fromRoot: tempDir, context: context)
+                XCTAssertTrue(result.ingestIncomplete || result.storeUnreadable, container)
+                XCTAssertFalse(result.warnings.isEmpty, container)
+                XCTAssertEqual(Set(try context.fetch(FetchDescriptor<Skill>()).map(\.name)), ["Preserved", "Absent"])
+                XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name), ["Preserved category"])
+            }
+            try fileService.deleteFile(at: path)
+            try FileManager.default.moveItem(atPath: outside, toPath: path)
+        }
+    }
+
+    @MainActor
     func testLinkedAndRealStoreRebuildSameBodiesPreservedRowsAndWarnings() throws {
         let linked = tempDir + "/alias"
         try fileService.createSymlink(at: linked, pointingTo: tempDir)

@@ -89,6 +89,9 @@ final class PreviewImageFileSpy: FileServiceProtocol {
     func contentsHash(at path: String) throws -> String { try files.contentsHash(at: path) }
 
     func realPath(at path: String) -> String { files.realPath(at: path) }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try files.entryTypeWithoutFollowingLinks(at: path)
+    }
     func resolveRealPath(at path: String) throws -> String { try files.resolveRealPath(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try files.storeTemporaryParent(root: root) }
 }

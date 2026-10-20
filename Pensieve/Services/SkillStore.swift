@@ -99,6 +99,7 @@ final class SkillStore: SkillStoreProtocol {
     func prepareImport() throws -> Set<String> { try occupiedDirectoryNames() }
 
     private func occupiedDirectoryNames() throws -> Set<String> {
+        _ = try fileService.storeContainerExists(at: baseDir)
         try fileService.createDirectory(at: baseDir)
         return Set(try fileService.listDirectory(at: baseDir))
     }
@@ -176,7 +177,7 @@ final class SkillStore: SkillStoreProtocol {
     }
 
     func listSkills() throws -> [String] {
-        guard fileService.directoryExists(at: baseDir) else { return [] }
+        guard try fileService.storeContainerExists(at: baseDir) else { return [] }
         return try fileService.listDirectory(at: baseDir).filter { entry in
             let skillPath = baseDir + "/" + entry + "/SKILL.md"
             return fileService.fileExists(at: skillPath)
@@ -185,6 +186,7 @@ final class SkillStore: SkillStoreProtocol {
 
     func slugEntryExists(_ directoryName: String) throws -> Bool {
         guard Self.isPathSafeSlug(directoryName) else { throw SkillStoreError.invalidDirectory(directoryName) }
+        _ = try fileService.storeContainerExists(at: baseDir)
         let wanted = directoryName.lowercased()
         return try fileService.listDirectory(at: baseDir).contains { $0.lowercased() == wanted }
     }
@@ -237,11 +239,13 @@ final class SkillStore: SkillStoreProtocol {
     // MARK: - Private
 
     /// The single C7 guard. Returns `<base>/<slug>` iff `slug` is a safe single directory
-    /// component (non-empty; no `/`; not `.`/`..`) AND `<base>/<slug>` is neither a symlink nor
-    /// realpaths outside `<base>`. Returns nil otherwise. PURE check — the caller decides what to
-    /// do with nil (throw / skip / return 0), so a fail-safe skip site never has to catch a throw.
+    /// component (non-empty; no `/`; not `.`/`..`), the base container is unlinked, and
+    /// `<base>/<slug>` is neither a symlink nor realpaths outside `<base>`. Returns nil otherwise.
+    /// PURE check — the caller decides what to do with nil (throw / skip / return 0), so a fail-safe
+    /// skip site never has to catch a throw.
     static func safeSkillDirectory(slug: String, base: String, fileService: FileServiceProtocol) -> String? {
         guard let dirPath = skillDirectoryPath(slug: slug, base: base) else { return nil }
+        do { _ = try fileService.storeContainerExists(at: base) } catch { return nil }
         if fileService.isSymlink(at: dirPath) { return nil }
         guard fileService.isRealpathContained(dirPath) else { return nil }
         return dirPath
