@@ -1127,6 +1127,7 @@
 		E74578A030E85FA3293CAEE7 /* UpstreamHistorySequenceHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFA5DF7D0CC322CAA45E62F9 /* UpstreamHistorySequenceHarness.swift */; };
 		E78678A376F8684BF85916E8 /* AppRuntimeSyncRecoveryTests+Probe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30CB90B4C7C55B05C281BF31 /* AppRuntimeSyncRecoveryTests+Probe.swift */; };
 		E7BA89BE653167D93D0D463C /* CategoryName.swift in Sources */ = {isa = PBXBuildFile; fileRef = D508FF7EE646F0D4E4265903 /* CategoryName.swift */; };
+		E7F6ED28B6D32AF0B4A4C17F /* IngestPreflightTests+PeerRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1FAECBFF80EAEB496E5E29 /* IngestPreflightTests+PeerRepair.swift */; };
 		E805E773CEFCEB97D00EC424 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176538C79FCDF929D3AC1763 /* AppRuntime.swift */; };
 		E86F46BA60990144528DDAC4 /* SyncConflictResolutionTests+ControlFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB1560B3226E32BFB699E43A /* SyncConflictResolutionTests+ControlFiles.swift */; };
 		E905F6901AB201F4550ECE92 /* CLIAppLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8756D335D73078977646130A /* CLIAppLauncher.swift */; };
@@ -1287,10 +1288,10 @@
 		2A5D7B61082192659FBC2FEA /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Helpers;
-			dstSubfolderSpec = 1;
+			dstPath = "";
+			dstSubfolderSpec = 6;
 			files = (
-				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
+				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1309,10 +1310,10 @@
 		93E582B3BFE204FAFE24F297 /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 6;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
 			files = (
-				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
+				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -2245,6 +2246,7 @@
 		D9AC2A934B4F7A0BE1C4A1E1 /* SkillParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillParser.swift; sourceTree = "<group>"; };
 		D9FBCEBA62DB3033B6EA185C /* InstalledSkillHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledSkillHistoryView.swift; sourceTree = "<group>"; };
 		DA104754C586DF10B278840D /* AdministratorPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministratorPrompt.swift; sourceTree = "<group>"; };
+		DA1FAECBFF80EAEB496E5E29 /* IngestPreflightTests+PeerRepair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IngestPreflightTests+PeerRepair.swift"; sourceTree = "<group>"; };
 		DA8098F6F85C3ACA65EB8FF5 /* FileServiceProjectContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileServiceProjectContractTests.swift; sourceTree = "<group>"; };
 		DA8313BD4BF82C7A67ADC035 /* AppRuntimeUpdateEnvironmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeUpdateEnvironmentTests.swift; sourceTree = "<group>"; };
 		DAAF16DE31197D68F6858AED /* GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsView.swift; sourceTree = "<group>"; };
@@ -3609,6 +3611,7 @@
 				3E87B60D6E36CAFE804479B5 /* IngestPreflightTests+LocalCommits.swift */,
 				910FE53F61BB3010055723D0 /* IngestPreflightTests+ManifestWriters.swift */,
 				90582C4D75F035CE7C752D02 /* IngestPreflightTests+MovingHead.swift */,
+				DA1FAECBFF80EAEB496E5E29 /* IngestPreflightTests+PeerRepair.swift */,
 				6BAFA8F1F0D2C3328C943D94 /* IngestPreflightTests+QueuedEdits.swift */,
 				E7F5B985106BC81353B6F123 /* IngestPreflightTests+QueueFailures.swift */,
 				9C39B0719AA66C1D28C8CECE /* IngestPreflightTests+ReadFailures.swift */,
@@ -4377,6 +4380,7 @@
 				E0698CF6B7120FE6C4028909 /* IngestPreflightTests+LocalCommits.swift in Sources */,
 				F58F16CA6CD00D3636EB3BB0 /* IngestPreflightTests+ManifestWriters.swift in Sources */,
 				CCC5C39CAAB4AB564CA1D017 /* IngestPreflightTests+MovingHead.swift in Sources */,
+				E7F6ED28B6D32AF0B4A4C17F /* IngestPreflightTests+PeerRepair.swift in Sources */,
 				57FA340061D74C174EE7D620 /* IngestPreflightTests+QueueFailures.swift in Sources */,
 				7DE13728AFC9D6B89189EAFA /* IngestPreflightTests+QueuedEdits.swift in Sources */,
 				579F262521372A2D20AC8EF7 /* IngestPreflightTests+ReadFailures.swift in Sources */,

@@ -29,6 +29,7 @@ final class ManifestSaveModel {
     var requiresNewerVersion: Bool?
     @ObservationIgnored var damageObservationOrder = 0
     @ObservationIgnored var damageRefreshOrder: Int?
+    @ObservationIgnored var damageRefreshTask: Task<Void, Never>?
     @ObservationIgnored var didReadRepairedLibrary: () async -> Void = {}
     var repairError: String?
     @ObservationIgnored var damage: ManifestDamage?

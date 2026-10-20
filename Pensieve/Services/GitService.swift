@@ -98,7 +98,9 @@ struct GitRemoteReferences: Equatable {
     let heads: [String]
 }
 
-protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading {
+protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading, GitFastForwarding {
+    @_disfavoredOverload
+    func manifestMatchesHead(at path: String) throws -> Bool
     func scopedToStore(_ root: String) -> GitServiceProtocol
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws
     @_disfavoredOverload

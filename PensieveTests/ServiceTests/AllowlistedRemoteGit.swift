@@ -7,6 +7,11 @@ import Foundation
 /// `GitService.pullRebase`/`push` run `git … origin main` (git resolves the URL from `.git/config`);
 /// `remoteURL(at:)` feeds only the guard + error strings. (PLAN-10 / 10.3 — file:// test reconciliation.)
 final class AllowlistedRemoteGit: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { wrapped.isWorktreeClean(at: path) }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+        try wrapped.fastForwardOnly(at: path, credential: credential)
+    }
+    func manifestMatchesHead(at path: String) throws -> Bool { try wrapped.manifestMatchesHead(at: path) }
     private let wrapped: GitServiceProtocol
     private let acceptedRemote: String
     var beforeLocalCommit: ((String) throws -> Void)?

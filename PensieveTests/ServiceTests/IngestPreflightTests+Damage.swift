@@ -97,38 +97,6 @@ extension IngestPreflightTests {
         XCTAssertEqual(remote.skills.first?.tags, ["waiting"])
     }
 
-    func testPeerRepairResumesWaitingEditsWithoutLocalRepair() async throws {
-        let f = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/peer-repair") }
-        let context = try damageContext(f)
-        let library = queuedLibrary(f, context: context)
-        let saves = try XCTUnwrap(library.manifestSaves)
-        // The damaged file is already synced; a later remote commit replaces it normally.
-        try NativeTestWork.run {
-            try f.files.writeFile(at: f.app + "/manifest/manifest.yaml", content: "damaged")
-            _ = try f.git.stageAllAndCommit(at: f.app, message: "damaged file")
-            try f.git.push(at: f.app, credential: nil)
-            _ = try f.git.fastForwardOnly(at: f.peer, credential: nil)
-        }
-        let category = try XCTUnwrap(try context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Kept" })
-        CategoryStore(manifestSaves: saves).rename(category, to: "Waiting", context: context)
-        await saves.waitUntilIdle()
-        XCTAssertTrue(saves.libraryDamaged)
-        XCTAssertTrue(library.addsFenced)
-        XCTAssertFalse(library.categoryEditsFenced)
-        try NativeTestWork.run {
-            try f.files.writeFile(at: f.peer + "/manifest/manifest.yaml", content: "schema_version: 5\n")
-            try f.changePeer()
-            _ = try f.git.fastForwardOnly(at: f.app, credential: nil)
-        }
-        await saves.refreshAndRetry()
-        await saves.waitUntilIdle()
-        XCTAssertFalse(saves.libraryDamaged)
-        XCTAssertFalse(library.addsFenced, "A readable peer file lifts the damage fence")
-        XCTAssertEqual(saves.pendingCount, 0)
-        XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name), ["Added", "Waiting"])
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Waiting"])
-    }
-
     func damageContext(_ fixture: IncompleteIngestFixture) throws -> ModelContext {
         let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: fixture.app, context: context)

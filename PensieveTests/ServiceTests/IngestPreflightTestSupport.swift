@@ -8,6 +8,9 @@ enum IngestPreflightBoom: Error {
 }
 
 final class IngestRecordingGit: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { false }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+    func manifestMatchesHead(at path: String) throws -> Bool { false }
     var remote: String? = "https://fixture.test/repo.git"
     var remoteRead: (() throws -> String?)?
     var calls: [String] = []

@@ -78,13 +78,26 @@ extension ManifestSaveTests {
             defer { h.cleanup() }
             let gate = TestWait.Gate(owner: self)
             defer { gate.open() }
+            let currentRead = TestWait.Gate(owner: self)
+            defer { currentRead.open() }
+            let returned = expectation(description: "Superseded refresh returned before the current read")
+            returned.isInverted = true
+            var releasedCurrentRead = false
             h.recording.afterRead = { try gate.wait() }
-            let old = Task { await h.saves.refreshDamage() }
+            let old = Task {
+                await h.saves.refreshDamage()
+                if !releasedCurrentRead { returned.fulfill() }
+            }
             await TestWait.until(failureMessage: "Old refresh must be in flight") { gate.waiterCount == 1 }
             h.recording.afterRead = nil
+            h.recording.afterReadFailure = { try currentRead.wait() }
             try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged")
             h.saves.acceptLibraryVerdict(newer: newer)
+            await TestWait.until(failureMessage: "Current damage read must be held") { currentRead.waiterCount == 1 }
             gate.open()
+            await fulfillment(of: [returned], timeout: 0.5) // upper-bound: negative wait; the current read stays gated.
+            releasedCurrentRead = true
+            currentRead.open()
             await old.value
             await TestWait.until(failureMessage: "A verdict must replace the invalidated damage observation") {
                 h.saves.libraryDamaged && h.saves.requiresNewerVersion == false

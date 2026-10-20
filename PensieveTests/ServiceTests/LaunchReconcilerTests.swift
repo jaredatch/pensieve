@@ -26,6 +26,9 @@ private struct Plan24LaunchProbeCase {
 }
 
 private final class Plan24GitState: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { false }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+    func manifestMatchesHead(at path: String) throws -> Bool { false }
     var remote: String?
     var branches: Result<Bool, Error> = .success(true)
     var origin: Result<Bool, Error> = .success(true)

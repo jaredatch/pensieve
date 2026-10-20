@@ -9,12 +9,27 @@ enum FastForwardResult: Equatable {
     case diverged
 }
 
-/// Fast-forward-only sync primitives (PLAN-12 / 12.4). Split into their own file (like
-/// `ManifestService+Snapshot`/`SkillSerializer+Skill`) so `GitService.swift` stays under the
-/// file-length cap without compressing its security-hardening comments. Concrete-only for now:
-/// `GitServiceProtocol` exposure lands in Stage 12.6, when the daemon injects a stub for its
-/// branch tests.
+/// Fast-forward primitives shared by the app's damaged-manifest recovery and the daemon.
 extension GitService {
+    /// Unlike staging, the damage check includes excluded and nested-repository additions under
+    /// manifest/. A local .env.yaml can break a category read even though sync would not stage it.
+    @_disfavoredOverload
+    func manifestMatchesHead(at path: String) throws -> Bool {
+        let store = try storeOperation(at: path)
+        let args = ["diff", "--quiet", "HEAD", "--", ":(literal)manifest"]
+        let difference = try store.run(args)
+        if difference.exit == 1 { return false }
+        guard difference.exit == 0 else { throw commandError(difference, args: ["-C", path] + args) }
+        let untracked = try store.runOrThrow(["ls-files", "--others", "--directory", "-z", "--", ":(literal)manifest"])
+        // Git cannot record the empty containers ManifestService writes. An extra child can
+        // affect parsing (even an empty deploy directory), so only empty containers are equivalent.
+        let containers = ["manifest/categories/", "manifest/skills/", "manifest/deploys/"]
+        return try untracked.stdout.split(separator: "\0").allSatisfy { entry in
+            guard containers.contains(String(entry)) else { return false }
+            return try fileService.listDirectory(at: path + "/" + entry).isEmpty
+        }
+    }
+
     /// True iff the worktree has no uncommitted changes sync would stage. New nested repositories
     /// stay local; tracked files and ordinary untracked files (including skill-ignored ones) count.
     /// A failed/non-zero

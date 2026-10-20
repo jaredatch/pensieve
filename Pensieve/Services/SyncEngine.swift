@@ -136,11 +136,9 @@ struct SyncEngine: SyncEngineProtocol {
         try requireAcceptableRemote(at: root)
         try gitService.abortRebase(at: root)
 
-        // Guard BEFORE any write: if the on-disk manifest is newer/unreadable (e.g. a clone of a remote
-        // written by a newer Pensieve), refuse. The after-pull storeUnreadable guard CANNOT catch this —
-        // step 1 below would already have clobbered the newer manifest with our snapshot, so we'd push a
-        // downgrade. Reading it here (before the write) fails fast instead. (PLAN-08 review)
-        try requireReadableManifest(root: root)
+        // A snapshot must never replace unreadable disk state. Committed damage may first move
+        // to a readable peer revision; a newer schema keeps its unconditional refusal.
+        let recoveredByPull = try recoverCommittedDamage(root: root, credential: credential)
 
         let headStamp = GitHeadStamp(fileService: fileService)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
@@ -185,7 +183,7 @@ struct SyncEngine: SyncEngineProtocol {
         return .synced(
             pushed: committed,
             warnings: rebuild.warnings,
-            ingestedHeadStamp: ingestedHeadStamp, pulled: pulled
+            ingestedHeadStamp: ingestedHeadStamp, pulled: pulled || recoveredByPull
         )
     }
 
@@ -281,6 +279,27 @@ struct SyncEngine: SyncEngineProtocol {
             }
             try conflictOperation.abortResolution(after: error, root: root, refusedFolder: refusedFolder)
             throw error
+        }
+    }
+
+    /// Recovery moves only committed damage, before prepare, snapshots or local commits can run.
+    private func recoverCommittedDamage(root: String, credential: GitCredential?) throws -> Bool {
+        do {
+            try requireReadableManifest(root: root)
+            return false
+        } catch ManifestError.damaged {
+            guard gitService.isWorktreeClean(at: root) else { throw ManifestError.damaged }
+            do {
+                guard try gitService.manifestMatchesHead(at: root),
+                      case .fastForwarded = try gitService.fastForwardOnly(at: root, credential: credential) else {
+                    throw ManifestError.damaged
+                }
+            } catch {
+                // Fetch, divergence and protected-file refusals leave the repair offer in place.
+                throw ManifestError.damaged
+            }
+            try requireReadableManifest(root: root)
+            return true
         }
     }
 

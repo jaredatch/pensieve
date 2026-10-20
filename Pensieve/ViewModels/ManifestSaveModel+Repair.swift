@@ -27,21 +27,31 @@ extension ManifestSaveModel {
         damageObservationOrder += 1
         requiresNewerVersion = newer
         guard damageRefreshOrder != nil else { return }
-        let order = damageObservationOrder
-        damageRefreshOrder = order
-        Task { @MainActor in
-            guard self.damageObservationOrder == order else { return }
-            await self.refreshAndRetry()
-        }
+        beginDamageRefresh()
     }
 
-    /// Later-started reads and accepted launch/sync verdicts supersede this observation.
+    /// A superseded caller waits for the current read, including its repair token and callback.
     @MainActor
     func refreshDamage() async {
+        beginDamageRefresh()
+        while let task = damageRefreshTask { await task.value }
+    }
+
+    private func beginDamageRefresh() {
         damageObservationOrder += 1
         let order = damageObservationOrder
         damageRefreshOrder = order
-        defer { if damageRefreshOrder == order { damageRefreshOrder = nil } }
+        damageRefreshTask = Task { @MainActor in await self.observeDamage(order: order) }
+    }
+
+    @MainActor
+    private func observeDamage(order: Int) async {
+        defer {
+            if damageRefreshOrder == order {
+                damageRefreshOrder = nil
+                damageRefreshTask = nil
+            }
+        }
         let pending = items.contains {
             StoreIngestState.shared(for: $0.presentation.context.container).needsRebuild
         }
@@ -63,6 +73,10 @@ extension ManifestSaveModel {
         libraryDamaged = observation.0 == .damaged
         requiresNewerVersion = observation.0 == .newer
         if !libraryDamaged { pausedForRepair = false; showsDamageAlert = false }
+        if observation.0 == .readable {
+            cancelRepair()
+            repairError = nil
+        }
         if !showsDamageAlert, !showsRepairConfirmation { damage = observation.1 }
         if wasDamaged, observation.0 == .readable { await didReadRepairedLibrary() }
         if !libraryDamaged { retryWaitingEdits() }
@@ -89,13 +103,12 @@ extension ManifestSaveModel {
 
     @MainActor
     func replaceWithThisMac(context: ModelContext) async {
-        let expected = confirmedDamage
+        guard let expected = confirmedDamage else { return }
         cancelRepair()
         repairError = nil
         var held: SyncLock?
         defer { held?.release(); isWaiting = false; if libraryDamaged { pausedForRepair = true } }
         do {
-            guard let expected else { throw ManifestError.damaged }
             pausedForRepair = false
             held = try await takeLock()
             let snapshot = try manifest.snapshot(from: context)

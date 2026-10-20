@@ -49,6 +49,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Sync can pull a repaired library file from another Mac when the damage is already committed and this Mac has no pending file changes. Waiting edits then save, and the repair offer closes.
+
 - A queued library edit retries when another tool commits to the library during its save, instead of being undone.
 
 - Installs and imports work when your library folder is a symbolic link, including a link to another volume.

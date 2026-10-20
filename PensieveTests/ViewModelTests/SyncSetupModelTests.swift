@@ -33,6 +33,9 @@ final class SyncSetupModelTests: XCTestCase {
     /// Records call order + scriptable results. Every op appends a tag to `calls`; `throwAuthOn` names
     /// a call that should throw `authenticationFailed`.
     private final class RecordingGitService: GitServiceProtocol {
+        func isWorktreeClean(at path: String) -> Bool { false }
+        func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+        func manifestMatchesHead(at path: String) throws -> Bool { false }
         var beforeCall: ((String) -> Void)?
         private(set) var calls: [String] = []
         let trace: EventTrace

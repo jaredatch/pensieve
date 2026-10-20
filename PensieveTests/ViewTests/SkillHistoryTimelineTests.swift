@@ -119,6 +119,9 @@ final class SkillHistoryTimelineTests: XCTestCase {
 }
 
 final class SkillHistoryRecordingGit: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { false }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+    func manifestMatchesHead(at path: String) throws -> Bool { false }
     struct LogCall: Equatable {
         let path: String
         let workingDir: String
