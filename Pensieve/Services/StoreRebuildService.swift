@@ -194,7 +194,8 @@ extension StoreRebuildService {
         } catch {
             result.skillListFailed = true
             result.reportIngestFailure(
-                "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows.")
+                "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows. "
+                    + error.localizedDescription)
             return nil
         }
     }

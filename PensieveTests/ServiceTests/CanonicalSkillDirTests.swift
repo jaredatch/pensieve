@@ -77,7 +77,12 @@ final class CanonicalSkillDirTests: XCTestCase {
         try fileService.writeFile(at: outside + "/victim/SKILL.md", content: "precious")
         try fileService.deleteDirectory(at: baseDir)
         try fileService.createSymlink(at: baseDir, pointingTo: outside)
-        let store = SkillStore(fileService: fileService, baseDir: baseDir, storeRoot: tempDir)
+        let observed = RebuildReadFileService()
+        observed.beforeCreateDirectory = { path in XCTFail("Linked container must refuse before mkdir: " + path) }
+        let store = SkillStore(fileService: observed, baseDir: baseDir, storeRoot: tempDir)
+        XCTAssertThrowsError(try store.slugEntryExists("victim"))
+        XCTAssertThrowsError(try store.createSkill(name: "New", description: "New", body: "body"))
+        XCTAssertFalse(fileService.fileExists(at: outside + "/new"))
         XCTAssertNil(SkillStore.safeSkillDirectory(slug: "victim", base: baseDir, fileService: fileService))
         XCTAssertThrowsError(try store.listSkills())
         XCTAssertThrowsError(try store.readBody(directoryName: "victim"))

@@ -44,20 +44,22 @@ extension AppRuntimeTests {
                                                  conflictFinishesFirst: conflictFinishesFirst)
             }
         }
+        try await checkOverlappingRepair(releasedBeforeRepair: 0, conflictFinishesFirst: true, headAdvanced: true)
         try await checkAdvancedCycleRepairConvergence()
     }
 
-    private func checkOverlappingRepair(releasedBeforeRepair: Int, conflictFinishesFirst: Bool) async throws {
+    private func checkOverlappingRepair(releasedBeforeRepair: Int, conflictFinishesFirst: Bool,
+                                        headAdvanced: Bool = false) async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged at launch")
-        let backfills = Counter(), convergence = RepairLifecycleConvergence()
+        let backfills = Counter(), convergence = RepairLifecycleConvergence(fixture: headAdvanced ? h : nil)
         let runtime = try await launchRepairRuntime(h, backfills: backfills, convergence: convergence,
                                                    successfulCycle: true)
         defer { runtime.commandServer?.stop(); runtime.library.stopWatching() }
         let gates = RepairReadGates(owner: self)
         defer { gates.release(conflict: true); gates.release(conflict: false) }
-        let cycle = try await holdOverlappingReads(h, runtime: runtime, gates: gates)
+        let cycle = try await holdOverlappingReads(h, runtime: runtime, gates: gates, headAdvanced: headAdvanced)
         if releasedBeforeRepair > 0 {
             await finishRepairOwner(conflictFirst: conflictFinishesFirst, gates: gates, cycle: cycle, runtime: runtime)
         }
@@ -76,11 +78,12 @@ extension AppRuntimeTests {
         await TestWait.until(failureMessage: "Both damage-read gates must drain before joining the cycle") {
             gates.conflict.waiterCount == 0 && gates.cycle.waiterCount == 0
         }
-        XCTAssertEqual(gates.conflict.waiterCount, 0)
-        XCTAssertEqual(gates.cycle.waiterCount, 0)
         let result = await cycle.value
-        guard case let .synced(_, _, _, headAdvanced, _) = result else { return XCTFail("Expected a successful cycle") }
-        XCTAssertFalse(headAdvanced, "The stub cycle must not advance HEAD")
+        guard case let .synced(_, _, _, advanced, _) = result else { return XCTFail("Expected a successful cycle") }
+        XCTAssertEqual(advanced, headAdvanced)
+        if headAdvanced {
+            XCTAssertEqual(convergence.ledgerPasses, 2, "Launch and the overlapping advanced cycle each reconcile ledgers")
+        }
         await waitForConflictCompletion(runtime)
         XCTAssertEqual(backfills.value, 1, "Local repair must retain the launch callback after overlapping outcomes")
         XCTAssertEqual(convergence.launches, 1)
@@ -117,7 +120,7 @@ extension AppRuntimeTests {
     }
 
     private func holdOverlappingReads(_ h: ManifestSaveFixture, runtime: AppRuntime,
-                                      gates: RepairReadGates) async throws -> Task<SyncCycleResult, Never> {
+                                      gates: RepairReadGates, headAdvanced: Bool) async throws -> Task<SyncCycleResult, Never> {
         await TestWait.until(failureMessage: "Launch damage read must finish") {
             h.saves.damage != nil && h.saves.damageRefreshTask == nil
         }
@@ -125,7 +128,12 @@ extension AppRuntimeTests {
         try runtime.beginConflictResolution()(.synced(pushed: false, warnings: [], completedAt: Date(), headAdvanced: false))
         await TestWait.until(failureMessage: "Conflict completion must hold its damage read") { gates.conflict.waiterCount == 1 }
         h.recording.afterReadFailure = { try gates.cycle.wait() }
-        let cycle = Task { await runtime.syncModel.syncCycleForCommand() }
+        let cycle = Task {
+            if !headAdvanced { return await runtime.syncModel.syncCycleForCommand() }
+            let result = SyncCycleResult.synced(pushed: false, warnings: [], completedAt: Date(), headAdvanced: true)
+            await runtime.applyLibrarySyncOutcome(result)
+            return result
+        }
         await TestWait.until(failureMessage: "A successful cycle must overlap conflict completion") {
             gates.cycle.waiterCount == 2
         }
@@ -289,13 +297,14 @@ private final class RepairLifecycleConvergence: PostSyncConverging {
     func runAfterLaunchIngest() { launches += 1; delegate?.runAfterLaunchIngest() }
 }
 
-/// Grants exactly the held reads: one conflict read and two cycle observations. Repeated
+/// Grants exactly the held conflict and cycle reads. Repeated
 /// cleanup calls grant no extra permits; an unexpected later read still times out in TestWait.Gate.
 @MainActor
 private final class RepairReadGates {
     let conflict: TestWait.Gate
     let cycle: TestWait.Gate
-    private var released: Set<Bool> = []
+    private var releasedConflict = false
+    private var releasedCycle = false
 
     init(owner: XCTestCase) {
         conflict = TestWait.Gate(owner: owner)
@@ -303,9 +312,14 @@ private final class RepairReadGates {
     }
 
     func release(conflict isConflict: Bool) {
-        guard released.insert(isConflict).inserted else { return }
-        if isConflict { conflict.open() } else {
-            // The verdict supersedes the old observation; the cycle also requests its own refresh.
+        if isConflict {
+            guard !releasedConflict else { return }
+            releasedConflict = true
+            conflict.open()
+        } else {
+            guard !releasedCycle else { return }
+            releasedCycle = true
+            // The verdict supersedes the old observation; the outcome also requests its own refresh.
             cycle.open()
             cycle.open()
         }

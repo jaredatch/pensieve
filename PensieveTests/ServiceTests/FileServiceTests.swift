@@ -279,7 +279,44 @@ final class FileServiceTests: XCTestCase {
     }
 }
 
-private struct InertMetadataFileService: FileServiceProtocol {
+extension FileServiceTests {
+    func testWritableMetadataRefusesOversizedGitdirFile() throws {
+        let metadata = tempDir + "/metadata", root = tempDir + "/store"
+        try fileService.createDirectory(at: metadata)
+        try fileService.createDirectory(at: root)
+        try fileService.writeFile(at: root + "/.git", content:
+            "gitdir: ../metadata\n" + String(repeating: "\n", count: 64 * 1_024))
+        XCTAssertThrowsError(try fileService.storeMetadataDirectory(root: root))
+        try fileService.writeFile(at: root + "/.git", content: "gitdir: ../metadata\n")
+        XCTAssertEqual(try fileService.storeMetadataDirectory(root: root), try fileService.resolveRealPath(at: metadata))
+    }
+
+    func testRelativeStoreLocationTerminatesWhenCwdCannotResolve() throws {
+        let files = InertMetadataFileService()
+        XCTAssertThrowsError(try files.resolvedStoreLocation(root: "skills")) { error in
+            XCTAssertEqual((error as NSError).code, CocoaError.fileNoSuchFile.rawValue)
+        }
+        XCTAssertLessThanOrEqual(files.resolutionAttempts, 2, "An unresolvable dot must terminate parent traversal")
+        files.resolutionAttempts = 0
+        files.resolvableCwd = "/resolved/cwd"
+        XCTAssertEqual(try files.resolvedStoreLocation(root: "skills").path, "/resolved/cwd/skills")
+    }
+
+}
+
+/// Models only metadata primitives. Relative-path cases bound probes so a recursion regression fails without crashing.
+private final class InertMetadataFileService: FileServiceProtocol {
+    var resolutionAttempts = 0
+    var resolvableCwd: String?
+    func resolveRealPath(at path: String) throws -> String {
+        resolutionAttempts += 1
+        if path == ".", let resolvableCwd { return resolvableCwd }
+        throw CocoaError(.fileNoSuchFile)
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        guard resolutionAttempts < 16 else { throw CocoaError(.fileReadUnknown) }
+        return nil
+    }
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws {}
     func deleteFile(at path: String) throws {}

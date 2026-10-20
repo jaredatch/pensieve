@@ -4,20 +4,36 @@ import SwiftData
 extension ManifestSaveModel {
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
 
+    struct StagedRefusal {
+        let id: UUID
+        let order: Int
+        let complete: () -> Void
+    }
+
     struct SaveResult {
         let published: Bool
         let error: Error?
     }
 
-    struct Publication {
-        let snapshot: ManifestSnapshot
-        let published: Bool
-        let headChanged: Bool
+    enum Publication {
+        case skipped(ManifestSnapshot)
+        case saved(ManifestSnapshot)
+        case headChanged
     }
 
     struct ManifestRead {
         let disk: ManifestSnapshot?
         let head: GitHeadStamp.State
+    }
+
+    private struct RebuildObservation {
+        let value: PreparedStoreRebuild
+        let before: GitHeadStamp.State
+        let after: GitHeadStamp.State
+        var stable: Bool { before == after }
+        var ingest: StoreIngestState.Observation<PreparedStoreRebuild> {
+            .init(value: value, before: before.oid, after: after.oid)
+        }
     }
 
     @MainActor
@@ -44,13 +60,12 @@ extension ManifestSaveModel {
                 guard observation.stable else { throw SyncError.ingestIncomplete }
                 _ = try acceptRebuild(item, prepared: observation.value, durable: observation.value.snapshot,
                                       includingHeadEdit: false)
-                StoreIngestState.shared(for: item.presentation.context.container).accept(observation, result: RebuildResult())
+                StoreIngestState.shared(for: item.presentation.context.container)
+                    .accept(observation.ingest, result: RebuildResult())
             }
             return nil
         } catch {
-            StoreIngestState.shared(for: item.presentation.context.container).invalidate()
-            let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
-            return ManifestSaveError.rebuildFailed(cause, manifestSaved: published)
+            return rebuildFailure(error, item: item, manifestSaved: published)
         }
     }
 
@@ -70,51 +85,61 @@ extension ManifestSaveModel {
             if attempt > 0 || ingest.requiresRebuild(at: read.head) {
                 let before = read.head
                 let durable: ManifestSnapshot
-                let observation: StoreIngestState.Observation<PreparedStoreRebuild>
+                let observation: RebuildObservation
                 let verdict: HeadEditVerdict
                 do {
                     durable = try disk ?? item.fallback()
                     observation = try await prepareRebuild(item, durable: durable)
                     // The bracket starts before the manifest read, not just before the skill scan.
-                    guard observation.stable, before.oid == observation.before else { continue }
+                    guard observation.stable, before == observation.before else { continue }
                     verdict = try acceptRebuild(item, prepared: observation.value,
                                                 durable: observation.value.snapshot, includingHeadEdit: true)
-                    ingest.accept(observation, result: RebuildResult())
+                    ingest.accept(observation.ingest, result: RebuildResult())
                     acceptedFinalAttempt = true
-                } catch { throw failedPreSaveRebuild(error, item: item) }
+                } catch { throw rebuildFailure(error, item: item, manifestSaved: item.wasHealed) }
                 switch verdict {
                 case .ready(let scan): prepared = scan
                 case .refused(let error): throw error
                 }
-                head = observation.after.map(GitHeadStamp.State.resolved) ?? read.head
+                head = observation.after
             }
             // Check again on the publication worker, after acceptance and immediately before writing.
             guard let result = try await publish(item, disk: disk, head: head) else { continue }
-            if result.headChanged {
-                return SaveResult(published: result.published, error: SyncError.ingestIncomplete)
-            }
-            let error = await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
-            return SaveResult(published: result.published, error: error)
+            return await finishPublication(result, item: item, prepared: prepared)
         }
         if acceptedFinalAttempt { throw SyncError.ingestIncomplete }
-        throw failedPreSaveRebuild(SyncError.ingestIncomplete, item: item)
+        throw rebuildFailure(SyncError.ingestIncomplete, item: item, manifestSaved: item.wasHealed)
     }
 
-    private func failedPreSaveRebuild(_ error: Error, item: Item) -> ManifestSaveError {
+    private func finishPublication(_ result: Publication, item: Item,
+                                   prepared: PreparedStoreRebuild?) async -> SaveResult {
+        switch result {
+        case .headChanged:
+            return SaveResult(published: true, error: ManifestSaveError.rebuildFailed(
+                SyncError.ingestIncomplete.localizedDescription, manifestSaved: true))
+        case .saved(let snapshot), .skipped(let snapshot):
+            let published: Bool = if case .saved = result { true } else { false }
+            let error = await rebuild(item, durable: snapshot, published: published, prepared: prepared)
+            return SaveResult(published: published, error: error)
+        }
+    }
+
+    private func rebuildFailure(_ error: Error, item: Item, manifestSaved: Bool) -> ManifestSaveError {
         StoreIngestState.shared(for: item.presentation.context.container).invalidate()
         let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
-        return .rebuildFailed(cause, manifestSaved: item.wasHealed)
+        return .rebuildFailed(cause, manifestSaved: manifestSaved)
     }
 
     @MainActor
     private func prepareRebuild(_ item: Item, durable: ManifestSnapshot) async throws
-        -> StoreIngestState.Observation<PreparedStoreRebuild> {
+        -> RebuildObservation {
         let container = item.presentation.context.container, files = files, manifest = manifest, root = root
         return try await BlockingWork.run {
-            try StoreIngestState.observe(head: { GitHeadStamp(fileService: files).read(root: root) }, rebuild: {
-                try StoreRebuildService(fileService: files, manifestService: manifest)
-                    .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
-            })
+            let stamp = GitHeadStamp(fileService: files)
+            let before = stamp.state(root: root)
+            let prepared = try StoreRebuildService(fileService: files, manifestService: manifest)
+                .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
+            return RebuildObservation(value: prepared, before: before, after: stamp.state(root: root))
         }
     }
 

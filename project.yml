@@ -122,9 +122,6 @@ targets:
       - path: Pensieve/Services/SkillParser+Preservation.swift
       - path: Pensieve/Services/SkillSerializer.swift
       - path: Pensieve/Services/CheckedYAMLLoader.swift
-      - path: Pensieve/Services/ManifestTypes.swift
-      - path: Pensieve/Services/ManifestService.swift
-      - path: Pensieve/Services/ManifestService+DeployIntents.swift
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Utilities/BlockingWork.swift
@@ -166,6 +163,7 @@ targets:
       - path: Pensieve/Models/PlatformTarget.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/GitDirectoryText.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
       base:
@@ -247,6 +245,7 @@ targets:
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/GitDirectoryText.swift
       - path: Pensieve/Utilities/RuntimePaths.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
@@ -287,6 +286,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/GitDirectoryText.swift
       - path: Pensieve/Services/CLIProtocol.swift
       - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/SocketPeerCredentials.swift

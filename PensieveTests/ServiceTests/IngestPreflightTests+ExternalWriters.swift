@@ -62,7 +62,10 @@ extension IngestPreflightTests {
     func testUnchangedHeadSkipsImportAndDeployRebuild() async throws {
         for linked in [false, true] {
             for writer in ExternalWriter.allCases {
-                let configurations = writer == .importSkill ? ["plain", "sparse", "v0", "v1"] : ["plain"]
+                // The shared HEAD reader is independent of the writer. Import owns the full format
+                // sweep; deployment also checks v1 so that assumption has a second caller.
+                let configurations = writer == .importSkill ? ["plain", "sparse", "v0", "v1"]
+                    : (writer == .windowDeploy ? ["plain", "v1"] : ["plain"])
                 for configuration in configurations {
                     try await assertUnchangedWriter(writer, linked: linked, configuration: configuration)
                 }

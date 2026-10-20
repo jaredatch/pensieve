@@ -40,7 +40,7 @@ final class ManifestSaveModel {
     private typealias OrderedCategoryNotice = (order: Int, entry: CategorySaveNotice.Entry)
     @ObservationIgnored private var nextOrder = 0
     @ObservationIgnored private var categoryMessages: [OrderedCategoryNotice] = []
-    @ObservationIgnored var stagedRefusals: [(id: UUID, complete: () -> Void)] = []
+    @ObservationIgnored var stagedRefusals: [StagedRefusal] = []
     @ObservationIgnored var worker: Task<Void, Never>?
 
     struct Item {
@@ -132,7 +132,7 @@ final class ManifestSaveModel {
             heldLock = try await takeLock()
             let read = try await readCurrentManifest()
             let result = try await saveWithStableHead(item, disk: &disk, first: read)
-            outcome = .finished(result.published && result.error == nil)
+            outcome = .finished(result.published)
             report = { item.report(result.error) }
         } catch {
             if case ManifestError.damaged = error {
@@ -198,7 +198,7 @@ final class ManifestSaveModel {
             }
             if !item.change.isDeletion {
                 log("Skipped queued manifest change: its target was removed by sync.")
-                return Publication(snapshot: saved, published: false, headChanged: false)
+                return .skipped(saved)
             }
         }
         let snapshot = saved, manifest = manifest, root = root, files = files
@@ -217,7 +217,7 @@ final class ManifestSaveModel {
             ingest.finish(items[index].id)
         }
         refused = refused.filter { $0.acknowledge(durable: saved) }
-        return Publication(snapshot: saved, published: true, headChanged: headChanged)
+        return headChanged ? .headChanged : .saved(saved)
     }
 
     @MainActor
@@ -297,12 +297,13 @@ extension ManifestSaveModel {
     @MainActor
     func stageCategoryRefusal(_ item: Item, durable: ManifestSnapshot?, error: Error) {
         guard !stagedRefusals.contains(where: { $0.id == item.id }) else { return }
-        stagedRefusals.append((item.id, prepareCategoryRefusal(item, durable: durable, error: error)))
+        stagedRefusals.append(.init(id: item.id, order: item.order,
+                                   complete: prepareCategoryRefusal(item, durable: durable, error: error)))
     }
 
     @MainActor
     func finishStagedRefusals() {
-        let completions = stagedRefusals
+        let completions = stagedRefusals.sorted { $0.order < $1.order }
         stagedRefusals = []
         for completion in completions { completion.complete() }
     }

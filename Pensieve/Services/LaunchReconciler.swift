@@ -232,7 +232,8 @@ struct LaunchReconciler {
     /// legacy/content-free-manifest cases whose existing rows must bootstrap migration.
     private func hasUnmanagedSkillOnDisk(root: String, context: ModelContext) -> Bool {
         let skillsRoot = root + "/skills"
-        guard let rows = try? context.fetch(FetchDescriptor<Skill>()),
+        guard (try? fileService.storeContainerExists(at: skillsRoot)) == true,
+              let rows = try? context.fetch(FetchDescriptor<Skill>()),
               let entries = try? fileService.listDirectory(at: skillsRoot) else {
             return false
         }

@@ -32,10 +32,11 @@ struct SyncLocalCommit {
                 git: GitServiceProtocol, state: StoreIngestState) {
         guard let parent, let head else { return }
         if parent == head { state.recordLocalCommit(from: parent, to: head); return }
-        guard let outputs else { return }
-        let expected = GitTreeExpectation(files: outputs,
-            deletablePaths: Set([".gitattributes", ".gitignore", StoreIgnoreRules.receiptFile].map { Data($0.utf8) }),
-            deletablePrefixes: [Data("manifest/".utf8)], ignoredPrefixes: [Data("machines/".utf8)])
+        let expected = GitTreeExpectation(files: outputs ?? [:],
+            deletablePaths: outputs == nil ? []
+                : Set([".gitattributes", ".gitignore", StoreIgnoreRules.receiptFile].map { Data($0.utf8) }),
+            deletablePrefixes: outputs == nil ? [] : [Data("manifest/".utf8)],
+            ignoredPrefixes: outputs == nil ? [] : [Data("machines/".utf8)])
         guard (try? git.localCommitMatches(expected, from: parent, to: head, at: root)) == true else { return }
         state.recordLocalCommit(from: parent, to: head)
     }

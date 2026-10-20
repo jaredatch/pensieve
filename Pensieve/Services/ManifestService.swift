@@ -42,6 +42,7 @@ struct ManifestService: ManifestReadWriting {
         guard try admitsWrite(root: root, replacing: damage) else { return false }
         try validateSnapshotForWrite(snapshot)
 
+        // Every app writer holds sync.lock, which also protects these temporaries from the launch sweep.
         // Complete the tree outside the store, on its device, before the atomic swap.
         let tmpDir = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: "manifest-build")
         let categoriesDir = tmpDir + "/categories"
@@ -157,7 +158,7 @@ struct ManifestService: ManifestReadWriting {
         let categoriesDir = manifestDir + "/categories"
         guard try manifestDirectoryExists(at: categoriesDir) else { return [] }
         for entry in try fileService.listDirectory(at: categoriesDir)
-            where !Self.ignoresEntry(at: Data(("categories/" + entry).utf8)) {
+            where !ManifestReaderPolicy.ignoresEntry(at: Data(("categories/" + entry).utf8)) {
             guard let content = try? readManifestText(at: categoriesDir + "/" + entry),
                   let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                   let name = obj["name"] as? String else {
@@ -177,7 +178,7 @@ struct ManifestService: ManifestReadWriting {
         let skillsDir = manifestDir + "/skills"
         if try manifestDirectoryExists(at: skillsDir) {
             for entry in try fileService.listDirectory(at: skillsDir)
-                where !Self.ignoresEntry(at: Data(("skills/" + entry).utf8)) {
+                where !ManifestReaderPolicy.ignoresEntry(at: Data(("skills/" + entry).utf8)) {
                 guard let content = try? readManifestText(at: skillsDir + "/" + entry),
                       let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
                       let slug = obj["slug"] as? String else {

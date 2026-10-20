@@ -1,31 +1,6 @@
 import Foundation
 
 extension ManifestService {
-    /// Reader visibility for a byte path relative to manifest/. Recovery uses the same policy
-    /// before decoding Git's untracked names; the flat readers inspect only their immediate child.
-    static func ignoresEntry(at relativePath: Data.SubSequence, emptyDirectory: Bool = false) -> Bool {
-        let parts = relativePath.split(separator: 0x2F)
-        guard let first = parts.first else { return false }
-        if emptyDirectory {
-            if parts.count == 1 {
-                return ["categories", "skills", "deploys"].contains { first.elementsEqual($0.utf8) }
-            }
-            guard first.elementsEqual("deploys".utf8), parts.count == 2,
-                  let machine = String(bytes: parts[1], encoding: .utf8),
-                  let uuid = UUID(uuidString: machine) else { return false }
-            return machine == uuid.uuidString
-        }
-        if first.elementsEqual("categories".utf8) || first.elementsEqual("skills".utf8) {
-            return parts.count > 1 && !parts[1].suffix(5).elementsEqual(".yaml".utf8)
-        }
-        if first.elementsEqual("deploys".utf8) {
-            guard parts.count > 1 else { return false }
-            return StoreExclusions.isExcludedFile(relativePath)
-                || parts.dropFirst().contains(where: StoreExclusions.isExcludedDirectory)
-        }
-        return !first.elementsEqual("manifest.yaml".utf8) && !first.elementsEqual("projects.yaml".utf8)
-    }
-
     func writeDeployIntents(_ records: [DeployIntentRecord], to deploysDir: String) throws {
         let grouped = Dictionary(grouping: records) { record in
             record.machineID + "|" + record.skillSlug
@@ -66,7 +41,7 @@ extension ManifestService {
         var seenMachines: [UUID: String] = [:]
         for machineEntry in try fileService.listDirectory(at: deploysDir).sorted() {
             let machineFile = "deploys/" + machineEntry
-            if Self.ignoresEntry(at: Data(machineFile.utf8)) { continue }
+            if ManifestReaderPolicy.ignoresEntry(at: Data(machineFile.utf8)) { continue }
             guard machineEntry == (machineEntry as NSString).lastPathComponent,
                   !PathSyntax.hasSeparator(machineEntry), !machineEntry.contains("\\"),
                   let uuid = UUID(uuidString: machineEntry),
@@ -101,7 +76,7 @@ extension ManifestService {
         var seenSlugs: [String: String] = [:]
         for entry in try fileService.listDirectory(at: directory).sorted() {
             let relativePath = "deploys/" + machineID + "/" + entry
-            if Self.ignoresEntry(at: Data(relativePath.utf8)) { continue }
+            if ManifestReaderPolicy.ignoresEntry(at: Data(relativePath.utf8)) { continue }
             guard entry == (entry as NSString).lastPathComponent,
                   !PathSyntax.hasSeparator(entry), !entry.contains("\\"), entry.hasSuffix(".yaml") else {
                 throw ManifestError.corruptManifestFile(relativePath)

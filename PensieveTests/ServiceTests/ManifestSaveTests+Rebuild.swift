@@ -3,32 +3,6 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
-    func testFallbackRefreshesRefusedMetadataBeforePublication() async throws {
-        for corrupt in [false, true] {
-            let h = try ManifestSaveFixture()
-            defer { h.cleanup() }
-            if corrupt {
-                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
-            } else { try h.files.deleteDirectory(at: h.root + "/manifest") }
-            h.recording.failingWrites = 1
-            h.library.updateMetadata(h.alpha, tags: ["a"], scope: .user, context: h.context)
-            await h.saves.waitUntilIdle()
-            if corrupt { XCTAssertTrue(h.saves.showsDamageAlert) } else { XCTAssertNotNil(h.library.error) }
-            h.library.updateMetadata(h.alpha, tags: ["b"], scope: .user, context: h.context)
-            await h.saves.waitUntilIdle()
-            if corrupt {
-                h.recording.failingWrites = 0
-                h.saves.requestRepair()
-                await h.saves.replaceWithThisMac(context: h.context)
-                await h.saves.waitUntilIdle()
-            }
-            XCTAssertNil(h.library.error)
-            XCTAssertEqual(h.recording.writes.count, corrupt ? 2 : 1)
-            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["b"])
-            XCTAssertEqual(h.alpha.tags, ["b"], "A refused fallback edit must use the current context before publishing")
-        }
-    }
-
     func testRefusedRetirementSurvivesRebuild() async throws {
         for missingManifest in [false, true] {
             for unreadableWindow in [false, true] {

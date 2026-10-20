@@ -17,6 +17,8 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
         entryObservations.increment()
         return try wrapped.entryObservation(at: path)
     }
+    var beforeEntryProbe: ((String) throws -> Void)?
+    var beforeCreateDirectory: ((String) throws -> Void)?
     var beforeUnboundedRead: ((String) throws -> Void)?
     var afterRead: ((String) throws -> Void)?
     var refuseReplacement = false
@@ -78,13 +80,17 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         separateTypeReads.increment()
+        try beforeEntryProbe?(path)
         return try wrapped.entryTypeWithoutFollowingLinks(at: path)
     }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func isUserExecutableFile(at path: String) -> Bool { wrapped.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool { try wrapped.directoryExistsFollowingLinks(at: path) }
-    func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
+    func createDirectory(at path: String) throws {
+        try beforeCreateDirectory?(path)
+        try wrapped.createDirectory(at: path)
+    }
     func createDirectoryWithoutParents(at path: String) throws { try wrapped.createDirectoryWithoutParents(at: path) }
     func writeFileWithoutParents(at path: String, content: String) throws {
         try wrapped.writeFileWithoutParents(at: path, content: content)

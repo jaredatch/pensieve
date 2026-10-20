@@ -407,6 +407,20 @@ extension LaunchReconcilerTests {
     //    but NO manifest on disk. Launch must NOT rebuild off the absent (empty) manifest — that would
     //    delete the category, and the migration would then bake the loss into the bootstrapped manifest.
     //    Instead the rebuild is skipped and migration bootstraps the manifest FROM SwiftData, preserving it.
+    func testLinkedSkillsContainerDoesNotTriggerUnmanagedLaunchIngest() throws {
+        try NativeTestWork.run { [self] in
+            let context = try makeContext()
+            let outside = tempDir + "/outside"
+            try fileService.writeFile(at: outside + "/victim/SKILL.md",
+                content: SkillSerializer.serialize(name: "Victim", description: "Description", body: "precious"))
+            try fileService.createSymlink(at: tempDir + "/skills", pointingTo: outside)
+            let outcome = reconciler.reconcileOnLaunch(context: context, alreadyMigrated: true)
+            XCTAssertFalse(outcome.rebuild.skillListFailed, "Unmanaged detection must continue to skip a linked container")
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 0)
+            XCTAssertFalse(fileService.fileExists(at: tempDir + "/manifest/manifest.yaml"))
+        }
+    }
+
     func testLegacyStoreWithoutManifestPreservesCategories() throws {
         try NativeTestWork.run { [self] in
             let ctx = try makeContext()

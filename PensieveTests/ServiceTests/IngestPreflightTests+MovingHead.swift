@@ -27,9 +27,14 @@ extension IngestPreflightTests {
             // This real commit lands after the queue's guard, inside the manifest writer.
             try self.commitOutsideCategory(fixture)
         }
-        let saves = ManifestSaveModel(manifest: recording, root: fixture.app, lockPath: fixture.base + "/sync.lock")
+        var reports: [String] = []
+        let saves = ManifestSaveModel(manifest: recording, root: fixture.app, lockPath: fixture.base + "/sync.lock",
+                                      log: { reports.append($0) })
         try renameKept(context, saves: saves)
         await saves.waitUntilIdle()
+        XCTAssertEqual(reports.count, 1)
+        XCTAssertTrue(reports.first?.hasPrefix("The sync manifest was saved, but") == true)
+        XCTAssertNil(saves.categoryNotice, "A published category edit is kept")
         let ingest = StoreIngestState.shared(for: context.container)
         XCTAssertTrue(moved)
         XCTAssertEqual(recording.writes.count, 1)

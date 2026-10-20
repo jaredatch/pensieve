@@ -97,7 +97,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
     private func userWideSymlinkCandidates() -> [Candidate] {
         var candidates: [Candidate] = []
         for (dir, platform) in Self.userWideSymlinkDirectories(paths: deployPaths) {
-            if fileService.isSymlink(at: dir) || !fileService.isRealpathContained(dir) {
+            if !fileService.isRealpathContained(dir) {
                 continue
             }
             guard fileService.directoryExists(at: dir),

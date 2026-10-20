@@ -75,10 +75,9 @@ extension SkillInstallService {
         guard externallyHeldLock || lock != nil else { return }
         defer { lock?.release() }
         var locations = [VendorTemporaryDirectory.legacyNamespace(storeRoot: storeRoot)]
-        for kind in ["vendor", "manifest-build", "machine-state"] {
-            if let current = try? VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: fileService, kind: kind) {
-                locations.append(current)
-            }
+        if let parent = try? fileService.storeTemporaryParent(root: storeRoot),
+           let key = try? fileService.storeKey(root: storeRoot) {
+            locations += ["vendor", "manifest-build", "machine-state"].map { (parent, ".pensieve-" + key + "." + $0 + "-") }
         }
         for (parent, prefix) in locations {
             cleanupVendorTemps(fileService: fileService, parent: parent, prefix: prefix)

@@ -19,17 +19,21 @@ extension AppRuntime {
         defer { if successful { successfulLibraryReads -= 1 } }
         library.applySyncCycleOutcome(result)
         await saves?.refreshAndRetry()
-        await performDeferredLaunchBackfillIfNeeded(afterSync: result)
+        await performDeferredLaunchBackfillIfNeeded(trigger: .sync(result))
     }
 
-    func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false, afterSync: SyncCycleResult? = nil) async {
-        if afterRepair, successfulLibraryReads > 0 { return }
-        let mayBackfill = switch afterSync {
-        case nil, .synced?: true
+    enum LaunchBackfillTrigger { case repair, sync(SyncCycleResult) }
+
+    func performDeferredLaunchBackfillIfNeeded(trigger: LaunchBackfillTrigger) async {
+        if case .repair = trigger, successfulLibraryReads > 0 { return }
+        let mayBackfill = switch trigger {
+        case .repair, .sync(.synced): true
         default: false
         }
         let performed = mayBackfill ? await runDeferredLaunchBackfill() : false
-        if performed { finishLaunchBackfill() } else if let afterSync { convergence.run(after: afterSync) }
+        if performed { finishLaunchBackfill() } else if case .sync(let result) = trigger {
+            convergence.run(after: result)
+        }
     }
 
     private func runDeferredLaunchBackfill() async -> Bool {

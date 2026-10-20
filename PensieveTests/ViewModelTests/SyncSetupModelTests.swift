@@ -216,6 +216,12 @@ final class SyncSetupModelTests: XCTestCase {
 
         init(trace: EventTrace = EventTrace()) { self.trace = trace }
 
+        func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+            if symlinks.contains(path) { return .symlink }
+            if dirs.contains(path) { return .directory }
+            if files.contains(path) || regularFiles.contains(path) { return .regular }
+            return nil
+        }
         func directoryExists(at path: String) -> Bool { dirs.contains(path) }
         func listDirectory(at path: String) throws -> [String] {
             if listErrors.contains(path) { throw StubBoom() }
@@ -347,6 +353,30 @@ extension SyncSetupModelTests {
     }
 
     // MARK: - connect: call order
+
+    func testLinkedSkillsContainerRefusesSetupBeforeAnyWrite() async throws {
+        for configured in [false, true] {
+            let files = FileService()
+            let outside = root + "-outside"
+            try files.writeFile(at: outside + "/victim/SKILL.md", content: "precious")
+            try files.createSymlink(at: root + "/skills", pointingTo: outside)
+            if configured { try files.createDirectory(at: root + "/.git") }
+            defer {
+                try? files.deleteDirectory(at: root)
+                try? files.deleteDirectory(at: outside)
+            }
+            let git = RecordingGitService(), credentials = InMemoryCredentialStore()
+            let model = try makeModel(git: git, credentials: credentials,
+                rebuilder: RecordingRebuilder(), fileService: files)
+            await model.connectAndReport(url: "https://fixture.test/owner/library.git", username: "fixture", token: "fixture")
+            guard case .failed(let message) = model.state else { XCTFail("Linked skills must refuse setup"); continue }
+            XCTAssertTrue(message.contains("is a link to another folder"), message)
+            XCTAssertNil(credentials.credential(forHost: "fixture.test"))
+            XCTAssertTrue(git.calls.isEmpty, "The read-only check must refuse before any git write: \(git.calls)")
+            XCTAssertEqual(try files.readFile(at: outside + "/victim/SKILL.md"), "precious")
+            XCTAssertFalse(files.fileExists(at: root + "/manifest"))
+        }
+    }
 
     func testConnectInitAndPushCallOrder() async throws {
         let git = RecordingGitService()   // remoteHasCommits false -> fresh remote, skip pull

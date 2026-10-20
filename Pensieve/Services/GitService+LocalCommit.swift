@@ -44,7 +44,6 @@ extension GitService {
     @_disfavoredOverload
     func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String,
                             at root: String) throws -> Bool {
-        if parent == head { return true }
         let args = ["-C", root, "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames",
                     "--ignore-submodules=none", "-z", parent, head, "--"]
         let output = try runData(args, in: nil)
@@ -73,12 +72,20 @@ extension GitService {
         }
         guard mode == "100644", let bytes = expected.files[path],
               let object = String(bytes: fields[3], encoding: .utf8) else { return false }
-        let blob = Data("blob \(bytes.count)\0".utf8) + bytes
+        let header = Data("blob \(bytes.count)\0".utf8)
         // --no-abbrev returns the repository's full object IDs, including SHA-256 repositories.
         let digest: [UInt8]
         switch object.utf8.count {
-        case 40: digest = Array(Insecure.SHA1.hash(data: blob))
-        case 64: digest = Array(SHA256.hash(data: blob))
+        case 40:
+            var hash = Insecure.SHA1()
+            hash.update(data: header)
+            hash.update(data: bytes)
+            digest = Array(hash.finalize())
+        case 64:
+            var hash = SHA256()
+            hash.update(data: header)
+            hash.update(data: bytes)
+            digest = Array(hash.finalize())
         default: return false
         }
         return digest.map { String(format: "%02x", $0) }.joined() == object

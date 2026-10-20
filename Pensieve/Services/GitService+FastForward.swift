@@ -26,17 +26,19 @@ extension GitService {
         // Git can collapse untracked directories. Excluded leaves are checked as bytes;
         // visible containers match only when the reader permits them and no visible child remains.
         func matches(_ entry: Data.SubSequence) throws -> Bool {
+            let entry = entry.last == 0x2F ? entry.dropLast() : entry
             let parts = entry.split(separator: 0x2F)
             guard parts.first?.elementsEqual("manifest".utf8) == true, let leaf = parts.last else { return false }
             let relative = entry.dropFirst("manifest/".utf8.count)
             if StoreExclusions.isExcludedFile(entry) || StoreExclusions.isExcludedDirectory(leaf),
-               ManifestService.ignoresEntry(at: relative) { return true }
-            guard let name = String(bytes: entry, encoding: .utf8),
+               ManifestReaderPolicy.ignoresEntry(at: relative) { return true }
+            guard ManifestReaderPolicy.ignoresEntry(at: relative, kind: .emptyDirectory),
+                  let name = String(bytes: entry, encoding: .utf8),
                   try fileService.entryTypeWithoutFollowingLinks(at: path + "/" + name) == .directory else { return false }
             let prefix = entry.last == 0x2F ? Data(entry) : Data(entry) + Data([0x2F])
             return try fileService.listDirectory(at: path + "/" + name).allSatisfy {
                 try matches(prefix + Data($0.utf8))
-            } && ManifestService.ignoresEntry(at: relative, emptyDirectory: true)
+            }
         }
         return try untracked.stdout.split(separator: 0).allSatisfy(matches)
     }

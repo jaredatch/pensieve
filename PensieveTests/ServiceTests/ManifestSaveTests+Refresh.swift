@@ -199,7 +199,7 @@ extension ManifestSaveTests {
             }
             await h.saves.waitUntilIdle()
             XCTAssertTrue(completed)
-            XCTAssertEqual(nudges, rebuildFails ? 0 : 1, "An error report must not also announce a successful save")
+            XCTAssertEqual(nudges, 1, "A landed write must nudge sync even when its rebuild failed")
         }
     }
 

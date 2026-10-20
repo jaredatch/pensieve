@@ -141,6 +141,7 @@ struct MachineStateService: MachineStateServicing {
         }
         try fileService.createDirectory(at: directory)
         let destination = directory + "/" + state.machineID + ".yaml"
+        // The coordinator holds sync.lock, as does the launch sweep of abandoned machine-state temporaries.
         let temporary = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: "machine-state")
         do {
             try fileService.writeFile(at: temporary, content: Self.serialize(state))

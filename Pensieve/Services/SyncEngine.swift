@@ -51,7 +51,7 @@ enum SyncError: LocalizedError, Equatable {
     }
 }
 
-/// A recovery refusal still means damaged library; retain the cause for the cycle's UI and audit.
+/// Recovery still reports damage; retain the cause for audit and app-authored credential advice.
 struct ManifestRecoveryFailure: Error {
     let underlying: Error
 }
@@ -295,14 +295,16 @@ struct SyncEngine: SyncEngineProtocol {
             try requireReadableManifest(root: root)
             return false
         } catch ManifestError.damaged {
-            let recovery = Result { () throws -> FastForwardResult in
+            do {
                 guard gitService.isWorktreeClean(at: root),
-                      try gitService.manifestMatchesHead(at: root) else { return .upToDate }
-                return try gitService.fastForwardOnly(at: root, credential: credential)
-            }
-            guard case .success(.fastForwarded) = recovery else {
-                if case let .failure(error) = recovery { throw ManifestRecoveryFailure(underlying: error) }
+                      try gitService.manifestMatchesHead(at: root) else { throw ManifestError.damaged }
+                guard case .fastForwarded = try gitService.fastForwardOnly(at: root, credential: credential) else {
+                    throw ManifestError.damaged
+                }
+            } catch ManifestError.damaged {
                 throw ManifestError.damaged
+            } catch {
+                throw ManifestRecoveryFailure(underlying: error)
             }
             try requireReadableManifest(root: root)
             return true

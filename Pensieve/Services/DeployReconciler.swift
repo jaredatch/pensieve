@@ -144,7 +144,7 @@ final class DeployReconciler: DeployReconciling {
         for agent in agentSkillDirs {
             let agentDir = agent.path
             guard agent.platform.usesSymlinks else { continue }
-            if fileService.isSymlink(at: agentDir) || !fileService.isRealpathContained(agentDir) {
+            if !fileService.isRealpathContained(agentDir) {
                 result.skippedDirs.append(agentDir)
                 continue
             }

@@ -246,7 +246,6 @@ final class SkillStore: SkillStoreProtocol {
     static func safeSkillDirectory(slug: String, base: String, fileService: FileServiceProtocol) -> String? {
         guard let dirPath = skillDirectoryPath(slug: slug, base: base) else { return nil }
         do { _ = try fileService.storeContainerExists(at: base) } catch { return nil }
-        if fileService.isSymlink(at: dirPath) { return nil }
         guard fileService.isRealpathContained(dirPath) else { return nil }
         return dirPath
     }

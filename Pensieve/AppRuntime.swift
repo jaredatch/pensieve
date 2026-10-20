@@ -56,7 +56,6 @@ final class AppRuntime {
     private var didPerformLaunchWork = false
     private var didCompleteLaunchIngest = false
     private var didFinishInitialLaunchCallbacks = false
-
     private var didSignalLaunchIngest = false
     private var launchIngestHeadStamp: String?
     @ObservationIgnored var successfulLibraryReads = 0
@@ -287,7 +286,7 @@ private extension AppRuntime {
         if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
         applyLibraryLaunchOutcome(outcome.rebuild) { [weak self] in
-            await self?.performDeferredLaunchBackfillIfNeeded(afterRepair: true)
+            await self?.performDeferredLaunchBackfillIfNeeded(trigger: .repair)
         }
         needsLaunchBackfillAfterCoordinator = outcome.rebuild.manifestDamaged
             || (!outcome.rebuild.storeUnreadable && !outcome.ingestionNeedsRetry && !result.backfilled)

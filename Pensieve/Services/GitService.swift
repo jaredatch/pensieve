@@ -823,10 +823,9 @@ extension GitService {
             let path = result.stdout.trimmingCharacters(in: .newlines)
             if try fileService.entryExistsWithoutFollowingLinks(at: path) {
                 let commit = try fileService.readFile(at: path).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard [40, 64].contains(commit.utf8.count), commit.utf8.allSatisfy({
-                    (48...57).contains($0) || (97...102).contains($0)
-                }) else { break }
-                return commit
+                guard [40, 64].contains(commit.utf8.count),
+                      let oid = GitObjectID.parse(commit, length: commit.utf8.count, casePolicy: .lowercase) else { break }
+                return oid
             }
         }
         throw GitError.repositoryUnreadable(path: root, detail: "The rebase’s original commit is unavailable.")

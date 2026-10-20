@@ -36,7 +36,7 @@ struct SyncAuthentication {
         return "Connect to \(host) once with ssh in Terminal to check and accept its key, then sync again."
     }
 
-    private struct Failure: LocalizedError {
+    struct Failure: LocalizedError {
         let message: String
         var errorDescription: String? { message }
     }

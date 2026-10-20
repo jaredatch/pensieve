@@ -11,7 +11,9 @@ final class CLISyncHandlerTests: XCTestCase {
             (.noRemote, (1, "not_connected")), (.locked, (1, "sync_running")),
             (.failed("Sign in to Pensieve's HTTPS sync remote."), (1, "sync_failed")),
             (.failed(SyncError.ingestIncomplete.localizedDescription), (1, "sync_failed")),
-            (.storeUnreadable("Newer schema"), (1, "store_unreadable")), (.branchless, (1, "sync_failed"))
+            (.storeUnreadable("Newer schema"), (1, "store_unreadable")),
+            (.manifestDamaged("The synced library file is damaged. Credential advice."), (1, "store_unreadable")),
+            (.branchless, (1, "sync_failed"))
         ]
         for (cycle, expected) in cases {
             let (exit, code) = expected
@@ -23,6 +25,10 @@ final class CLISyncHandlerTests: XCTestCase {
             XCTAssertEqual(result.exitCode, exit)
             XCTAssertEqual(result.envelope.error?.code, code)
             if case let .failed(message) = cycle { XCTAssertEqual(result.envelope.error?.message, message) }
+            if case let .manifestDamaged(message) = cycle {
+                XCTAssertEqual(result.envelope.error?.message, message)
+                XCTAssertEqual(result.envelope.error?.hint, "Open Pensieve to repair the library file.")
+            }
             if case let .synced(pushed, _, _, _, pulled) = cycle {
                 guard case let .object(fields) = result.envelope.data else { return XCTFail("Missing sync result") }
                 XCTAssertEqual(fields["pushed"], .bool(pushed))

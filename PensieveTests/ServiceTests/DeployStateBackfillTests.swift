@@ -325,3 +325,18 @@ private extension DeployStateBackfillTests {
         )
     }
 }
+
+extension DeployStateBackfillTests {
+    @MainActor
+    func testBackfillRefusesLinkedUserSkillsFolder() throws {
+        let context = try makeContext()
+        try makeCanonicalSkill("owned")
+        let folder = try XCTUnwrap(paths.userSkillsRoot(.claudeCode))
+        let outside = tempDir + "/outside"
+        try fileService.createSymlink(at: outside + "/owned", pointingTo: paths.pensieveSkillsDir + "/owned")
+        try fileService.createSymlink(at: folder, pointingTo: outside)
+        makeBackfill().backfill(context: context)
+        XCTAssertTrue(try store.read().records.isEmpty, "A linked user-wide folder must not establish ownership")
+        XCTAssertEqual(try fileService.symlinkTarget(at: outside + "/owned"), paths.pensieveSkillsDir + "/owned")
+    }
+}

@@ -1200,6 +1200,35 @@ extension GitServiceTests {
 }
 
 extension GitServiceTests {
+    func testManifestAdmissionRefusesCollapsedDirectoryThatIsNowALink() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService(), root = tempDir + "/linked-container"
+            try files.createDirectory(at: root)
+            try git.initRepository(at: root)
+            try files.writeFile(at: root + "/manifest/manifest.yaml", content: "damaged\n")
+            _ = try git.stageAllAndCommit(at: root, message: "committed damage")
+            let outside = tempDir + "/outside"
+            try files.createDirectory(at: outside)
+            try files.createSymlink(at: root + "/manifest/categories", pointingTo: outside)
+            let executable = tempDir + "/collapsed-listing-git"
+            // Pin the matcher input produced before a final-component replacement; no timing race is needed.
+            try files.writeExecutableFile(at: executable, content: """
+                #!/bin/sh
+                is_listing() {
+                    \(FakeGitScript.skipGlobalOptions)
+                    [ "$1" = ls-files ]
+                }
+                if is_listing "$@"; then
+                    printf 'manifest/categories/\\0'
+                    exit 0
+                fi
+                exec /usr/bin/git "$@"
+                """ + "\n")
+            let listing = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            XCTAssertFalse(try listing.manifestMatchesHead(at: root), "A collapsed directory's final link must not be followed")
+        }
+    }
+
     func testManifestAdmissionPreservesUntrackedPathBytes() throws {
         try NativeTestWork.run { [self] in
             let files = FileService()

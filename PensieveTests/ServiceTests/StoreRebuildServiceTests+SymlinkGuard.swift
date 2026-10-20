@@ -22,14 +22,49 @@ extension StoreRebuildServiceTests {
                 let result = suppliedSnapshot
                     ? service.rebuild(snapshot: snapshot, fromRoot: tempDir, context: context, manifestIsAuthoritative: true)
                     : service.rebuild(fromRoot: tempDir, context: context)
-                XCTAssertTrue(result.ingestIncomplete || result.storeUnreadable, container)
-                XCTAssertFalse(result.warnings.isEmpty, container)
+                if container == "manifest", !suppliedSnapshot {
+                    XCTAssertTrue(result.manifestDamaged)
+                    XCTAssertEqual(result.warnings, [ManifestError.damaged.localizedDescription])
+                } else {
+                    XCTAssertTrue(result.skillListFailed, container)
+                    let warning = "“" + (path as NSString).abbreviatingWithTildeInPath
+                        + "” is a link to another folder. Pensieve needs a real folder there."
+                    XCTAssertTrue(result.warnings.contains { $0.contains(warning) }, result.warnings.joined())
+                }
                 XCTAssertEqual(Set(try context.fetch(FetchDescriptor<Skill>()).map(\.name)), ["Preserved", "Absent"])
                 XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name), ["Preserved category"])
             }
             try fileService.deleteFile(at: path)
             try FileManager.default.moveItem(atPath: outside, toPath: path)
         }
+    }
+
+    @MainActor
+    func testSkillListingRefusesContainerLinkedAfterTheInitialCheck() throws {
+        try writeSkillFile(slug: "victim", name: "Original", description: "Original")
+        try writeManifest(skills: [overlay("victim")])
+        let snapshot = try manifest.read(fromRoot: tempDir)
+        let context = try makeContext()
+        context.insert(Skill(name: "Preserved", directoryName: "victim"))
+        try context.save()
+        let files = RebuildReadFileService()
+        let path = tempDir + "/skills", outside = tempDir + "/outside"
+        var probes = 0
+        files.beforeEntryProbe = { candidate in
+            guard candidate == path else { return }
+            probes += 1
+            guard probes == 2 else { return }
+            try FileManager.default.moveItem(atPath: path, toPath: outside)
+            try self.fileService.createSymlink(at: path, pointingTo: outside)
+        }
+        let result = StoreRebuildService(fileService: files).rebuild(snapshot: snapshot, fromRoot: tempDir,
+            context: context, manifestIsAuthoritative: true)
+        XCTAssertGreaterThanOrEqual(probes, 2, "The listing must sample the container again")
+        XCTAssertTrue(result.skillListFailed)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.name), ["Preserved"])
+        let warning = "“" + (path as NSString).abbreviatingWithTildeInPath
+            + "” is a link to another folder. Pensieve needs a real folder there."
+        XCTAssertTrue(result.warnings.contains { $0.contains(warning) }, result.warnings.joined())
     }
 
     @MainActor

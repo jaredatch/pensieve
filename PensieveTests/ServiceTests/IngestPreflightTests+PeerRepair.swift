@@ -145,14 +145,17 @@ extension IngestPreflightTests {
             XCTAssertEqual(status.result, "failed")
             XCTAssertTrue(status.detail.contains(authentication ? "Authentication failed" : "missing.git"), status.detail)
             guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
-            XCTAssertEqual(message, "The synced library file is damaged")
-            XCTAssertFalse(message.contains("git -C"), message)
-            XCTAssertFalse(message.contains("fetch origin main"), message)
-            XCTAssertFalse(message.contains(h.f.app), message)
-            XCTAssertFalse(message.contains(h.f.base), message)
-            XCTAssertFalse(message.contains("missing.git"), message)
-            XCTAssertFalse(message.contains("\n"), message)
-            XCTAssertFalse(message.contains("Please make sure"), message)
+            if authentication {
+                XCTAssertEqual(message, ManifestError.damaged.localizedDescription
+                    + ". Sync over HTTPS needs an access token. Add one in Settings › Sync.")
+                XCTAssertFalse(message.contains("git -C"), message)
+                XCTAssertFalse(message.contains("fetch origin main"), message)
+                XCTAssertFalse(message.contains(h.f.app), message)
+                XCTAssertFalse(message.contains(h.f.base), message)
+                XCTAssertFalse(message.contains("missing.git"), message)
+                XCTAssertFalse(message.contains("\n"), message)
+                XCTAssertFalse(message.contains("Please make sure"), message)
+            } else { XCTAssertEqual(message, ManifestError.damaged.localizedDescription) }
             if !authentication {
                 XCTAssertTrue(status.detail.contains("fetch origin main"), status.detail)
                 XCTAssertTrue(status.detail.contains(h.f.app), status.detail)
@@ -179,7 +182,7 @@ extension IngestPreflightTests {
             from: h.f.files.readData(at: h.f.base + "/audit/daemon-status.json"))
         XCTAssertTrue(status.detail.contains("skills/item/.env"), status.detail)
         guard case let .manifestDamaged(message) = h.lastResult else { return XCTFail("Expected damage refusal") }
-        XCTAssertEqual(message, "The synced library file is damaged")
+        XCTAssertEqual(message, ManifestError.damaged.localizedDescription)
     }
 
     private func peerRepairHarness(path: String = "manifest.yaml", committed: Bool = true,
