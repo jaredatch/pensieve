@@ -154,8 +154,8 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    func publish(_ item: Item, disk: ManifestSnapshot?, head: String?) async throws
-        -> (snapshot: ManifestSnapshot, published: Bool)? {
+    func publish(_ item: Item, disk: ManifestSnapshot?, head: GitHeadStamp.State) async throws
+        -> Publication? {
         var saved = try disk ?? item.fallback()
         // A fallback publishes this context's whole window. Capture its queue membership before
         // awaiting the write; another context or an edit submitted during the write is not healed.
@@ -169,24 +169,26 @@ final class ManifestSaveModel {
             }
             if !item.change.isDeletion {
                 log("Skipped queued manifest change: its target was removed by sync.")
-                return (saved, false)
+                return Publication(snapshot: saved, published: false, headChanged: false)
             }
         }
         let snapshot = saved, manifest = manifest, root = root, files = files
-        let published = try await BlockingWork.run {
-            guard GitHeadStamp(fileService: files).read(root: root) == head else { return false }
+        let headChanged = try await BlockingWork.run { () -> Bool? in
+            let stamp = GitHeadStamp(fileService: files)
+            guard stamp.state(root: root) == head else { return nil }
             try manifest.write(snapshot, toRoot: root)
-            return true
+            return stamp.state(root: root) != head
         }
-        guard published else { return nil }
+        guard let headChanged else { return nil }
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
+        if headChanged { ingest.invalidate() }
         ingest.finish(item.id)
         for index in items.indices where healedItems.contains(items[index].id) {
             items[index].wasHealed = true
             ingest.finish(items[index].id)
         }
         refused = refused.filter { $0.acknowledge(durable: saved) }
-        return (saved, true)
+        return Publication(snapshot: saved, published: true, headChanged: headChanged)
     }
 
     @MainActor

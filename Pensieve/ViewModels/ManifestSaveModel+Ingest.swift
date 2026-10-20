@@ -4,6 +4,12 @@ import SwiftData
 extension ManifestSaveModel {
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
 
+    struct Publication {
+        let snapshot: ManifestSnapshot
+        let published: Bool
+        let headChanged: Bool
+    }
+
     struct ManifestRead {
         let disk: ManifestSnapshot?
         let head: GitHeadStamp.State
@@ -46,14 +52,16 @@ extension ManifestSaveModel {
     @MainActor
     func saveWithStableHead(_ item: Item, disk: inout ManifestSnapshot?, first: ManifestRead) async throws -> Bool {
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
+        var acceptedFinalAttempt = false
         for attempt in 0..<3 {
+            acceptedFinalAttempt = false
             // Read refusals have the same meaning on the first attempt and on a retry.
             let read = attempt == 0 ? first : try await readCurrentManifest()
             disk = read.disk
             if disk == nil, ingest.needsRebuild { throw ManifestError.damaged }
             refreshRefused(durable: disk)
             var prepared: PreparedStoreRebuild?
-            var head = read.head.oid
+            var head = read.head
             if attempt > 0 || ingest.requiresRebuild(at: read.head) {
                 let before = read.head
                 let durable: ManifestSnapshot
@@ -67,18 +75,24 @@ extension ManifestSaveModel {
                     verdict = try acceptRebuild(item, prepared: observation.value,
                                                 durable: observation.value.snapshot, includingHeadEdit: true)
                     ingest.accept(observation, result: RebuildResult())
+                    acceptedFinalAttempt = true
                 } catch { throw failedPreSaveRebuild(error, item: item) }
                 switch verdict {
                 case .ready(let scan): prepared = scan
                 case .refused(let error): throw error
                 }
-                head = observation.after
+                head = observation.after.map(GitHeadStamp.State.resolved) ?? read.head
             }
             // Check again on the publication worker, after acceptance and immediately before writing.
             guard let result = try await publish(item, disk: disk, head: head) else { continue }
+            if result.headChanged {
+                item.report(SyncError.ingestIncomplete)
+                return result.published
+            }
             await rebuild(item, durable: result.snapshot, published: result.published, prepared: prepared)
             return result.published
         }
+        if acceptedFinalAttempt { throw SyncError.ingestIncomplete }
         throw failedPreSaveRebuild(SyncError.ingestIncomplete, item: item)
     }
 
