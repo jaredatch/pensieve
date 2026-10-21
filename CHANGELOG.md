@@ -56,6 +56,13 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Installs and imports work when your library folder is a symbolic link, including a link to another volume.
 
+- Saving to a library kept in a linked git worktree, or in a repository made with `--separate-git-dir`, no longer rereads the whole library first when nothing changed.
+- Changes another tool leaves uncommitted in your library now show up after sync commits them, instead of being skipped by the next import, deploy change or save.
+- If sync can't sign in while it checks your other Macs for a fixed library file, the damage message now says how to fix the sign-in in Settings › Sync, so you don't replace the file when the problem is your access token.
+- Connecting sync refuses a library whose `skills` folder is a link or isn't a folder, and names the folder, before it changes anything.
+- When another tool commits to the library while an edit saves, the message now says the edit was saved.
+- When git refuses to abort a conflicted sync for a reason that isn't about one folder, Pensieve shows git's own message.
+
 - If saving a new project fails, Pensieve cleans up its new identity marker when it can. Retrying reuses any marker left behind, and simultaneous adds share one registration.
 
 - Importing, deploying, installing or updating skills, removing a project and saving edits now keep category changes pulled by another process, even before the app’s next sync.
