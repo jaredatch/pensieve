@@ -34,7 +34,7 @@ extension IngestPreflightTests {
         await saves.waitUntilIdle()
         XCTAssertEqual(reports.count, 1)
         XCTAssertEqual(reports.first, "The sync manifest was saved, but rebuilding the local store failed: "
-            + ManifestSaveModel.headMovedCause)
+            + "the store changed on disk at the same moment. Pensieve reads it again before your next change.")
         XCTAssertNil(saves.categoryNotice, "A published category edit is kept")
         let ingest = StoreIngestState.shared(for: context.container)
         XCTAssertTrue(moved)

@@ -13,8 +13,6 @@ final class UntrustedSkillRewriteTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        let temporary = try TestStoreTemporary(root: root + "/store", files: files)
-        try files.files.removeEmptyDirectory(at: temporary.parent)
         try files.deleteDirectory(at: root)
     }
 

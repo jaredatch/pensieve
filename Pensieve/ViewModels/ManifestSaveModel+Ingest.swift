@@ -2,8 +2,6 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
-    static let headMovedCause = "the store changed on disk at the same moment. Pensieve reads it again before your next change."
-
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
 
     struct StagedRefusal {
@@ -118,7 +116,7 @@ extension ManifestSaveModel {
         switch result {
         case .headChanged:
             return SaveResult(published: true, error: ManifestSaveError.rebuildFailed(
-                Self.headMovedCause,
+                "the store changed on disk at the same moment. Pensieve reads it again before your next change.",
                 manifestSaved: true))
         case .saved(let snapshot), .skipped(let snapshot):
             let published: Bool = if case .saved = result { true } else { false }

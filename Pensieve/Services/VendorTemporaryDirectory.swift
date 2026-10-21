@@ -27,7 +27,15 @@ enum VendorTemporaryDirectory {
 
     static func makePath(storeRoot: String, fileService: FileServiceProtocol, kind: String = "vendor") throws -> String {
         let location = try namespace(storeRoot: storeRoot, fileService: fileService, kind: kind)
-        try fileService.createDirectory(at: location.parent)
+        if try !fileService.storeContainerExists(at: location.parent) {
+            do {
+                try fileService.createDirectory(at: location.parent)
+            } catch {
+                // A concurrent creator is fine only when it left a real directory.
+                guard (try? fileService.storeContainerExists(at: location.parent)) == true else { throw error }
+            }
+        }
+        // Recheck after creation, which may have raced a file or link into this name.
         guard try fileService.storeContainerExists(at: location.parent) else { throw CocoaError(.fileNoSuchFile) }
         return location.parent + "/" + location.prefix + UUID().uuidString + ".tmp"
     }
