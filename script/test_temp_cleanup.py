@@ -10,7 +10,8 @@ UUID = r"[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}"
 UUID_NAME = re.compile(UUID + r"\Z")
 PROCESS_NAME = re.compile(UUID + r"-[0-9]+-[0-9A-Fa-f]+\Z")
 TEMPORARY_NAME = re.compile(r"TemporaryDirectory\.[A-Za-z0-9]{6}\Z")
-ROOT_NAME = re.compile("|".join(pattern.pattern for pattern in (UUID_NAME, PROCESS_NAME, TEMPORARY_NAME)))
+STORE_NAME = re.compile(r"\.pensieve-(?:[0-9a-f]{64}|store-writes-.+)\Z")
+ROOT_NAME = re.compile("|".join(pattern.pattern for pattern in (UUID_NAME, PROCESS_NAME, TEMPORARY_NAME, STORE_NAME)))
 ICON_NAME = re.compile(r"Pensieve1024x1024_[A-Za-z0-9]+_" + UUID + r"-([0-9]+)-[0-9A-Fa-f]+\.png\Z")
 
 
@@ -71,11 +72,12 @@ def sweep_directory(directory, name_pattern, cutoff, deadline):
                     if not name_pattern.fullmatch(entry.name):
                         continue
                     try:
-                        if entry.is_dir(follow_symlinks=False) and entry.stat(follow_symlinks=False).st_mtime < cutoff:
+                        if entry.is_dir(follow_symlinks=False) and (STORE_NAME.fullmatch(entry.name) or
+                                                                 entry.stat(follow_symlinks=False).st_mtime < cutoff):
                             if UUID_NAME.fullmatch(entry.name) or TEMPORARY_NAME.fullmatch(entry.name):
                                 remove_artifact(descriptor, entry.name, cutoff, deadline)
                             else:
-                                # Process folders are eligible only when rmdir proves them empty.
+                                # Process and store folders are eligible only when rmdir proves them empty.
                                 os.rmdir(entry.name, dir_fd=descriptor)
                     except OSError:
                         pass

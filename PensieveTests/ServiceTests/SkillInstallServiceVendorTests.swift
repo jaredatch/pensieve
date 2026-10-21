@@ -336,6 +336,7 @@ extension SkillInstallServiceTests {
 
     func assertNoVendorTemps(root: String, file: StaticString = #filePath, line: UInt = #line) throws {
         let location = try VendorTemporaryDirectory.namespace(storeRoot: root, fileService: fileService)
+        guard fileService.directoryExists(at: location.parent) else { return }
         XCTAssertFalse(try fileService.listDirectory(at: location.parent).contains { $0.hasPrefix(location.prefix) },
                        file: file, line: line)
     }

@@ -45,6 +45,8 @@ protocol FileServiceProtocol {
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
+    /// Remove only an empty directory entry, without following a link.
+    func removeEmptyDirectory(at path: String) throws
     /// Atomically publish a sibling directory over an absent or empty directory only.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
@@ -76,9 +78,6 @@ protocol FileServiceProtocol {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
-    /// Path-only default for modeled filesystems; concrete FileService admits a same-device system location.
-    func storeTemporaryParent(root: String) throws -> String { (root as NSString).deletingLastPathComponent }
-
     /// Unmodeled endpoints never create host files.
     func makeSocketListener(at path: String) throws -> SocketListener { throw CocoaError(.featureUnsupported) }
     /// Unmodeled folder copies refuse without host I/O.

@@ -98,6 +98,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
         try wrapped.createSymlinkWithoutParents(at: linkPath, pointingTo: targetPath)
     }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
         try wrapped.createSymlink(at: linkPath, pointingTo: targetPath)

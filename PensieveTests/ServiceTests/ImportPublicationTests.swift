@@ -46,6 +46,7 @@ final class ImportPublicationTests: XCTestCase {
 
     private func temps() throws -> [String] {
         let location = try VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: files)
+        guard files.directoryExists(at: location.parent) else { return [] }
         return try files.listDirectory(at: location.parent).filter { $0.hasPrefix(location.prefix) }
             .map { location.parent + "/" + $0 }
     }

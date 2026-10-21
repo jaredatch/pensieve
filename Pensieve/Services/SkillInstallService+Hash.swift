@@ -39,30 +39,31 @@ extension SkillInstallService {
             excludingTopLevelGitMetadata: excludingTopLevelGitMetadata
         )
         // The caller holds sync.lock through preparation and publication, excluding the launch sweep.
-        let temp = try VendorTemporaryDirectory.makePath(storeRoot: storeRoot, fileService: fileService)
-        do {
-            try fileService.createDirectory(at: temp)
-            for entry in entries where entry.isDirectory {
+        try VendorTemporaryDirectory.withPath(storeRoot: storeRoot, fileService: fileService) { temp in
+            do {
+                try fileService.createDirectory(at: temp)
+                for entry in entries where entry.isDirectory {
+                    try Task.checkCancellation()
+                    try fileService.createDirectory(at: temp + "/" + entry.relativePath)
+                }
+                for entry in entries where !entry.isDirectory {
+                    try Task.checkCancellation()
+                    try fileService.copyFile(
+                        at: sourceDirectory + "/" + entry.relativePath,
+                        to: temp + "/" + entry.relativePath,
+                        checkingCancellation: true
+                    )
+                }
                 try Task.checkCancellation()
-                try fileService.createDirectory(at: temp + "/" + entry.relativePath)
-            }
-            for entry in entries where !entry.isDirectory {
+                try beforeReplace()
                 try Task.checkCancellation()
-                try fileService.copyFile(
-                    at: sourceDirectory + "/" + entry.relativePath,
-                    to: temp + "/" + entry.relativePath,
-                    checkingCancellation: true
-                )
+                try fileService.replaceItem(at: destination, with: temp)
+            } catch {
+                if fileService.directoryExists(at: temp) || fileService.isSymlink(at: temp) {
+                    try? fileService.deleteDirectory(at: temp)
+                }
+                throw error
             }
-            try Task.checkCancellation()
-            try beforeReplace()
-            try Task.checkCancellation()
-            try fileService.replaceItem(at: destination, with: temp)
-        } catch {
-            if fileService.directoryExists(at: temp) || fileService.isSymlink(at: temp) {
-                try? fileService.deleteDirectory(at: temp)
-            }
-            throw error
         }
     }
 
@@ -75,24 +76,23 @@ extension SkillInstallService {
         let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
         guard externallyHeldLock || lock != nil else { return }
         defer { lock?.release() }
-        var locations = [VendorTemporaryDirectory.legacyNamespace(storeRoot: storeRoot)]
-        if let current = try? VendorTemporaryDirectory.namespaces(storeRoot: storeRoot, fileService: fileService,
-                                                                  kinds: ["vendor", "manifest-build", "machine-state"]) {
-            locations += current.prefixes.map { (current.parent, $0) }
-        }
-        for (parent, prefix) in locations {
-            cleanupVendorTemps(fileService: fileService, parent: parent, prefix: prefix)
+        let legacy = VendorTemporaryDirectory.legacyNamespace(storeRoot: storeRoot)
+        cleanupVendorTemps(fileService: fileService, parent: legacy.parent, prefixes: legacy.prefixes)
+        if let current = try? VendorTemporaryDirectory.namespace(storeRoot: storeRoot, fileService: fileService) {
+            cleanupVendorTemps(fileService: fileService, parent: current.parent,
+                               prefixes: VendorTemporaryDirectory.kinds.map { $0 + "-" })
+            try? fileService.removeEmptyDirectory(at: current.parent)
         }
     }
 
-    private static func cleanupVendorTemps(fileService: FileServiceProtocol, parent: String, prefix: String) {
+    private static func cleanupVendorTemps(fileService: FileServiceProtocol, parent: String, prefixes: [String]) {
         guard !fileService.isSymlink(at: parent),
               fileService.directoryExists(at: parent),
               let entries = try? fileService.listDirectory(at: parent) else {
             return
         }
-        // Match only our UUID namespace, never a user's similarly named sibling.
-        for entry in entries where VendorTemporaryDirectory.contains(entry, prefix: prefix) {
+        // Match only our UUID namespaces, never a user's similarly named sibling.
+        for entry in entries where prefixes.contains(where: { VendorTemporaryDirectory.contains(entry, prefix: $0) }) {
             let path = parent + "/" + entry
             if fileService.directoryExists(at: path) || fileService.isSymlink(at: path) {
                 try? fileService.deleteDirectory(at: path)

@@ -55,7 +55,8 @@ struct TestStoreTemporary {
     }
 
     func paths(files: FileServiceProtocol) throws -> [String] {
-        try files.listDirectory(at: parent).map { parent + "/" + $0 }.filter { contains($0) }
+        guard files.directoryExists(at: parent) else { return [] }
+        return try files.listDirectory(at: parent).map { parent + "/" + $0 }.filter { contains($0) }
     }
 
     func contains(_ path: String) -> Bool {

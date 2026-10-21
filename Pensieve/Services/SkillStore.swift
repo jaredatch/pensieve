@@ -118,20 +118,21 @@ final class SkillStore: SkillStoreProtocol {
         let candidate = Self.availableDirectoryName(for: name, occupied: avoiding)
         let destination = try validatedSkillDirectory(candidate)
         // The import caller holds sync.lock through preparation and publication, excluding the launch sweep.
-        let temporary = try VendorTemporaryDirectory.makePath(storeRoot: storeRoot, fileService: fileService)
-        do {
-            try fileService.createDirectory(at: temporary)
-            try fileService.writeFile(at: temporary + "/SKILL.md", content: content)
-            let skipped = try sourceDirectory.map {
-                try fileService.copyImportedSkillContents(fromDirectory: $0, toDirectory: temporary)
-            } ?? []
-            try fileService.publishNewDirectory(at: temporary, to: destination)
-            return SkillFolderImportResult(directoryName: candidate, skipped: skipped)
-        } catch {
-            if fileService.directoryExists(at: temporary) || fileService.isSymlink(at: temporary) {
-                try? fileService.deleteDirectory(at: temporary)
+        return try VendorTemporaryDirectory.withPath(storeRoot: storeRoot, fileService: fileService) { temporary in
+            do {
+                try fileService.createDirectory(at: temporary)
+                try fileService.writeFile(at: temporary + "/SKILL.md", content: content)
+                let skipped = try sourceDirectory.map {
+                    try fileService.copyImportedSkillContents(fromDirectory: $0, toDirectory: temporary)
+                } ?? []
+                try fileService.publishNewDirectory(at: temporary, to: destination)
+                return SkillFolderImportResult(directoryName: candidate, skipped: skipped)
+            } catch {
+                if fileService.directoryExists(at: temporary) || fileService.isSymlink(at: temporary) {
+                    try? fileService.deleteDirectory(at: temporary)
+                }
+                throw error
             }
-            throw error
         }
     }
 

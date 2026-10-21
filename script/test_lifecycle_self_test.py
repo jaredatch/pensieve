@@ -424,6 +424,34 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         self.failed_run(label="linked-debug-temp")
         self.assertTrue(linked_old.is_dir(), "sweep followed the debug folder symlink")
 
+    def test_sweep_removes_empty_store_folders_without_following_links(self):
+        import test_temp_cleanup as cleanup
+        for prefix in (".pensieve-", ".pensieve-store-writes-"):
+            with self.subTest(prefix=prefix):
+                self.assert_empty_store_sweep(cleanup, prefix)
+
+    def assert_empty_store_sweep(self, cleanup, prefix):
+        root = self.root / prefix
+        root.mkdir()
+        empty, live, linked, regular = [root / (prefix + str(i) * 64) for i in range(4)]
+        empty.mkdir()
+        live.mkdir()
+        (live / "vendor-live.tmp").write_text("live bytes")
+        target = self.root / (prefix + "foreign-store-folder")
+        target.mkdir()
+        linked.symlink_to(target, target_is_directory=True)
+        regular.write_text("foreign file")
+        decoy = root / (".pensieve-" + "f" * 63)
+        decoy.mkdir()
+        with patch.object(cleanup.time, "monotonic", return_value=0.0):
+            cleanup.sweep(str(root))
+        self.assertFalse(empty.exists(), "Fresh empty store folders must be reclaimed after the run")
+        self.assertEqual((live / "vendor-live.tmp").read_text(), "live bytes")
+        self.assertTrue(linked.is_symlink())
+        self.assertTrue(target.is_dir())
+        self.assertEqual(regular.read_text(), "foreign file")
+        self.assertTrue(decoy.is_dir())
+
     def test_sweep_keeps_matching_old_folders_when_its_budget_expires(self):
         import test_temp_cleanup as cleanup
         for location, elapsed, kept in (("root", 0.249, False), ("root", 0.25, True),

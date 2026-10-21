@@ -18,6 +18,8 @@ extension SkillInstallServiceTests {
         XCTAssertFalse(service.directoryListings.contains(temporaryParent),
                        "Launch must not enumerate the shared temporary parent")
         XCTAssertFalse(fileService.directoryExists(at: stale))
+        XCTAssertFalse(fileService.directoryExists(at: (stale as NSString).deletingLastPathComponent))
+        XCTAssertEqual(service.directoryListings.filter { $0 == (stale as NSString).deletingLastPathComponent }.count, 1)
     }
 
     func testPublisherCreatesItsFolderAndRefusesLinkedOrFileOccupants() throws {
@@ -32,9 +34,9 @@ extension SkillInstallServiceTests {
                                         categories: [], projects: [], skills: [])
         XCTAssertFalse(try fileService.entryExistsWithoutFollowingLinks(at: folder))
         try publisher.write(snapshot, toRoot: root)
-        XCTAssertEqual(try fileService.entryTypeWithoutFollowingLinks(at: folder), .directory)
+        XCTAssertNil(try fileService.entryTypeWithoutFollowingLinks(at: folder))
         try publisher.write(snapshot, toRoot: root)
-        try fileService.deleteDirectory(at: folder)
+        XCTAssertFalse(try fileService.entryExistsWithoutFollowingLinks(at: folder))
 
         let target = tempDir + "/foreign"
         let precious = target + "/manifest-build-" + UUID().uuidString + ".tmp"
@@ -63,6 +65,10 @@ extension SkillInstallServiceTests {
         try NativeTestWork.run { [self] in
             let root = tempDir + "/cleanup-store"
             let stale = tempDir + "/cleanup-store.vendor-" + UUID().uuidString + ".tmp"
+            let legacyManifest = tempDir + "/cleanup-store.manifest-build-" + UUID().uuidString + ".tmp"
+            let legacyMachine = tempDir + "/cleanup-store.machine-state-" + UUID().uuidString + ".tmp"
+            try fileService.writeFile(at: legacyManifest + "/partial", content: "manifest")
+            try fileService.writeFile(at: legacyMachine, content: "machine")
             let userDecoy = tempDir + "/cleanup-store.vendor-backup.tmp"
             let realSkill = root + "/skills/real-skill"
             try fileService.writeFile(at: stale + "/partial", content: "partial")
@@ -79,6 +85,8 @@ extension SkillInstallServiceTests {
             for path in current { XCTAssertFalse(try fileService.entryExistsWithoutFollowingLinks(at: path)) }
 
             XCTAssertFalse(fileService.directoryExists(at: stale))
+            XCTAssertFalse(fileService.directoryExists(at: legacyManifest))
+            XCTAssertFalse(fileService.fileExists(at: legacyMachine))
             // Non-UUID sibling in the sweep directory is USER data, never app-owned — must survive.
             XCTAssertTrue(fileService.fileExists(at: userDecoy + "/precious"))
             XCTAssertTrue(fileService.fileExists(at: realSkill + "/SKILL.md"))

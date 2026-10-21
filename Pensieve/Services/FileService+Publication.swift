@@ -3,6 +3,12 @@ import Darwin
 import Foundation
 
 extension FileServiceProtocol {
+    /// Path-only default for modeled filesystems; concrete FileService admits a same-device system location.
+    func storeTemporaryParent(root: String) throws -> String { (root as NSString).deletingLastPathComponent }
+
+    /// Unmodeled cleanup never touches host files.
+    func removeEmptyDirectory(at path: String) throws {}
+
     /// Atomically publish over an absent or empty directory, preserving every other occupant.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws {
         try publishDirectory(at: sourcePath, to: destinationPath, exclusively: false)
@@ -45,6 +51,13 @@ extension FileServiceProtocol {
 }
 
 extension FileService {
+    func removeEmptyDirectory(at path: String) throws {
+        guard rmdir(path) != 0 else { return }
+        let code = errno
+        guard code != ENOENT, code != ENOTEMPTY else { return }
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
+    }
+
     /// Publication uses the admitted directory descriptor throughout. A replaced namespace cannot
     /// redirect this writer into a directory protected by another lock. Rename never displaces folders.
     func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {

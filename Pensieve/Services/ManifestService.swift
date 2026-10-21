@@ -44,42 +44,44 @@ struct ManifestService: ManifestReadWriting {
 
         // Every app writer holds sync.lock, which also protects these temporaries from the launch sweep.
         // Complete the tree outside the store, on its device, before the atomic swap.
-        let tmpDir = try VendorTemporaryDirectory.makePath(storeRoot: root, fileService: fileService, kind: "manifest-build")
-        let categoriesDir = tmpDir + "/categories"
-        let skillsDir = tmpDir + "/skills"
-        let deploysDir = tmpDir + "/deploys"
+        return try VendorTemporaryDirectory.withPath(
+            storeRoot: root, fileService: fileService, kind: "manifest-build") { tmpDir in
+            let categoriesDir = tmpDir + "/categories"
+            let skillsDir = tmpDir + "/skills"
+            let deploysDir = tmpDir + "/deploys"
 
-        do {
-            for directory in [categoriesDir, skillsDir, deploysDir] {
-                try fileService.createDirectory(at: directory)
-            }
-            try fileService.writeFile(
-                at: tmpDir + "/manifest.yaml",
-                content: "schema_version: \(supportedSchemaVersion)\n"
-            )
-            for category in snapshot.categories {
+            do {
+                for directory in [categoriesDir, skillsDir, deploysDir] {
+                    try fileService.createDirectory(at: directory)
+                }
                 try fileService.writeFile(
-                    at: categoriesDir + "/" + Self.categoryFileName(category.name),
-                    content: Self.serializeCategory(category)
+                    at: tmpDir + "/manifest.yaml",
+                    content: "schema_version: \(supportedSchemaVersion)\n"
                 )
-            }
-            for skill in snapshot.skills {
+                for category in snapshot.categories {
+                    try fileService.writeFile(
+                        at: categoriesDir + "/" + Self.categoryFileName(category.name),
+                        content: Self.serializeCategory(category)
+                    )
+                }
+                for skill in snapshot.skills {
+                    try fileService.writeFile(
+                        at: skillsDir + "/" + skill.slug + ".yaml",
+                        content: Self.serializeSkillOverlay(skill)
+                    )
+                }
+                try writeDeployIntents(snapshot.deployIntents, to: deploysDir)
                 try fileService.writeFile(
-                    at: skillsDir + "/" + skill.slug + ".yaml",
-                    content: Self.serializeSkillOverlay(skill)
+                    at: tmpDir + "/projects.yaml",
+                    content: Self.serializeProjects(snapshot.projects)
                 )
+                if !fileService.directoryExists(at: root) { try fileService.createDirectory(at: root) }
+                try fileService.replaceItem(at: manifestDir, with: tmpDir)
+                return true
+            } catch {
+                try? fileService.deleteDirectory(at: tmpDir)
+                throw error
             }
-            try writeDeployIntents(snapshot.deployIntents, to: deploysDir)
-            try fileService.writeFile(
-                at: tmpDir + "/projects.yaml",
-                content: Self.serializeProjects(snapshot.projects)
-            )
-            if !fileService.directoryExists(at: root) { try fileService.createDirectory(at: root) }
-            try fileService.replaceItem(at: manifestDir, with: tmpDir)
-            return true
-        } catch {
-            try? fileService.deleteDirectory(at: tmpDir)
-            throw error
         }
     }
 

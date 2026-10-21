@@ -90,7 +90,7 @@ extension ManifestSaveTests {
     }
 
     func testHeadMovementAfterPublicationKeepsSkillReportsAndNudgesSync() async throws {
-        let cause = "the store changed on disk at the same moment. Pensieve reads it again before your next change."
+        let cause = ManifestSaveModel.headMovedCause
         for consumer in ["metadata", "deletion", "retirement"] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }

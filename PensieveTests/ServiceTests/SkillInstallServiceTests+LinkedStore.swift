@@ -48,10 +48,11 @@ extension SkillInstallServiceTests {
             try assertVendorSweep(root: linked)
             for kind in ["vendor", "manifest-build", "machine-state"] {
                 let location = try VendorTemporaryDirectory.namespace(storeRoot: linked, fileService: fileService, kind: kind)
-                XCTAssertEqual(fileService.fileIdentity(at: location.parent, followingLinks: true)?.device,
+                let parent = (location.parent as NSString).deletingLastPathComponent
+                XCTAssertEqual(fileService.fileIdentity(at: parent, followingLinks: true)?.device,
                                fileService.fileIdentity(at: real, followingLinks: true)?.device)
                 XCTAssertFalse(PathSyntax.hasPrefix(location.parent, fileService.realPath(at: real) + "/"))
-                XCTAssertFalse(try fileService.listDirectory(at: location.parent).contains { $0.hasPrefix(location.prefix) })
+                XCTAssertFalse(try fileService.entryExistsWithoutFollowingLinks(at: location.parent))
             }
             XCTAssertEqual(try fileService.listDirectory(at: tempDir + "/home"), [".pensieve"])
             XCTAssertFalse(try fileService.listDirectory(at: volume).contains { $0.contains(".tmp") })
@@ -152,7 +153,10 @@ extension SkillInstallServiceTests {
         XCTAssertEqual(try installer.install(candidate: candidate, from: fetched, context: context), .installed(slug: "vendor"))
         XCTAssertEqual(try fileService.readData(at: root + "/skills/vendor/SKILL.md"),
                        try fileService.readData(at: repository + "/skills/vendor/SKILL.md"))
+        let temporaryFolder = try VendorTemporaryDirectory.namespace(storeRoot: root, fileService: fileService).parent
+        XCTAssertFalse(fileService.directoryExists(at: temporaryFolder), "Vendor and manifest publications release the folder")
         try importIntoLinkedStore(root: root, context: context)
+        XCTAssertFalse(fileService.directoryExists(at: temporaryFolder), "Skill publication releases the folder")
         let store = SkillStore(fileService: fileService, baseDir: root + "/skills", storeRoot: root)
         let created = try store.createSkill(name: "Created", description: "Created here", body: "created body")
         XCTAssertEqual(created, "created")
@@ -168,6 +172,7 @@ extension SkillInstallServiceTests {
         let state = try machines.compose(machineID: "5A9C2E31-8F04-4D2B-9C61-0B7A43F1D002", context: context,
                                          publishedAt: Date(timeIntervalSince1970: 100))
         try machines.write(state, toRoot: root)
+        XCTAssertFalse(fileService.directoryExists(at: temporaryFolder), "Machine-state publication releases the folder")
         // Exercise replacement as well as first publication of both metadata publishers.
         try machines.write(state, toRoot: root)
         let manifest = ManifestService(fileService: fileService)
