@@ -35,7 +35,7 @@ extension GitService {
             guard ManifestReaderPolicy.ignoresEntry(at: relative, kind: .emptyDirectory),
                   let name = String(bytes: entry, encoding: .utf8),
                   try fileService.entryTypeWithoutFollowingLinks(at: path + "/" + name) == .directory else { return false }
-            let prefix = entry.last == 0x2F ? Data(entry) : Data(entry) + Data([0x2F])
+            let prefix = Data(entry) + Data([0x2F])
             return try fileService.listDirectory(at: path + "/" + name).allSatisfy {
                 try matches(prefix + Data($0.utf8))
             }

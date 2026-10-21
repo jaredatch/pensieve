@@ -90,6 +90,7 @@ extension ManifestSaveTests {
     }
 
     func testHeadMovementAfterPublicationKeepsSkillReportsAndNudgesSync() async throws {
+        let cause = "the store changed on disk at the same moment. Pensieve reads it again before your next change."
         for consumer in ["metadata", "deletion", "retirement"] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }
@@ -127,12 +128,12 @@ extension ManifestSaveTests {
             let disk = try h.manifest.read(fromRoot: h.root)
             if consumer == "metadata" {
                 XCTAssertEqual(disk.skills.first { $0.slug == "alpha" }?.tags, ["kept"])
-                XCTAssertTrue(h.library.error?.hasPrefix("The sync manifest was saved, but") == true)
+                XCTAssertEqual(h.library.error, "The sync manifest was saved, but rebuilding the local store failed: " + cause)
             } else {
                 XCTAssertFalse(disk.skills.contains { $0.slug == "alpha" })
                 let notice = try XCTUnwrap(presentation.notice)
                 XCTAssertEqual(notice.title, "Skill deleted, but the library didn't refresh")
-                XCTAssertTrue(notice.message.contains("The sync manifest was saved, but"), notice.message)
+                XCTAssertTrue(notice.message.contains(cause), notice.message)
                 if consumer == "retirement" {
                     XCTAssertTrue(notice.message.contains("Couldn't publish retired deploy records: The sync manifest was saved"),
                                   "The retirement completion must retain the publication fact: " + notice.message)

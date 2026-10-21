@@ -5,7 +5,8 @@ import XCTest
 /// Runs the production writers in the existing disposable helper. A dylib intercepts their real
 /// write, rename, lock and flush syscalls to kill the child, refuse optional work or insert a race.
 /// Namespace races launch one more disposable writer. Directory creation can be observed for volume
-/// probes. It invents no intermediate name and intercepts no process outside these helper children.
+/// probes; root resolution can fail after its first successful admission. It invents no intermediate name
+/// and intercepts no process outside these helper children.
 struct StoreWriteCrashProbe {
     let library: String
 
@@ -132,7 +133,14 @@ struct StoreWriteCrashProbe {
         return result;
     }
     static char resolved_temporary[MAXPATHLEN];
+    static int root_resolutions;
     static char *resolving(const char *path, char *output) {
+        const char *root = getenv("STORE_PROBE_ROOT");
+        if (point("root-resolution-fails") && root && !strcmp(path, root) && ++root_resolutions > 1) {
+            int fd = open(getenv("STORE_CRASH_TRACE"), O_CREAT|O_WRONLY|O_TRUNC, 0600);
+            if (fd >= 0) { write(fd, "root resolution failed", 22); close(fd); }
+            errno = EIO; return NULL;
+        }
         char *result = realpath(path, output);
         if (result && strstr(result, "/TemporaryItems")) strlcpy(resolved_temporary, result, sizeof(resolved_temporary));
         return result;

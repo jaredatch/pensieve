@@ -823,8 +823,7 @@ extension GitService {
             let path = result.stdout.trimmingCharacters(in: .newlines)
             if try fileService.entryExistsWithoutFollowingLinks(at: path) {
                 let commit = try fileService.readFile(at: path).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard [40, 64].contains(commit.utf8.count),
-                      let oid = GitObjectID.parse(commit, length: commit.utf8.count, casePolicy: .lowercase) else { break }
+                guard let oid = GitObjectID.parse(commit, casePolicy: .lowercase) else { break }
                 return oid
             }
         }

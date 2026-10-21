@@ -90,7 +90,7 @@ extension FileService {
     /// Tidying is best effort: an unavailable lock, namespace or leftover must not refuse the operation.
     /// A metadata-backed operation never asks Foundation to create a fallback location on another volume.
     func cleanStoreIntermediates(at root: String) throws {
-        guard directoryExists(at: root), let location = try? resolvedStoreLocation(root: root) else { return }
+        guard directoryExists(at: root) else { return }
         let metadata = try? storeMetadataDirectory(root: root)
         if let metadata { cleanStoreDirectory(metadata) }
         let parent: String?
@@ -98,10 +98,12 @@ extension FileService {
         if sameStoreDevice(system, root) {
             parent = try? resolveRealPath(at: system)
         } else if metadata == nil {
-            parent = try? storeTemporaryParent(location: location)
+            parent = try? storeTemporaryParent(root: root)
         } else { parent = nil }
         guard let parent else { return }
-        for directory in skillNamespaces(store: location.path, parent: parent) { cleanStoreDirectory(directory) }
+        if let location = try? resolvedStoreLocation(root: root) {
+            for directory in skillNamespaces(store: location.path, parent: parent) { cleanStoreDirectory(directory) }
+        }
         // Reclaim this store's previous-format namespace when its identity is still known.
         if let identity = fileIdentity(at: root, followingLinks: true) {
             cleanStoreDirectory(parent + "/.pensieve-store-writes-\(identity.device)-\(identity.inode)")
@@ -217,8 +219,7 @@ extension FileServiceProtocol {
         guard let type = try entryTypeWithoutFollowingLinks(at: metadata) else { return nil }
         let directory: String
         if type == .regular {
-            let data = try readRegularFileData(at: metadata, maximumBytes: 64 * 1_024)
-            guard let text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadInapplicableStringEncoding) }
+            let text = try GitDirectoryText.read(at: metadata, fileService: self)
             directory = try GitDirectoryText.directory(text, relativeTo: root)
         } else {
             guard type == .directory else { throw CocoaError(.fileReadUnknown) }

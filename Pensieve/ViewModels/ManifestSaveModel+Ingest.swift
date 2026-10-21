@@ -116,7 +116,8 @@ extension ManifestSaveModel {
         switch result {
         case .headChanged:
             return SaveResult(published: true, error: ManifestSaveError.rebuildFailed(
-                SyncError.ingestIncomplete.localizedDescription, manifestSaved: true))
+                "the store changed on disk at the same moment. Pensieve reads it again before your next change.",
+                manifestSaved: true))
         case .saved(let snapshot), .skipped(let snapshot):
             let published: Bool = if case .saved = result { true } else { false }
             let error = await rebuild(item, durable: snapshot, published: published, prepared: prepared)

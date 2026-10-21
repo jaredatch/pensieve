@@ -38,6 +38,7 @@ extension SkillInstallService {
             at: sourceDirectory,
             excludingTopLevelGitMetadata: excludingTopLevelGitMetadata
         )
+        // The caller holds sync.lock through preparation and publication, excluding the launch sweep.
         let temp = try VendorTemporaryDirectory.makePath(storeRoot: storeRoot, fileService: fileService)
         do {
             try fileService.createDirectory(at: temp)
@@ -75,9 +76,9 @@ extension SkillInstallService {
         guard externallyHeldLock || lock != nil else { return }
         defer { lock?.release() }
         var locations = [VendorTemporaryDirectory.legacyNamespace(storeRoot: storeRoot)]
-        if let parent = try? fileService.storeTemporaryParent(root: storeRoot),
-           let key = try? fileService.storeKey(root: storeRoot) {
-            locations += ["vendor", "manifest-build", "machine-state"].map { (parent, ".pensieve-" + key + "." + $0 + "-") }
+        if let current = try? VendorTemporaryDirectory.namespaces(storeRoot: storeRoot, fileService: fileService,
+                                                                  kinds: ["vendor", "manifest-build", "machine-state"]) {
+            locations += current.prefixes.map { (current.parent, $0) }
         }
         for (parent, prefix) in locations {
             cleanupVendorTemps(fileService: fileService, parent: parent, prefix: prefix)

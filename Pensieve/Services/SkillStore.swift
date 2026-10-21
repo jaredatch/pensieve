@@ -117,6 +117,7 @@ final class SkillStore: SkillStoreProtocol {
                               avoiding: Set<String>) throws -> SkillFolderImportResult {
         let candidate = Self.availableDirectoryName(for: name, occupied: avoiding)
         let destination = try validatedSkillDirectory(candidate)
+        // The import caller holds sync.lock through preparation and publication, excluding the launch sweep.
         let temporary = try VendorTemporaryDirectory.makePath(storeRoot: storeRoot, fileService: fileService)
         do {
             try fileService.createDirectory(at: temporary)

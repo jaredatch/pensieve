@@ -64,8 +64,9 @@ final class ManifestAtomicWriteTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        for path in [tempDir!, tempDir! + ".manifest-build.tmp"] where FileManager.default.fileExists(atPath: path) {
-            try FileManager.default.removeItem(atPath: path)
+        let temporary = try TestStoreTemporary(root: tempDir, files: fileService, kind: "manifest-build")
+        for path in [temporary.parent, tempDir!] where fileService.directoryExists(at: path) {
+            try fileService.deleteDirectory(at: path)
         }
     }
 

@@ -21,7 +21,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     var beforeCreateDirectory: ((String) throws -> Void)?
     var beforeUnboundedRead: ((String) throws -> Void)?
     var afterRead: ((String) throws -> Void)?
-    var refuseReplacement = false
+    var refusedReplacement: TestStoreTemporary?
     var refuseSkillListing = false
     private var refusedListings = 0
     var skillListingRefusals: Int { lock.withLock { refusedListings } }
@@ -63,7 +63,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
         return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)
     }
     func writeFile(at path: String, content: String) throws {
-        if refuseReplacement && path.contains(".manifest-build-") { throw CocoaError(.fileWriteNoPermission) }
+        if refusedReplacement?.contains(path) == true { throw CocoaError(.fileWriteNoPermission) }
         try wrapped.writeFile(at: path, content: content)
     }
     func writeData(at path: String, data: Data) throws { try wrapped.writeData(at: path, data: data) }

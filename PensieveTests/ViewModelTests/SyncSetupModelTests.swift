@@ -356,25 +356,36 @@ extension SyncSetupModelTests {
 
     func testLinkedSkillsContainerRefusesSetupBeforeAnyWrite() async throws {
         for configured in [false, true] {
-            let files = FileService()
-            let outside = root + "-outside"
-            try files.writeFile(at: outside + "/victim/SKILL.md", content: "precious")
-            try files.createSymlink(at: root + "/skills", pointingTo: outside)
-            if configured { try files.createDirectory(at: root + "/.git") }
-            defer {
-                try? files.deleteDirectory(at: root)
-                try? files.deleteDirectory(at: outside)
+            for linked in [true, false] {
+                let files = FileService()
+                let outside = root + "-outside"
+                try files.writeFile(at: outside + "/victim/SKILL.md", content: "precious")
+                if linked {
+                    try files.createSymlink(at: root + "/skills", pointingTo: outside)
+                } else {
+                    try files.writeFile(at: root + "/skills", content: "not a folder")
+                }
+                if configured { try files.createDirectory(at: root + "/.git") }
+                defer {
+                    try? files.deleteDirectory(at: root)
+                    try? files.deleteDirectory(at: outside)
+                }
+                let before = try files.listDirectory(at: root).sorted()
+                let git = RecordingGitService(), credentials = InMemoryCredentialStore()
+                let model = try makeModel(git: git, credentials: credentials,
+                    rebuilder: RecordingRebuilder(), fileService: files)
+                await model.connectAndReport(url: "https://fixture.test/owner/library.git", username: "fixture", token: "fixture")
+                guard case .failed(let message) = model.state else { XCTFail("Unsafe skills must refuse setup"); continue }
+                let reason = linked ? "is a link to another folder" : "isn't a folder"
+                let expected = "“" + ((root + "/skills") as NSString).abbreviatingWithTildeInPath
+                    + "” " + reason + ". Pensieve needs a real folder there."
+                XCTAssertTrue(message.contains(expected), message)
+                XCTAssertNil(credentials.credential(forHost: "fixture.test"))
+                XCTAssertTrue(git.calls.isEmpty, "Refuse before any git write: \(git.calls)")
+                XCTAssertEqual(try files.listDirectory(at: root).sorted(), before)
+                XCTAssertEqual(try files.readFile(at: outside + "/victim/SKILL.md"), "precious")
+                if !linked { XCTAssertEqual(try files.readFile(at: root + "/skills"), "not a folder") }
             }
-            let git = RecordingGitService(), credentials = InMemoryCredentialStore()
-            let model = try makeModel(git: git, credentials: credentials,
-                rebuilder: RecordingRebuilder(), fileService: files)
-            await model.connectAndReport(url: "https://fixture.test/owner/library.git", username: "fixture", token: "fixture")
-            guard case .failed(let message) = model.state else { XCTFail("Linked skills must refuse setup"); continue }
-            XCTAssertTrue(message.contains("is a link to another folder"), message)
-            XCTAssertNil(credentials.credential(forHost: "fixture.test"))
-            XCTAssertTrue(git.calls.isEmpty, "The read-only check must refuse before any git write: \(git.calls)")
-            XCTAssertEqual(try files.readFile(at: outside + "/victim/SKILL.md"), "precious")
-            XCTAssertFalse(files.fileExists(at: root + "/manifest"))
         }
     }
 

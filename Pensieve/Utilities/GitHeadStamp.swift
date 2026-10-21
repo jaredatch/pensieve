@@ -54,9 +54,7 @@ struct GitHeadStamp {
     /// Small pointers and refs get 64 KiB, config 1 MiB, and packed refs 16 MiB.
     /// A special node, link, invalid UTF-8 or oversized file leaves HEAD unresolved.
     private func readText(at path: String, maximumBytes: Int = 64 * 1_024) throws -> String {
-        let data = try fileService.readRegularFileData(at: path, maximumBytes: maximumBytes)
-        guard let text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadInapplicableStringEncoding) }
-        return text
+        try GitDirectoryText.read(at: path, fileService: fileService, maximumBytes: maximumBytes)
     }
 
     private func metadataDirectory(_ entry: String, root: String) throws -> String {

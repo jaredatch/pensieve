@@ -40,6 +40,21 @@ extension StoreRebuildServiceTests {
     }
 
     @MainActor
+    func testRegularSkillsContainerWarningNamesTheFolderAndKeepsRows() throws {
+        try fileService.writeFile(at: tempDir + "/skills", content: "not a folder")
+        let context = try makeContext()
+        context.insert(Skill(name: "Preserved", directoryName: "victim"))
+        try context.save()
+        let result = service.rebuild(fromRoot: tempDir, context: context)
+        let warning = "“" + ((tempDir + "/skills") as NSString).abbreviatingWithTildeInPath
+            + "” isn't a folder. Pensieve needs a real folder there."
+        XCTAssertTrue(result.skillListFailed)
+        XCTAssertTrue(result.warnings.contains { $0.contains(warning) }, result.warnings.joined())
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.name), ["Preserved"])
+        XCTAssertEqual(try fileService.readFile(at: tempDir + "/skills"), "not a folder")
+    }
+
+    @MainActor
     func testSkillListingRefusesContainerLinkedAfterTheInitialCheck() throws {
         try writeSkillFile(slug: "victim", name: "Original", description: "Original")
         try writeManifest(skills: [overlay("victim")])

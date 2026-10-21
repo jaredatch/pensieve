@@ -102,7 +102,7 @@ extension AppRuntimePathsTests {
                 XCTAssertEqual(try files.listDirectory(at: scratch), [])
             }
             XCTAssertEqual(try files.readFile(at: paths.skillsDir + "/example/SKILL.md"), remote.original)
-            XCTAssertEqual(try files.listDirectory(at: fixture.base).filter { $0.contains(".vendor-") }, [])
+            XCTAssertEqual(try TestStoreTemporary(root: paths.storeRoot, files: files).paths(files: files), [])
         }
     }
 

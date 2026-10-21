@@ -48,8 +48,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
             + "Rebuild computed changes but saving the local store failed:"))
         XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
         var writes = 0
+        let temporary = try TestStoreTemporary(root: h.root + "/sync", files: h.mapped, kind: "manifest-build")
         h.mapped.beforeFileWrite = { path in
-            if path.contains(".manifest-build-") { writes += 1 }
+            if temporary.contains(path) { writes += 1 }
         }
         let result = remove(h, project: project, context: context)
         XCTAssertTrue(result.hasFailures)
@@ -57,6 +58,8 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(writes, 0, "pending ingestion must not repair from the stale window")
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), pulled)
         XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
+        XCTAssertFalse(remove(h, project: h.project, context: h.context).hasFailures)
+        XCTAssertGreaterThan(writes, 0, "The same observer must see publication when writable ingestion succeeds")
     }
 
     func testBusySyncRefusesBeforeWithdrawalOrArtifactCleanup() throws {
@@ -103,8 +106,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         var artifactEffects: [String] = []
         h.mapped.beforeArtifactDeletion = { artifactEffects.append($0) }
         h.mapped.beforeArtifactCreation = { artifactEffects.append($0) }
+        let temporary = try TestStoreTemporary(root: h.root + "/sync", files: h.mapped, kind: "manifest-build")
         h.mapped.beforeFileWrite = { path in
-            if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") {
+            if temporary.contains(path) && path.hasSuffix("/manifest.yaml") {
                 faulted = true
                 throw NSError(domain: NSPOSIXErrorDomain, code: 5)
             }
@@ -145,8 +149,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let project = try XCTUnwrap(try context.fetch(FetchDescriptor<Project>()).first { $0.id == projectID })
         var faulted = false
         var logs: [String] = []
+        let temporary = try TestStoreTemporary(root: h.root + "/sync", files: h.mapped, kind: "manifest-build")
         h.mapped.beforeFileWrite = { path in
-            guard path.contains(".manifest-build-"), path.hasSuffix("/manifest.yaml") else { return }
+            guard temporary.contains(path), path.hasSuffix("/manifest.yaml") else { return }
             guard !faulted else { return }
             faulted = true
             fault.refusesRestore = true
@@ -198,9 +203,12 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let context = ModelContext(readOnly)
         let projectID = h.project.id
         let project = try XCTUnwrap(try context.fetch(FetchDescriptor<Project>()).first { $0.id == projectID })
-        var reconciled = false, lateWrites = 0
+        var reconciled = false, earlyWrites = 0, lateWrites = 0
+        let temporary = try TestStoreTemporary(root: h.root + "/sync", files: h.mapped, kind: "manifest-build")
         h.mapped.beforeFileWrite = { path in
-            if reconciled && path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") { lateWrites += 1 }
+            if temporary.contains(path) && path.hasSuffix("/manifest.yaml") {
+                if reconciled { lateWrites += 1 } else { earlyWrites += 1 }
+            }
         }
         let result = removeRegisteredProject(project,
             reconciler: RemovalCheckpointReconciler { reconciled = true; return BatchResult() },
@@ -210,6 +218,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(reconciled, "The refused save follows the withdrawal and reconcile")
         XCTAssertEqual(lateWrites, 0, "Registration and ledger rollback cannot change the manifest snapshot")
+        XCTAssertEqual(earlyWrites, 1, "The same observer must see the withdrawal before reconciliation")
         let saved = try AppRuntime.makeContainer(configuration: ModelConfiguration(
             url: URL(fileURLWithPath: h.root + "/removal.sqlite")))
         XCTAssertEqual(try ModelContext(saved).fetchCount(FetchDescriptor<Project>()), 2)
@@ -219,8 +228,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let h = try fixture()
         defer { h.cleanup() }
         var writes = 0
+        let temporary = try TestStoreTemporary(root: h.root + "/sync", files: h.mapped, kind: "manifest-build")
         h.mapped.beforeFileWrite = { path in
-            if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") {
+            if temporary.contains(path) && path.hasSuffix("/manifest.yaml") {
                 writes += 1
                 throw NSError(domain: NSPOSIXErrorDomain, code: 5)
             }
@@ -235,9 +245,14 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertFalse(result.hasFailures, "A category CRUD publication dependency must not control project removal")
         XCTAssertEqual(writes, 0, "The caller provided no manifest service")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.otherProject.id])
+        XCTAssertThrowsError(try manifest(h).write(try manifest(h).snapshot(from: h.context), toRoot: h.root + "/sync"))
+        XCTAssertEqual(writes, 1, "The same fault must fire when the caller supplies a manifest publisher")
     }
 
-    private func fixture() throws -> ProjectFolderCallerHarness {
+}
+
+private extension ProjectRemovalDurabilityTests {
+    func fixture() throws -> ProjectFolderCallerHarness {
         let h = try ProjectFolderCallerHarness(installed: [.codex, .cursor], persistent: true)
         try h.files.createDirectory(at: h.project.path)
         for platform in [PlatformTarget.codex, .cursor] { try h.addIntent(platform: platform) }
@@ -246,10 +261,10 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         return h
     }
 
-    private func manifest(_ h: ProjectFolderCallerHarness) -> ManifestService { ManifestService(fileService: h.mapped) }
+    func manifest(_ h: ProjectFolderCallerHarness) -> ManifestService { ManifestService(fileService: h.mapped) }
 
-    private func remove(_ h: ProjectFolderCallerHarness, project: Project, context: ModelContext,
-                        manifestRoot: String? = nil) -> BatchResult {
+    func remove(_ h: ProjectFolderCallerHarness, project: Project, context: ModelContext,
+                manifestRoot: String? = nil) -> BatchResult {
         removeRegisteredProject(project,
             reconciler: CategoryReconciler(platformVM: h.platformVM),
             manifestService: manifest(h), manifestRoot: manifestRoot ?? h.root + "/sync",
@@ -258,9 +273,6 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
             lockPath: h.root + "/support" + ".sync.lock")
     }
 
-}
-
-private extension ProjectRemovalDurabilityTests {
     func assertLocalOnlyRemovalRecovers() throws {
         let h = try fixture()
         defer { h.cleanup() }

@@ -88,9 +88,12 @@ extension FileServiceProtocol {
 
 enum StoreContainerError: LocalizedError {
     case linked(String)
+    case notDirectory(String)
 
     var errorDescription: String? {
         switch self {
+        case .notDirectory(let path):
+            "“\((path as NSString).abbreviatingWithTildeInPath)” isn't a folder. Pensieve needs a real folder there."
         case .linked(let path):
             "“\((path as NSString).abbreviatingWithTildeInPath)” is a link to another folder. "
                 + "Pensieve needs a real folder there."
@@ -104,7 +107,7 @@ extension FileServiceProtocol {
     func storeContainerExists(at path: String) throws -> Bool {
         guard let type = try entryTypeWithoutFollowingLinks(at: path) else { return false }
         if type == .symlink { throw StoreContainerError.linked(path) }
-        guard type == .directory else { throw CocoaError(.fileReadUnsupportedScheme) }
+        guard type == .directory else { throw StoreContainerError.notDirectory(path) }
         return true
     }
 
