@@ -13,11 +13,9 @@ struct WaitingRemovalHarness {
     init(platforms: [PlatformTarget] = [.codex], persistent: Bool = false) throws {
         let base = try ProjectFolderCallerHarness(installed: platforms, persistent: persistent)
         self.base = base
-        let mappings = [(TestPaths.skillsDir, base.root + "/store/skills"),
-                        (TestPaths.deployPaths.cursorUserRulesDirectory, base.root + "/user/rules")]
-            + PlatformTarget.allCases.compactMap { platform in
-                TestPaths.deployPaths.userSkillsRoot(for: platform).map { ($0, base.root + "/user/" + platform.rawValue) }
-            }
+        // Map the whole hierarchy: containment now resolves each agent directory's parent too.
+        let mappings = [(TestPaths.storeRoot, base.root + "/store"),
+                        (TestPaths.homeDirectory, base.root + "/home")]
         mapped = LinkServiceCanonicalDirectoryFileService(wrapped: base.files,
             pathMappings: mappings, physicalSandbox: base.root)
         vm = PlatformViewModel(

@@ -41,6 +41,9 @@ final class ConflictResolutionModelTests: XCTestCase {
     }
 
     private final class StubGit: GitServiceProtocol {
+        func isWorktreeClean(at path: String) -> Bool { false }
+        func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+        func manifestMatchesHead(at path: String) throws -> Bool { false }
         func remoteURL(at path: String) -> String? { nil }
         func initRepository(at path: String) throws {}
         func setRemote(_ url: String, at path: String) throws {}

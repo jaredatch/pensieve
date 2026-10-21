@@ -4,8 +4,11 @@ import Foundation
 /// Holds sampled SKILL.md reads at the real filesystem boundary. Main-thread reads are recorded
 /// without blocking, so the owner can diagnose an actor regression without wedging its test host.
 /// Optional manifest-build and skill-listing refusals exercise publication and scan failures.
+/// The optional pre-read hook can refuse unbounded text opens before they reach a special node.
 /// Other I/O delegates to FileService; the double supplies no rebuild or merge result.
 final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
+    private var containedReads: [String] = []
+    var containedRegularReadPaths: [String] { lock.withLock { containedReads } }
     let entryObservations = Counter()
     let headReads = Counter()
     let skillListings = Counter()
@@ -14,7 +17,11 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
         entryObservations.increment()
         return try wrapped.entryObservation(at: path)
     }
-    var refuseReplacement = false
+    var beforeEntryProbe: ((String) throws -> Void)?
+    var beforeCreateDirectory: ((String) throws -> Void)?
+    var beforeUnboundedRead: ((String) throws -> Void)?
+    var afterRead: ((String) throws -> Void)?
+    var refusedReplacement: TestStoreTemporary?
     var refuseSkillListing = false
     private var refusedListings = 0
     var skillListingRefusals: Int { lock.withLock { refusedListings } }
@@ -27,8 +34,10 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func hold(_ gates: [TestWait.Gate]) { lock.withLock { self.gates = gates } }
 
     func readFile(at path: String) throws -> String {
+        try beforeUnboundedRead?(path)
         if path.hasSuffix("/HEAD") { headReads.increment() }
         let value = try wrapped.readFile(at: path)
+        try afterRead?(path)
         guard path.hasSuffix("/alpha/SKILL.md") else { return value }
         let gate: TestWait.Gate? = lock.withLock {
             if Thread.isMainThread { mainReads += 1; return nil }
@@ -41,16 +50,20 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func readData(at path: String) throws -> Data { try wrapped.readData(at: path) }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
-        return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        if path.hasSuffix("/HEAD") { headReads.increment() }
+        let data = try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        try afterRead?(path)
+        return data
     }
     func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
         try wrapped.readRegularFileHeader(at: path, maximumBytes: maximumBytes)
     }
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
-        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)
+        lock.withLock { containedReads.append(path) }
+        return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)
     }
     func writeFile(at path: String, content: String) throws {
-        if refuseReplacement && path.contains(".manifest-build-") { throw CocoaError(.fileWriteNoPermission) }
+        if refusedReplacement?.contains(path) == true { throw CocoaError(.fileWriteNoPermission) }
         try wrapped.writeFile(at: path, content: content)
     }
     func writeData(at path: String, data: Data) throws { try wrapped.writeData(at: path, data: data) }
@@ -67,13 +80,17 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         separateTypeReads.increment()
+        try beforeEntryProbe?(path)
         return try wrapped.entryTypeWithoutFollowingLinks(at: path)
     }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func isUserExecutableFile(at path: String) -> Bool { wrapped.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool { try wrapped.directoryExistsFollowingLinks(at: path) }
-    func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
+    func createDirectory(at path: String) throws {
+        try beforeCreateDirectory?(path)
+        try wrapped.createDirectory(at: path)
+    }
     func createDirectoryWithoutParents(at path: String) throws { try wrapped.createDirectoryWithoutParents(at: path) }
     func writeFileWithoutParents(at path: String, content: String) throws {
         try wrapped.writeFileWithoutParents(at: path, content: content)
@@ -81,6 +98,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
         try wrapped.createSymlinkWithoutParents(at: linkPath, pointingTo: targetPath)
     }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
         try wrapped.createSymlink(at: linkPath, pointingTo: targetPath)
@@ -103,4 +121,6 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func regularFileMetadata(at path: String) -> RegularFileMetadata? { wrapped.regularFileMetadata(at: path) }
     func touchRegularFile(at path: String, date: Date) throws { try wrapped.touchRegularFile(at: path, date: date) }
+
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
 }

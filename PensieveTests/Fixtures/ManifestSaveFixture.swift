@@ -97,6 +97,7 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     /// Category order is not a snapshot contract. Force a valid peer-first order when testing
     /// pending rename collisions, rather than relying on ModelContext's unsorted fetch order.
     var sortRebuildCategories = false
+    var beforeWrite: (() throws -> Void)?
     var afterWrite: (() -> Void)?
     var afterRebuildSnapshot: (() throws -> Void)?
     struct Refused: LocalizedError { var errorDescription: String? { "The local library could not be read." } }
@@ -132,6 +133,7 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         if failingWrites > 0 { failingWrites -= 1; throw CocoaError(.fileWriteNoPermission) }
+        try beforeWrite?()
         try base.write(snapshot, toRoot: root)
         lock.lock()
         snapshots.append(snapshot)

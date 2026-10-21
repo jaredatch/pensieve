@@ -98,9 +98,15 @@ struct GitRemoteReferences: Equatable {
     let heads: [String]
 }
 
-protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading {
+protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading, GitFastForwarding {
+    @_disfavoredOverload
+    func manifestMatchesHead(at path: String) throws -> Bool
     func scopedToStore(_ root: String) -> GitServiceProtocol
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws
+    @_disfavoredOverload
+    func hasUncommittedChanges(at path: String) -> Bool
+    @_disfavoredOverload
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String, at root: String) throws -> Bool
 
     @_disfavoredOverload
     func initRepository(at path: String) throws
@@ -767,8 +773,8 @@ extension GitService {
             try store.runOrThrow(["rebase", "--abort"])
         } catch {
             let paths = abortBlockingFolders(error)
+            guard !paths.isEmpty else { throw error }
             guard let permittedFolder else {
-                guard !paths.isEmpty else { throw error }
                 throw ConflictAbortBlocked(paths: paths, underlying: error)
             }
             try finishRefusedAbort(error, paths: paths, permittedFolder: permittedFolder, root: path)
@@ -791,8 +797,8 @@ extension GitService {
 
     /// Native abort runs first. Validate its exact obstruction before discarding anything.
     private func finishRefusedAbort(_ failure: Error, paths: [String], permittedFolder: String, root: String) throws {
-        let blocked = ConflictAbortBlocked(paths: paths.isEmpty ? [permittedFolder] : paths, underlying: failure)
-        guard !paths.isEmpty, paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw blocked }
+        let blocked = ConflictAbortBlocked(paths: paths, underlying: failure)
+        guard paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw blocked }
         do {
             let original = try conflictTree(revision: rebaseOriginalCommit(at: root), root: root, path: permittedFolder)
             let incoming = try conflictTree(revision: "HEAD", root: root, path: permittedFolder)
@@ -817,10 +823,8 @@ extension GitService {
             let path = result.stdout.trimmingCharacters(in: .newlines)
             if try fileService.entryExistsWithoutFollowingLinks(at: path) {
                 let commit = try fileService.readFile(at: path).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard [40, 64].contains(commit.utf8.count), commit.utf8.allSatisfy({
-                    (48...57).contains($0) || (97...102).contains($0)
-                }) else { break }
-                return commit
+                guard let oid = GitObjectID.parse(commit, casePolicy: .lowercase) else { break }
+                return oid
             }
         }
         throw GitError.repositoryUnreadable(path: root, detail: "The rebase’s original commit is unavailable.")

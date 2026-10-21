@@ -141,15 +141,15 @@ struct MachineStateService: MachineStateServicing {
         }
         try fileService.createDirectory(at: directory)
         let destination = directory + "/" + state.machineID + ".yaml"
-        let parent = (root as NSString).deletingLastPathComponent
-        let base = (root as NSString).lastPathComponent
-        let temporary = parent + "/" + base + ".machine-state-" + UUID().uuidString + ".tmp"
-        do {
-            try fileService.writeFile(at: temporary, content: Self.serialize(state))
-            try fileService.replaceItem(at: destination, with: temporary)
-        } catch {
-            try? fileService.deleteFile(at: temporary)
-            throw error
+        // The coordinator holds sync.lock, as does the launch sweep of abandoned machine-state temporaries.
+        try VendorTemporaryDirectory.withPath(storeRoot: root, fileService: fileService, kind: "machine-state") { temporary in
+            do {
+                try fileService.writeFile(at: temporary, content: Self.serialize(state))
+                try fileService.replaceItem(at: destination, with: temporary)
+            } catch {
+                try? fileService.deleteFile(at: temporary)
+                throw error
+            }
         }
     }
 

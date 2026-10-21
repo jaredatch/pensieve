@@ -4,6 +4,12 @@ import XCTest
 
 /// FileService whose writes/dir-creates always throw — to prove a manifest failure is surfaced, not silent.
 private struct ThrowingWriteFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     struct Boom: Error {}
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws { throw Boom() }

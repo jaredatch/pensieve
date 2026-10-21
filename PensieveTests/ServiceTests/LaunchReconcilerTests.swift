@@ -26,6 +26,9 @@ private struct Plan24LaunchProbeCase {
 }
 
 private final class Plan24GitState: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { false }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+    func manifestMatchesHead(at path: String) throws -> Bool { false }
     var remote: String?
     var branches: Result<Bool, Error> = .success(true)
     var origin: Result<Bool, Error> = .success(true)
@@ -154,6 +157,10 @@ private final class UnlistableDirFileService: FileServiceProtocol {
     func symlinkTarget(at path: String) throws -> String { try real.symlinkTarget(at: path) }
     func isSymlink(at path: String) -> Bool { real.isSymlink(at: path) }
     func contentsHash(at path: String) throws -> String { try real.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { real.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try real.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try real.storeTemporaryParent(root: root) }
 }
 
 /// PLAN-12 / 12.3 — the launch-time rebuild-from-disk + gated one-time migration. Proves the GUI is
@@ -400,6 +407,20 @@ extension LaunchReconcilerTests {
     //    but NO manifest on disk. Launch must NOT rebuild off the absent (empty) manifest — that would
     //    delete the category, and the migration would then bake the loss into the bootstrapped manifest.
     //    Instead the rebuild is skipped and migration bootstraps the manifest FROM SwiftData, preserving it.
+    func testLinkedSkillsContainerDoesNotTriggerUnmanagedLaunchIngest() throws {
+        try NativeTestWork.run { [self] in
+            let context = try makeContext()
+            let outside = tempDir + "/outside"
+            try fileService.writeFile(at: outside + "/victim/SKILL.md",
+                content: SkillSerializer.serialize(name: "Victim", description: "Description", body: "precious"))
+            try fileService.createSymlink(at: tempDir + "/skills", pointingTo: outside)
+            let outcome = reconciler.reconcileOnLaunch(context: context, alreadyMigrated: true)
+            XCTAssertFalse(outcome.rebuild.skillListFailed, "Unmanaged detection must continue to skip a linked container")
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 0)
+            XCTAssertFalse(fileService.fileExists(at: tempDir + "/manifest/manifest.yaml"))
+        }
+    }
+
     func testLegacyStoreWithoutManifestPreservesCategories() throws {
         try NativeTestWork.run { [self] in
             let ctx = try makeContext()

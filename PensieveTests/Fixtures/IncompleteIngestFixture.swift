@@ -114,3 +114,13 @@ final class IncompleteSnapshotManifest: ManifestSnapshotting {
         return snapshot
     }
 }
+
+@MainActor
+extension IncompleteIngestFixture {
+    func queuedLibrary(manifestSaves: ManifestSaveModel? = nil) -> SkillLibraryViewModel {
+        let saves = manifestSaves ?? ManifestSaveModel(manifest: manifest, root: app,
+            lockPath: base + "/sync.lock", waitSeconds: 0.01)
+        return SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: app + "/skills", storeRoot: app),
+            fileWatchService: RecordingWatcher(), manifestRoot: app, manifestSaves: saves)
+    }
+}

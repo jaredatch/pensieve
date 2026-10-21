@@ -3,30 +3,15 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
-    func testFallbackRefreshesRefusedMetadataBeforePublication() async throws {
-        for corrupt in [false, true] {
-            let h = try ManifestSaveFixture()
-            defer { h.cleanup() }
-            if corrupt {
-                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
-            } else { try h.files.deleteDirectory(at: h.root + "/manifest") }
-            h.recording.failingWrites = 1
-            h.library.updateMetadata(h.alpha, tags: ["a"], scope: .user, context: h.context)
-            await h.saves.waitUntilIdle()
-            if corrupt { XCTAssertTrue(h.saves.showsDamageAlert) } else { XCTAssertNotNil(h.library.error) }
-            h.library.updateMetadata(h.alpha, tags: ["b"], scope: .user, context: h.context)
-            await h.saves.waitUntilIdle()
-            if corrupt {
-                h.recording.failingWrites = 0
-                h.saves.requestRepair()
-                await h.saves.replaceWithThisMac(context: h.context)
-                await h.saves.waitUntilIdle()
+    func testRefusedRetirementSurvivesRebuild() async throws {
+        for missingManifest in [false, true] {
+            for unreadableWindow in [false, true] {
+                try await checkRefusedRetirementSurvivesRebuild(missingManifest: missingManifest,
+                                                              unreadableWindow: unreadableWindow)
             }
-            XCTAssertNil(h.library.error)
-            XCTAssertEqual(h.recording.writes.count, corrupt ? 2 : 1)
-            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["b"])
-            XCTAssertEqual(h.alpha.tags, ["b"], "A refused fallback edit must use the current context before publishing")
         }
+        try await checkRefusedRetirementSurvivesRebuild(missingManifest: true, unreadableWindow: false,
+                                                      readBeforeRebuild: true)
     }
 
     func testFallbackHealAcknowledgesRetirementAndShowsLaterPull() async throws {
@@ -68,6 +53,84 @@ extension ManifestSaveTests {
             XCTAssertTrue(durable.deployIntents.contains { $0.skillSlug == "alpha" })
             XCTAssertTrue(h.local.skillSlugs.contains("alpha"), "A healed retirement must not hide a later pull")
             XCTAssertTrue(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).contains { $0.skillSlug == "alpha" })
+        }
+    }
+
+    private func checkRefusedRetirementSurvivesRebuild(missingManifest: Bool, unreadableWindow: Bool,
+                                                       readBeforeRebuild: Bool = false) async throws {
+        let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
+        let f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
+        defer { try? f.files.deleteDirectory(at: base) }
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let peerIntent = DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
+                                            platformRaw: "codex", projectKey: nil)
+        try seedRetirement(f, container: container, intent: peerIntent)
+        let context = ModelContext(container)
+        for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>()) { context.delete(intent) }
+        try context.save()
+        let manifest = RecordingSaveManifest()
+        let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: base + "/sync.lock")
+        let original = try f.manifest.read(fromRoot: f.app)
+        if missingManifest { try f.files.deleteDirectory(at: f.app + "/manifest") }
+        manifest.failingWrites = 1
+        manifest.failingSnapshots = unreadableWindow ? .max : 0
+        saves.submit(.retireSkill("item"), context: context) { XCTAssertNotNil($0) }
+        await saves.waitUntilIdle()
+        XCTAssertEqual(saves.refused.count, 1, "A failed window read cannot acknowledge a retirement")
+        saves.refreshRefused(durable: nil)
+        XCTAssertEqual(saves.refused.count, 1, "A missing manifest cannot acknowledge retirement")
+        try f.manifest.write(original, toRoot: f.app)
+        try NativeTestWork.run {
+            var peer = try f.manifest.read(fromRoot: f.peer)
+            peer.categories.append(CategoryRecord(name: "Peer membership", projectKeys: [], skillSlugs: ["item"]))
+            try f.manifest.write(peer, toRoot: f.peer)
+            _ = try f.git.stageAllAndCommit(at: f.peer, message: "membership after retirement")
+            try f.git.push(at: f.peer, credential: nil)
+            _ = try f.git.fastForwardOnly(at: f.app, credential: nil)
+        }
+        if readBeforeRebuild { saves.refreshRefused(durable: try f.manifest.read(fromRoot: f.app)) }
+        try NativeTestWork.run(container: container) { worker in
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: f.app, context: worker)
+            let window = try f.manifest.snapshot(from: worker)
+            XCTAssertEqual(window.categories.contains { $0.skillSlugs.contains("item") }, !missingManifest,
+                           "Raw fallback removes memberships; known fields leave a later peer membership alone")
+            XCTAssertFalse(window.deployIntents.contains { $0.skillSlug == "item" }, "Rebuild cannot resurrect an intent")
+        }
+        XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
+        saves.refreshRefused(durable: try f.manifest.read(fromRoot: f.app))
+        XCTAssertEqual(saves.refused.count, 1, "Readable disk still contains the retired slug's requests")
+        try publishRetirement(f, container: container, peerMembershipSurvives: !missingManifest)
+        saves.refreshRefused(durable: try f.manifest.read(fromRoot: f.app))
+        XCTAssertTrue(saves.refused.isEmpty, "Only durable removal acknowledges retirement")
+        XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
+    }
+
+    private func seedRetirement(_ f: IncompleteIngestFixture, container: ModelContainer, intent: DeployIntentRecord) throws {
+        try NativeTestWork.run(container: container) { context in
+            var seed = try f.manifest.read(fromRoot: f.peer)
+            seed.deployIntents.append(intent)
+            try f.manifest.write(seed, toRoot: f.peer)
+            _ = try f.git.stageAllAndCommit(at: f.peer, message: "intent before retirement")
+            try f.git.push(at: f.peer, credential: nil)
+            _ = try f.git.fastForwardOnly(at: f.app, credential: nil)
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: f.app, context: context)
+        }
+    }
+
+    private func publishRetirement(_ f: IncompleteIngestFixture, container: ModelContainer,
+                                   peerMembershipSurvives: Bool) throws {
+        try NativeTestWork.run(container: container) { worker in
+            let engine = f.engine(rebuild: StoreRebuildService())
+            guard case .synced = try engine.sync(root: f.app, message: "publish retirement",
+                credential: nil, context: worker, prepare: { context in
+                    try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: f.app, context: context)
+                }) else { return XCTFail("Sync must publish the retirement") }
+            let published = f.base + "/published"
+            try f.git.clone(remote: f.remote, into: published, credential: nil)
+            let disk = try f.manifest.read(fromRoot: published)
+            XCTAssertEqual(disk.categories.contains { $0.skillSlugs.contains("item") }, peerMembershipSurvives,
+                           "Publication preserves the retirement's known field set")
+            XCTAssertFalse(disk.deployIntents.contains { $0.skillSlug == "item" })
         }
     }
 

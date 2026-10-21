@@ -1,13 +1,42 @@
 import Foundation
 
-/// The install/import preparation namespace, outside the configured store and owned by its locked sweep.
+/// Store publishers prepare outside the store on its own device. The resolved-path key keeps
+/// separate stores with the same basename from sweeping each other's abandoned preparations.
 enum VendorTemporaryDirectory {
-    static func namespace(storeRoot: String) -> (parent: String, prefix: String) {
-        ((storeRoot as NSString).deletingLastPathComponent, (storeRoot as NSString).lastPathComponent + ".vendor-")
+    static let kinds = ["vendor", "manifest-build", "machine-state"]
+
+    static func namespace(storeRoot: String, fileService: FileServiceProtocol,
+                          kind: String = "vendor") throws -> (parent: String, prefix: String) {
+        let parent = try fileService.storeTemporaryParent(root: storeRoot)
+        let key = try fileService.storeKey(root: storeRoot)
+        return (parent + "/.pensieve-" + key, kind + "-")
     }
 
-    static func makePath(storeRoot: String) -> String {
-        let location = namespace(storeRoot: storeRoot)
+    static func legacyNamespace(storeRoot: String) -> (parent: String, prefixes: [String]) {
+        ((storeRoot as NSString).deletingLastPathComponent,
+         kinds.map { (storeRoot as NSString).lastPathComponent + "." + $0 + "-" })
+    }
+
+    /// The caller holds sync.lock through this scope, including cleanup after a failed publication.
+    static func withPath<Result>(storeRoot: String, fileService: FileServiceProtocol, kind: String = "vendor",
+                                 body: (String) throws -> Result) throws -> Result {
+        let path = try makePath(storeRoot: storeRoot, fileService: fileService, kind: kind)
+        defer { try? fileService.removeEmptyDirectory(at: (path as NSString).deletingLastPathComponent) }
+        return try body(path)
+    }
+
+    static func makePath(storeRoot: String, fileService: FileServiceProtocol, kind: String = "vendor") throws -> String {
+        let location = try namespace(storeRoot: storeRoot, fileService: fileService, kind: kind)
+        if try !fileService.storeContainerExists(at: location.parent) {
+            do {
+                try fileService.createDirectory(at: location.parent)
+            } catch {
+                // A concurrent creator is fine only when it left a real directory.
+                guard (try? fileService.storeContainerExists(at: location.parent)) == true else { throw error }
+            }
+        }
+        // Recheck after creation, which may have raced a file or link into this name.
+        guard try fileService.storeContainerExists(at: location.parent) else { throw CocoaError(.fileNoSuchFile) }
         return location.parent + "/" + location.prefix + UUID().uuidString + ".tmp"
     }
 

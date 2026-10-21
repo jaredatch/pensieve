@@ -19,22 +19,39 @@ final class AppRuntimeTests: XCTestCase {
         let host = try XCTUnwrap(window.contentView as? NSHostingView<AnyView>)
         func content(_ phase: ScenePhase) -> AnyView {
             AnyView(PensieveApp.makeContentView(runtime: harness.runtime)
+                .overlay(RenderedScenePhase())
                 .environment(harness.runtime).modelContainer(harness.runtime.container).environment(\.scenePhase, phase))
         }
         host.rootView = content(.inactive)
-        await TestWait.until(failureMessage: "The main window must render before activation") {
-            !RenderedViewTestSupport.values(in: host).isEmpty
-        }
+        await waitForRenderedInactivePhase(in: host)
         // The sync model starts idle and learns the library is unconfigured from the bootstrap's detached git
         // read. A slow host (GitHub's runner) can still be reading here, and the footer stays up until it lands.
         await harness.runtime.bootstrapTask.value
         XCTAssertFalse(harness.runtime.syncModel.showsFooter(saves: h.saves))
+        let healthy = try h.files.readFile(at: h.root + "/manifest/manifest.yaml")
         try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged while inactive")
         host.rootView = content(.active)
         await TestWait.until(failureMessage: "Activating the window must discover damage without a mounted footer") {
             h.saves.libraryDamaged
         }
         XCTAssertEqual(h.saves.pendingCount, 0)
+        await TestWait.until(failureMessage: "Activation must render the damage line and supply a repair offer") {
+            self.hasDamageLine(host) && h.saves.damage != nil
+        }
+        host.rootView = content(.inactive)
+        await waitForRenderedInactivePhase(in: host)
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: healthy)
+        host.rootView = content(.active)
+        await TestWait.until(failureMessage: "Activation must retire externally repaired damage") {
+            !h.saves.libraryDamaged && h.saves.damage == nil && !self.hasDamageLine(host)
+        }
+    }
+
+    private func waitForRenderedInactivePhase(in host: NSView) async {
+        await TestWait.until(failureMessage: "The inactive scene phase must render before activation") {
+            RenderedViewTestSupport.values(in: host).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).contains("__inactive_scene_phase__")
+        }
     }
 
     func testDamageRecoveryRunsOnlyDamageDeferredLaunchWorkOnceOffMain() async throws {
@@ -347,5 +364,13 @@ extension AppRuntimeTests {
         await TestWait.until(failureMessage: "Conflict completion must finish convergence") { deploy.calls > 0 }
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(category.calls, 1)
+    }
+}
+
+private struct RenderedScenePhase: View {
+    @Environment(\.scenePhase) private var phase
+
+    var body: some View {
+        Text(phase == .inactive ? "__inactive_scene_phase__" : "__other_scene_phase__").hidden()
     }
 }

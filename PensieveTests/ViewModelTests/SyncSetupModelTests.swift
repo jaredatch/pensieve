@@ -33,6 +33,9 @@ final class SyncSetupModelTests: XCTestCase {
     /// Records call order + scriptable results. Every op appends a tag to `calls`; `throwAuthOn` names
     /// a call that should throw `authenticationFailed`.
     private final class RecordingGitService: GitServiceProtocol {
+        func isWorktreeClean(at path: String) -> Bool { false }
+        func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+        func manifestMatchesHead(at path: String) throws -> Bool { false }
         var beforeCall: ((String) -> Void)?
         private(set) var calls: [String] = []
         let trace: EventTrace
@@ -213,6 +216,12 @@ final class SyncSetupModelTests: XCTestCase {
 
         init(trace: EventTrace = EventTrace()) { self.trace = trace }
 
+        func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+            if symlinks.contains(path) { return .symlink }
+            if dirs.contains(path) { return .directory }
+            if files.contains(path) || regularFiles.contains(path) { return .regular }
+            return nil
+        }
         func directoryExists(at path: String) -> Bool { dirs.contains(path) }
         func listDirectory(at path: String) throws -> [String] {
             if listErrors.contains(path) { throw StubBoom() }
@@ -344,6 +353,41 @@ extension SyncSetupModelTests {
     }
 
     // MARK: - connect: call order
+
+    func testLinkedSkillsContainerRefusesSetupBeforeAnyWrite() async throws {
+        for configured in [false, true] {
+            for linked in [true, false] {
+                let files = FileService()
+                let outside = root + "-outside"
+                try files.writeFile(at: outside + "/victim/SKILL.md", content: "precious")
+                if linked {
+                    try files.createSymlink(at: root + "/skills", pointingTo: outside)
+                } else {
+                    try files.writeFile(at: root + "/skills", content: "not a folder")
+                }
+                if configured { try files.createDirectory(at: root + "/.git") }
+                defer {
+                    try? files.deleteDirectory(at: root)
+                    try? files.deleteDirectory(at: outside)
+                }
+                let before = try files.listDirectory(at: root).sorted()
+                let git = RecordingGitService(), credentials = InMemoryCredentialStore()
+                let model = try makeModel(git: git, credentials: credentials,
+                    rebuilder: RecordingRebuilder(), fileService: files)
+                await model.connectAndReport(url: "https://fixture.test/owner/library.git", username: "fixture", token: "fixture")
+                guard case .failed(let message) = model.state else { XCTFail("Unsafe skills must refuse setup"); continue }
+                let reason = linked ? "is a link to another folder" : "isn't a folder"
+                let expected = "“" + ((root + "/skills") as NSString).abbreviatingWithTildeInPath
+                    + "” " + reason + ". Pensieve needs a real folder there."
+                XCTAssertTrue(message.contains(expected), message)
+                XCTAssertNil(credentials.credential(forHost: "fixture.test"))
+                XCTAssertTrue(git.calls.isEmpty, "Refuse before any git write: \(git.calls)")
+                XCTAssertEqual(try files.listDirectory(at: root).sorted(), before)
+                XCTAssertEqual(try files.readFile(at: outside + "/victim/SKILL.md"), "precious")
+                if !linked { XCTAssertEqual(try files.readFile(at: root + "/skills"), "not a folder") }
+            }
+        }
+    }
 
     func testConnectInitAndPushCallOrder() async throws {
         let git = RecordingGitService()   // remoteHasCommits false -> fresh remote, skip pull

@@ -528,6 +528,20 @@ extension GitServiceTests {
             // Pull on B conflicts.
             XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
             XCTAssertEqual(try git.conflictedFiles(at: b), ["README.md"])
+            // A held index makes native abort fail without naming an obstructing folder.
+            let indexLock = b + "/.git/index.lock"
+            try FileService().writeFile(at: indexLock, content: "held by another git process")
+            var nativeMessage: String?
+            XCTAssertThrowsError(try git.abortRebase(at: b)) { error in
+                nativeMessage = error.localizedDescription
+                XCTAssertTrue(error.localizedDescription.contains("index.lock"))
+            }
+            XCTAssertThrowsError(try git.abortRebase(at: b, refusedFolder: "README.md")) { error in
+                XCTAssertEqual(error.localizedDescription, nativeMessage,
+                    "An unrelated abort failure must retain git's diagnostic without invented folder advice")
+                XCTAssertFalse(error is ConflictAbortBlocked)
+            }
+            try FileService().deleteFile(at: indexLock)
             // Abort restores B to its pre-pull state — nothing lost, no conflicted files.
             try git.abortRebase(at: b)
             XCTAssertEqual(try git.runOrThrow(["-C", b, "rev-parse", "--is-inside-work-tree"], in: nil).stdout, "true\n")
@@ -856,6 +870,10 @@ private struct AskpassWriteObservingFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
 }
 
 extension GitServiceTests {
@@ -1178,5 +1196,69 @@ extension GitServiceTests {
         sys.stderr.buffer.write(base64.b64decode('\(stderr.base64EncodedString())'))
         sys.exit(\(exit))
         """)
+    }
+}
+
+extension GitServiceTests {
+    func testManifestAdmissionRefusesCollapsedDirectoryThatIsNowALink() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService(), root = tempDir + "/linked-container"
+            try files.createDirectory(at: root)
+            try git.initRepository(at: root)
+            try files.writeFile(at: root + "/manifest/manifest.yaml", content: "damaged\n")
+            _ = try git.stageAllAndCommit(at: root, message: "committed damage")
+            let outside = tempDir + "/outside"
+            try files.createDirectory(at: outside)
+            try files.createSymlink(at: root + "/manifest/categories", pointingTo: outside)
+            let executable = tempDir + "/collapsed-listing-git"
+            // Pin the matcher input produced before a final-component replacement; no timing race is needed.
+            try files.writeExecutableFile(at: executable, content: """
+                #!/bin/sh
+                is_listing() {
+                    \(FakeGitScript.skipGlobalOptions)
+                    [ "$1" = ls-files ]
+                }
+                if is_listing "$@"; then
+                    printf 'manifest/categories/\\0'
+                    exit 0
+                fi
+                exec /usr/bin/git "$@"
+                """ + "\n")
+            let listing = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            XCTAssertFalse(try listing.manifestMatchesHead(at: root), "A collapsed directory's final link must not be followed")
+        }
+    }
+
+    func testManifestAdmissionPreservesUntrackedPathBytes() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let root = tempDir + "/store"
+            try files.createDirectory(at: root)
+            try git.initRepository(at: root)
+            try files.writeFile(at: root + "/manifest/manifest.yaml", content: "damaged\n")
+            _ = try git.stageAllAndCommit(at: root, message: "committed damage")
+            let executable = tempDir + "/manifest-listing-git"
+            for visible in [false, true] {
+                let entry = Data("manifest/categories/".utf8)
+                    + Data((visible ? ".env." : "node_modules/").utf8) + Data([0xFF])
+                    + Data((visible ? ".yaml\0" : "\0").utf8)
+                try files.writeExecutableFile(at: executable, content: """
+                    #!/bin/sh
+                    is_manifest_listing() {
+                        \(FakeGitScript.skipGlobalOptions)
+                        [ "$1" = ls-files ] || return 1
+                        case "$*" in *--directory*) return 0 ;; *) return 1 ;; esac
+                    }
+                    if is_manifest_listing "$@"; then
+                        printf '%s' '\(entry.base64EncodedString())' | /usr/bin/base64 -D
+                        exit 0
+                    fi
+                    exec /usr/bin/git "$@"
+                    """ + "\n")
+                let listing = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+                XCTAssertEqual(try listing.manifestMatchesHead(at: root), !visible,
+                               "Invalid UTF-8 must not erase a parser-visible untracked path")
+            }
+        }
     }
 }

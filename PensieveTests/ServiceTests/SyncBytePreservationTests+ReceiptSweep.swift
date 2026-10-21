@@ -10,6 +10,24 @@ private struct ReceiptSweepCase {
 }
 
 extension SyncBytePreservationTests {
+    func testCleanupKeepsMetadataAndLegacySweepWhenRootResolutionFails() throws {
+        try NativeTestWork.run { [self] in
+            let root = base + "/cleanup-resolution"
+            try files.createDirectory(at: root + "/.git")
+            let probe = try StoreWriteCrashProbe(directory: base + "/cleanup-resolution-probe")
+            let identity = try XCTUnwrap(files.fileIdentity(at: root, followingLinks: true))
+            let parent = try files.storeTemporaryParent(root: root)
+            let legacy = parent + "/.pensieve-store-writes-\(identity.device)-\(identity.inode)"
+            defer { try? files.deleteDirectory(at: legacy) }
+            let leftovers = [root + "/.git", legacy].map { $0 + "/.pensieve-write-" + UUID().uuidString }
+            for path in leftovers { try files.writeFile(at: path, content: "abandoned") }
+            XCTAssertEqual(try probe.run(root: root, writer: "cleanup", point: "root-resolution-fails"), 0)
+            XCTAssertEqual(try files.readFile(at: probe.library + ".path"), "root resolution failed",
+                           "The resolver must actually fail after the initial root admission")
+            for path in leftovers { XCTAssertFalse(files.fileExists(at: path), "Cleanup left " + path) }
+        }
+    }
+
     func testGeneratedReceiptRewritePreservesSafePathsDropsUnsafeAndIsIdempotent() throws {
         try NativeTestWork.run { [self] in
             let safe = ["skills/x/assets/legacy", "skills/x/a [*?!#]", "skills/\u{0600}/\u{0301}asset",

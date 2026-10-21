@@ -103,6 +103,13 @@ final class SettingsReadFiles: FileServiceProtocol {
         }
         return base.isRegularFile(at: path)
     }
+
+    func realPath(at path: String) -> String { base.realPath(at: path) }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try base.entryTypeWithoutFollowingLinks(at: path)
+    }
+    func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }
 
 /// Runs the real folder scan, then introduces a sync arrival before the importer acquires its lock.

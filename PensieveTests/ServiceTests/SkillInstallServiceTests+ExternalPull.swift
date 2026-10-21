@@ -5,18 +5,20 @@ import XCTest
 extension SkillInstallServiceTests {
     @MainActor
     func testInstallAdoptAndUpdateIngestExternalFastForwardBeforePublishing() async throws {
-        for writer in ["install", "adopt", "update"] { try await assertInstallIngest(writer, unreadableHead: false) }
+        for writer in ["install", "adopt", "update"] { try await assertInstallIngest(writer, headFault: nil) }
     }
 
     @MainActor
     func testUnreadableHeadRequiresInstallAdoptAndUpdateIngest() async throws {
-        for writer in ["install", "adopt", "update"] { try await assertInstallIngest(writer, unreadableHead: true) }
+        for fault in HeadMetadataFault.allCases {
+            for writer in ["install", "adopt", "update"] { try await assertInstallIngest(writer, headFault: fault) }
+        }
     }
 
     @MainActor
     func testInstallAdoptAndUpdateReportTheIngestFailureCause() async throws {
         for writer in ["install", "adopt", "update"] {
-            try await assertInstallIngest(writer, unreadableHead: false, refuseScan: true)
+            try await assertInstallIngest(writer, headFault: nil, refuseScan: true)
         }
     }
 
@@ -83,9 +85,10 @@ extension SkillInstallServiceTests {
     }
 
     @MainActor
-    private func assertInstallIngest(_ writer: String, unreadableHead: Bool, refuseScan: Bool = false) async throws {
+    private func assertInstallIngest(_ writer: String, headFault: HeadMetadataFault?,
+                                     refuseScan: Bool = false) async throws {
         let f = try await BlockingWork.run {
-            try IncompleteIngestFixture(base: self.tempDir + "/outside-\(writer)-\(unreadableHead)")
+            try IncompleteIngestFixture(base: self.tempDir + "/outside-\(writer)-\(headFault?.rawValue ?? "readable")")
         }
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
@@ -96,7 +99,7 @@ extension SkillInstallServiceTests {
             fileService: files, scratchRoot: f.base + "/scratch", storeRoot: f.app,
             manifestService: manifest, lockPath: f.base + "/sync.lock",
             remoteValidator: fixtureRemoteValidator)
-        let source = try await externalSource(service, name: "upstream-\(writer)-\(unreadableHead)")
+        let source = try await externalSource(service, name: "upstream-\(writer)-\(headFault?.rawValue ?? "readable")")
         let candidate = try XCTUnwrap(source.candidates.first)
         if writer == "update" {
             try await prepareAdoptedItem(f, service: service, source: source, candidate: candidate, context: context)
@@ -109,12 +112,9 @@ extension SkillInstallServiceTests {
             }
         }
         XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
-        let headPath = f.app + "/.git/HEAD", head = try f.files.readFile(at: f.app + "/.git/HEAD")
-        if unreadableHead {
-            try f.files.writeFile(at: headPath, content: "unreadable head\n")
-            XCTAssertNil(GitHeadStamp().read(root: f.app))
-        }
-        defer { if unreadableHead { try? f.files.writeFile(at: headPath, content: head) } }
+        let restore = try headFault?.apply(root: f.app)
+        try headFault?.assertUnreadable(root: f.app)
+        defer { try? restore?() }
         if refuseScan {
             try await assertInstallRefusal(writer, files: files, service: service, source: source,
                                            container: container, manifest: manifest)
@@ -127,9 +127,34 @@ extension SkillInstallServiceTests {
         let slug = writer == "install" ? "vendor" : "item"
         XCTAssertNotNil(try context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == slug }?.installedOrigin)
         XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name).sorted(), ["Added", "Kept"])
-        if unreadableHead { try f.files.writeFile(at: headPath, content: head) }
+        try restore?()
+        if headFault == nil && !refuseScan {
+            try await assertFollowingInstallSkipsIngest(writer, fixture: f, service: service, source: source,
+                                                       container: container, files: files)
+        }
         try await assertWriterSync(f, container: container)
     }
+    private func assertFollowingInstallSkipsIngest(_ writer: String, fixture f: IncompleteIngestFixture,
+                                                   service: SkillInstallService, source: SkillFetchResult,
+                                                   container: ModelContainer, files: RebuildReadFileService) async throws {
+        let candidate = try XCTUnwrap(source.candidates.first)
+        try await BlockingWork.run {
+            try f.configureReadableFormat("v1")
+            let before = files.skillListings.value
+            let job = ModelContext(container)
+            switch writer {
+            case "install":
+                XCTAssertEqual(try service.install(candidate: candidate, renamedTo: "following", from: source,
+                                                   context: job), .installed(slug: "following"))
+            case "adopt":
+                _ = try service.adopt(existingSlug: "item", candidate: candidate, from: source, context: job)
+            default:
+                try service.update(existingSlug: "item", candidate: candidate, from: source, context: job)
+            }
+            XCTAssertEqual(files.skillListings.value, before, "An unchanged supported format must skip ingestion")
+        }
+    }
+
     private func assertWriterSync(_ f: IncompleteIngestFixture, container: ModelContainer) async throws {
         try await BlockingWork.run {
             guard case .synced = try f.engine(rebuild: StoreRebuildService()).sync(root: f.app,

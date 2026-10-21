@@ -3,6 +3,12 @@ import Darwin
 import Foundation
 
 extension FileServiceProtocol {
+    /// Path-only default for modeled filesystems; concrete FileService admits a same-device system location.
+    func storeTemporaryParent(root: String) throws -> String { (root as NSString).deletingLastPathComponent }
+
+    /// Unmodeled cleanup never touches host files.
+    func removeEmptyDirectory(at path: String) throws {}
+
     /// Atomically publish over an absent or empty directory, preserving every other occupant.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws {
         try publishDirectory(at: sourcePath, to: destinationPath, exclusively: false)
@@ -45,6 +51,13 @@ extension FileServiceProtocol {
 }
 
 extension FileService {
+    func removeEmptyDirectory(at path: String) throws {
+        guard rmdir(path) != 0 else { return }
+        let code = errno
+        guard code != ENOENT, code != ENOTEMPTY else { return }
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
+    }
+
     /// Publication uses the admitted directory descriptor throughout. A replaced namespace cannot
     /// redirect this writer into a directory protected by another lock. Rename never displaces folders.
     func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {
@@ -58,8 +71,9 @@ extension FileService {
             directory = metadata
         } else {
             guard !control else { throw CocoaError(.fileNoSuchFile) }
-            let parent = try skillTemporaryParent(root: root)
-            let candidates = try skillNamespaces(root: root, parent: parent)
+            let location = try resolvedStoreLocation(root: root)
+            let parent = try storeTemporaryParent(location: location)
+            let candidates = skillNamespaces(store: location.path, parent: parent)
             guard let candidate = candidates.first(where: {
                 let type = try? entryTypeWithoutFollowingLinks(at: $0)
                 return type == nil || type == .directory
@@ -97,10 +111,12 @@ extension FileService {
         if sameStoreDevice(system, root) {
             parent = try? resolveRealPath(at: system)
         } else if metadata == nil {
-            parent = try? skillTemporaryParent(root: root)
+            parent = try? storeTemporaryParent(root: root)
         } else { parent = nil }
-        guard let parent, let candidates = try? skillNamespaces(root: root, parent: parent) else { return }
-        for directory in candidates { cleanStoreDirectory(directory) }
+        guard let parent else { return }
+        if let location = try? resolvedStoreLocation(root: root) {
+            for directory in skillNamespaces(store: location.path, parent: parent) { cleanStoreDirectory(directory) }
+        }
         // Reclaim this store's previous-format namespace when its identity is still known.
         if let identity = fileIdentity(at: root, followingLinks: true) {
             cleanStoreDirectory(parent + "/.pensieve-store-writes-\(identity.device)-\(identity.inode)")
@@ -118,27 +134,32 @@ extension FileService {
         return device == fileIdentity(at: second, followingLinks: true)?.device
     }
 
-    private func skillTemporaryParent(root: String) throws -> String {
-        let store = try resolveRealPath(at: root)
+    func storeTemporaryParent(root: String) throws -> String {
+        try storeTemporaryParent(location: resolvedStoreLocation(root: root))
+    }
+
+    private func storeTemporaryParent(location: (path: String, existingAncestor: String)) throws -> String {
+        let store = location.path
         var parent = FileManager.default.temporaryDirectory.path
-        if !sameStoreDevice(parent, store) {
+        if !sameStoreDevice(parent, location.existingAncestor) {
             // A volume-root store has no outside location on its own device. Refuse before
             // Foundation creates .TemporaryItems inside it; configuring Git supplies metadata.
             var volume = statfs()
-            guard statfs(store, &volume) == 0 else { throw storePublicationError(at: store, code: errno) }
+            guard statfs(location.existingAncestor, &volume) == 0 else { throw storePublicationError(at: store, code: errno) }
             let mount = withUnsafePointer(to: &volume.f_mntonname) {
                 $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
             }
             guard try resolveRealPath(at: mount) != store else {
                 throw storePublicationError(at: store, code: EXDEV)
             }
-            let replacement = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                                                          appropriateFor: URL(fileURLWithPath: store), create: true)
+            let replacement = try FileManager.default.url(
+                for: .itemReplacementDirectory, in: .userDomainMask,
+                appropriateFor: URL(fileURLWithPath: location.existingAncestor), create: true)
             parent = replacement.deletingLastPathComponent().path
             try? deleteDirectory(at: replacement.path)
         }
         parent = try resolveRealPath(at: parent)
-        guard sameStoreDevice(parent, store) else { throw storePublicationError(at: parent, code: EXDEV) }
+        guard sameStoreDevice(parent, location.existingAncestor) else { throw storePublicationError(at: parent, code: EXDEV) }
         guard parent != store, !PathSyntax.hasPrefix(parent, store + "/") else {
             throw storePublicationError(at: parent, code: EINVAL)
         }
@@ -147,10 +168,9 @@ extension FileService {
 
     /// Key by the resolved store path, so replacing its inode or remounting its device does not orphan writes.
     /// The alternate preserves a foreign occupant at the ordinary namespace, including a symlink.
-    private func skillNamespaces(root: String, parent: String) throws -> [String] {
-        let store = try resolveRealPath(at: root)
+    private func skillNamespaces(store: String, parent: String) -> [String] {
         guard parent != store, !PathSyntax.hasPrefix(parent, store + "/") else { return [] }
-        let key = SHA256.hash(data: Data(store.utf8)).map { String(format: "%02x", $0) }.joined()
+        let key = storeKey(resolvedPath: store)
         let directory = parent + "/.pensieve-store-writes-" + key
         return [directory, directory + "-alternate"]
     }
@@ -212,10 +232,8 @@ extension FileServiceProtocol {
         guard let type = try entryTypeWithoutFollowingLinks(at: metadata) else { return nil }
         let directory: String
         if type == .regular {
-            let text = try readFile(at: metadata).trimmingCharacters(in: .newlines)
-            guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileWriteUnknown) }
-            let target = String(text.dropFirst(8))
-            directory = PathSyntax.isAbsolute(target) ? target : root + "/" + target
+            let text = try GitDirectoryText.read(at: metadata, fileService: self)
+            directory = try GitDirectoryText.directory(text, relativeTo: root)
         } else {
             guard type == .directory else { throw CocoaError(.fileReadUnknown) }
             directory = metadata
@@ -242,5 +260,33 @@ extension FileService {
         guard access(metadata, W_OK | X_OK) == 0 else {
             throw storePublicationError(at: metadata, code: errno)
         }
+    }
+}
+
+// The same resolved path keys body writes and vendor, manifest and machine-state preparations.
+extension FileServiceProtocol {
+    func storeKey(root: String) throws -> String {
+        let store = try resolvedStoreLocation(root: root).path
+        return storeKey(resolvedPath: store)
+    }
+
+    fileprivate func storeKey(resolvedPath: String) -> String {
+        SHA256.hash(data: Data(resolvedPath.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Missing components inherit the nearest existing ancestor's device and resolved spelling.
+    /// A present but unresolvable entry (including a dangling link) always throws.
+    func resolvedStoreLocation(root: String) throws -> (path: String, existingAncestor: String) {
+        do {
+            let path = try resolveRealPath(at: root)
+            return (path, path)
+        } catch {
+            guard try entryTypeWithoutFollowingLinks(at: root) == nil else { throw error }
+        }
+        let parent = (root as NSString).deletingLastPathComponent
+        guard parent != root, !(root == "." && parent.isEmpty) else { throw CocoaError(.fileNoSuchFile) }
+        let location = try resolvedStoreLocation(root: parent.isEmpty ? "." : parent)
+        let path = (location.path as NSString).appendingPathComponent((root as NSString).lastPathComponent)
+        return (path, location.existingAncestor)
     }
 }

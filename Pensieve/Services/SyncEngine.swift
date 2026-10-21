@@ -51,6 +51,11 @@ enum SyncError: LocalizedError, Equatable {
     }
 }
 
+/// Recovery still reports damage; retain the cause for audit and app-authored credential advice.
+struct ManifestRecoveryFailure: Error {
+    let underlying: Error
+}
+
 // MARK: - Protocol
 
 protocol SyncEngineProtocol {
@@ -136,14 +141,14 @@ struct SyncEngine: SyncEngineProtocol {
         try requireAcceptableRemote(at: root)
         try gitService.abortRebase(at: root)
 
-        // Guard BEFORE any write: if the on-disk manifest is newer/unreadable (e.g. a clone of a remote
-        // written by a newer Pensieve), refuse. The after-pull storeUnreadable guard CANNOT catch this —
-        // step 1 below would already have clobbered the newer manifest with our snapshot, so we'd push a
-        // downgrade. Reading it here (before the write) fails fast instead. (PLAN-08 review)
-        try requireReadableManifest(root: root)
+        // A snapshot must never replace unreadable disk state. Committed damage may first move
+        // to a readable peer revision; a newer schema keeps its unconditional refusal.
+        let recoveredByPull = try recoverCommittedDamage(root: root, credential: credential)
 
         let headStamp = GitHeadStamp(fileService: fileService)
-        let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
+        // Recovery already checked the scoped, pinned revision. Pull still rechecks collisions
+        // after preparation, including protected files created while preparing the snapshot.
+        let incoming = recoveredByPull ? nil : try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
         try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
 
@@ -153,10 +158,12 @@ struct SyncEngine: SyncEngineProtocol {
         // 2. Install the union-merge driver + ignore rules (idempotent) so the pull below auto-merges
         //    concurrent list edits instead of emitting conflict markers.
         try ensureSyncAttributes(root: root)
+        let localCommit = try? SyncLocalCommit(root: root, files: fileService,
+                                                capture: gitService.hasUncommittedChanges(at: root))
         // 3. Commit (false when nothing changed locally).
         let committed = try gitService.stageAllAndCommit(at: root, message: message)
-        StoreIngestState.shared(for: context.container)
-            .recordLocalCommit(from: admittedParent, to: headStamp.read(root: root))
+        localCommit?.record(from: admittedParent, to: headStamp.read(root: root), root: root,
+                            git: gitService, state: StoreIngestState.shared(for: context.container))
 
         // 4. Pull with rebase. A body/overlay conflict is NOT ours to resolve here: abort (restoring the
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
@@ -183,7 +190,7 @@ struct SyncEngine: SyncEngineProtocol {
         return .synced(
             pushed: committed,
             warnings: rebuild.warnings,
-            ingestedHeadStamp: ingestedHeadStamp, pulled: pulled
+            ingestedHeadStamp: ingestedHeadStamp, pulled: pulled || recoveredByPull
         )
     }
 
@@ -282,6 +289,28 @@ struct SyncEngine: SyncEngineProtocol {
         }
     }
 
+    /// Recovery moves only committed damage, before prepare, snapshots or local commits can run.
+    private func recoverCommittedDamage(root: String, credential: GitCredential?) throws -> Bool {
+        do {
+            try requireReadableManifest(root: root)
+            return false
+        } catch ManifestError.damaged {
+            do {
+                guard gitService.isWorktreeClean(at: root),
+                      try gitService.manifestMatchesHead(at: root) else { throw ManifestError.damaged }
+                guard case .fastForwarded = try gitService.fastForwardOnly(at: root, credential: credential) else {
+                    throw ManifestError.damaged
+                }
+            } catch ManifestError.damaged {
+                throw ManifestError.damaged
+            } catch {
+                throw ManifestRecoveryFailure(underlying: error)
+            }
+            try requireReadableManifest(root: root)
+            return true
+        }
+    }
+
     private func requireReadableManifest(root: String) throws {
         do {
             _ = try ManifestService.classifiedRead(using: manifestService, root: root, files: fileService)
@@ -325,10 +354,12 @@ struct SyncEngine: SyncEngineProtocol {
         let admittedParent = stamp.read(root: root)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
+        let localCommit = try? SyncLocalCommit(root: root, files: fileService,
+                                                capture: gitService.hasUncommittedChanges(at: root))
         let committed = try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
                                                              credential: credential, fetchedRevision: incoming)
-        StoreIngestState.shared(for: context.container)
-            .recordLocalCommit(from: admittedParent, to: stamp.read(root: root))
+        localCommit?.record(from: admittedParent, to: stamp.read(root: root), root: root,
+                            git: gitService, state: StoreIngestState.shared(for: context.container))
         return committed
     }
 

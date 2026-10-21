@@ -4,6 +4,124 @@ import XCTest
 
 extension StoreRebuildServiceTests {
     @MainActor
+    func testLinkedStoreContainersRefuseIngestWithoutChangingRows() throws {
+        try writeSkillFile(slug: "victim", name: "Original", description: "Original")
+        try writeManifest(skills: [overlay("victim")])
+        let snapshot = try manifest.read(fromRoot: tempDir)
+        for container in ["skills", "manifest"] {
+            let path = tempDir + "/" + container
+            let outside = tempDir + "/outside-" + container
+            try FileManager.default.moveItem(atPath: path, toPath: outside)
+            try fileService.createSymlink(at: path, pointingTo: outside)
+            for suppliedSnapshot in [false, true] {
+                let context = try makeContext()
+                context.insert(Skill(name: "Preserved", skillDescription: "Local", directoryName: "victim"))
+                context.insert(Skill(name: "Absent", skillDescription: "Local", directoryName: "absent"))
+                context.insert(Pensieve.Category(name: "Preserved category"))
+                try context.save()
+                let result = suppliedSnapshot
+                    ? service.rebuild(snapshot: snapshot, fromRoot: tempDir, context: context, manifestIsAuthoritative: true)
+                    : service.rebuild(fromRoot: tempDir, context: context)
+                if container == "manifest", !suppliedSnapshot {
+                    XCTAssertTrue(result.manifestDamaged)
+                    XCTAssertEqual(result.warnings, [ManifestError.damaged.localizedDescription])
+                } else {
+                    XCTAssertTrue(result.skillListFailed, container)
+                    let warning = "“" + (path as NSString).abbreviatingWithTildeInPath
+                        + "” is a link to another folder. Pensieve needs a real folder there."
+                    XCTAssertTrue(result.warnings.contains { $0.contains(warning) }, result.warnings.joined())
+                }
+                XCTAssertEqual(Set(try context.fetch(FetchDescriptor<Skill>()).map(\.name)), ["Preserved", "Absent"])
+                XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name), ["Preserved category"])
+            }
+            try fileService.deleteFile(at: path)
+            try FileManager.default.moveItem(atPath: outside, toPath: path)
+        }
+    }
+
+    @MainActor
+    func testRegularSkillsContainerWarningNamesTheFolderAndKeepsRows() throws {
+        try fileService.writeFile(at: tempDir + "/skills", content: "not a folder")
+        let context = try makeContext()
+        context.insert(Skill(name: "Preserved", directoryName: "victim"))
+        try context.save()
+        let result = service.rebuild(fromRoot: tempDir, context: context)
+        let warning = "“" + ((tempDir + "/skills") as NSString).abbreviatingWithTildeInPath
+            + "” isn't a folder. Pensieve needs a real folder there."
+        XCTAssertTrue(result.skillListFailed)
+        XCTAssertTrue(result.warnings.contains { $0.contains(warning) }, result.warnings.joined())
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.name), ["Preserved"])
+        XCTAssertEqual(try fileService.readFile(at: tempDir + "/skills"), "not a folder")
+    }
+
+    @MainActor
+    func testSkillListingRefusesContainerLinkedAfterTheInitialCheck() throws {
+        try writeSkillFile(slug: "victim", name: "Original", description: "Original")
+        try writeManifest(skills: [overlay("victim")])
+        let snapshot = try manifest.read(fromRoot: tempDir)
+        let context = try makeContext()
+        context.insert(Skill(name: "Preserved", directoryName: "victim"))
+        try context.save()
+        let files = RebuildReadFileService()
+        let path = tempDir + "/skills", outside = tempDir + "/outside"
+        var probes = 0
+        files.beforeEntryProbe = { candidate in
+            guard candidate == path else { return }
+            probes += 1
+            guard probes == 2 else { return }
+            try FileManager.default.moveItem(atPath: path, toPath: outside)
+            try self.fileService.createSymlink(at: path, pointingTo: outside)
+        }
+        let result = StoreRebuildService(fileService: files).rebuild(snapshot: snapshot, fromRoot: tempDir,
+            context: context, manifestIsAuthoritative: true)
+        XCTAssertGreaterThanOrEqual(probes, 2, "The listing must sample the container again")
+        XCTAssertTrue(result.skillListFailed)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.name), ["Preserved"])
+        let warning = "“" + (path as NSString).abbreviatingWithTildeInPath
+            + "” is a link to another folder. Pensieve needs a real folder there."
+        XCTAssertTrue(result.warnings.contains { $0.contains(warning) }, result.warnings.joined())
+    }
+
+    @MainActor
+    func testLinkedAndRealStoreRebuildSameBodiesPreservedRowsAndWarnings() throws {
+        let linked = tempDir + "/alias"
+        try fileService.createSymlink(at: linked, pointingTo: tempDir)
+        try writeSkillFile(slug: "good", name: "Good", description: "Description", body: "Good body")
+        try writeSkillFile(slug: "unreadable", name: "Unreadable", description: "Description")
+        try fileService.writeFile(at: tempDir + "/outside/SKILL.md", content:
+            SkillSerializer.serialize(name: "Outside", description: "Forbidden", body: "Outside body"))
+        try fileService.createSymlink(at: tempDir + "/skills/refused", pointingTo: tempDir + "/outside")
+        try fileService.deleteFile(at: tempDir + "/skills/unreadable/SKILL.md")
+        try fileService.createSymlink(at: tempDir + "/skills/unreadable/SKILL.md",
+                                      pointingTo: tempDir + "/outside/SKILL.md")
+        try fileService.writeData(at: tempDir + "/skills/bad-text/SKILL.md", data: Data([0xFF, 0xFE, 0xFF]))
+        try writeManifest(skills: [overlay("good"), overlay("refused"), overlay("unreadable"), overlay("bad-text")])
+        var warnings: [[String]] = []
+        for root in [try XCTUnwrap(tempDir), linked] {
+            let context = try makeContext()
+            for slug in ["refused", "unreadable", "bad-text"] {
+                context.insert(Skill(name: "Preserved " + slug, skillDescription: "Original", directoryName: slug))
+            }
+            try context.save()
+            let result = service.rebuild(fromRoot: root, context: context)
+            warnings.append(result.warnings.sorted())
+            XCTAssertEqual(result.warnings.count, 3)
+            XCTAssertTrue(result.warnings.contains { $0.contains("refused") && $0.contains("symlink") })
+            XCTAssertTrue(result.warnings.contains { $0.contains("unreadable") && $0.contains("not a regular file") })
+            XCTAssertTrue(result.warnings.contains { $0.contains("bad-text") && $0.contains("could not be read") })
+            let skills = try context.fetch(FetchDescriptor<Skill>())
+            XCTAssertEqual(Set(skills.map(\.name)),
+                           ["Good", "Preserved refused", "Preserved unreadable", "Preserved bad-text"])
+            let store = SkillStore(fileService: fileService, baseDir: root + "/skills", storeRoot: root)
+            XCTAssertEqual(try store.readBody(directoryName: "good"),
+                SkillSerializer.serialize(name: "Good", description: "Description", body: "Good body"))
+            XCTAssertThrowsError(try store.readBody(directoryName: "refused"))
+            XCTAssertThrowsError(try store.readBody(directoryName: "bad-text"))
+        }
+        XCTAssertEqual(warnings[0], warnings[1])
+    }
+
+    @MainActor
     func testRebuildSkipsSymlinkedSlugDirPreservingRowWithoutReadingThrough() throws {
         let context = try makeContext()
         // First rebuild ingests a real "victim" skill row.
@@ -32,6 +150,19 @@ extension StoreRebuildServiceTests {
 
     @MainActor
     func testRebuildSkipsRealpathEscapingSlugDirPreservingRow() throws {
+        let fixtureRoot = try XCTUnwrap(tempDir)
+        defer { tempDir = fixtureRoot }
+        for linked in [false, true] {
+            let real = fixtureRoot + "/store-\(linked)"
+            try fileService.createDirectory(at: real)
+            tempDir = linked ? fixtureRoot + "/linked-store" : real
+            if linked { try fileService.createSymlink(at: tempDir, pointingTo: real) }
+            try assertEscapingDirectoryPreservesRow()
+        }
+    }
+
+    @MainActor
+    private func assertEscapingDirectoryPreservesRow() throws {
         let context = try makeContext()
         try writeSkillFile(slug: "victim", name: "Original", description: "orig")
         try writeManifest(skills: [overlay("victim")])

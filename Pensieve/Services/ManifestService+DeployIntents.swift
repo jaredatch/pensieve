@@ -41,6 +41,7 @@ extension ManifestService {
         var seenMachines: [UUID: String] = [:]
         for machineEntry in try fileService.listDirectory(at: deploysDir).sorted() {
             let machineFile = "deploys/" + machineEntry
+            if ManifestReaderPolicy.ignoresEntry(at: Data(machineFile.utf8)) { continue }
             guard machineEntry == (machineEntry as NSString).lastPathComponent,
                   !PathSyntax.hasSeparator(machineEntry), !machineEntry.contains("\\"),
                   let uuid = UUID(uuidString: machineEntry),
@@ -75,6 +76,7 @@ extension ManifestService {
         var seenSlugs: [String: String] = [:]
         for entry in try fileService.listDirectory(at: directory).sorted() {
             let relativePath = "deploys/" + machineID + "/" + entry
+            if ManifestReaderPolicy.ignoresEntry(at: Data(relativePath.utf8)) { continue }
             guard entry == (entry as NSString).lastPathComponent,
                   !PathSyntax.hasSeparator(entry), !entry.contains("\\"), entry.hasSuffix(".yaml") else {
                 throw ManifestError.corruptManifestFile(relativePath)

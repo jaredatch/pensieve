@@ -65,9 +65,7 @@ enum ManifestChange {
         case .createSkill(let overlay):
             if !snapshot.skills.contains(where: { $0.slug == overlay.slug }) { snapshot.skills.append(overlay) }
         case .skillMetadata(let slug, let tags, let scope):
-            guard let index = snapshot.skills.firstIndex(where: { $0.slug == slug }) else { return false }
-            if let tags { snapshot.skills[index].tags = tags }
-            if let scope { snapshot.skills[index].scope = scope }
+            return updateMetadata(slug, tags: tags, scope: scope, in: &snapshot)
         case .deleteSkill(let slug):
             let count = snapshot.skills.count
             snapshot.skills.removeAll { $0.slug == slug }
@@ -80,9 +78,90 @@ enum ManifestChange {
         return true
     }
 
+    private func updateMetadata(_ slug: String, tags: [String]?, scope: SkillScope?,
+                                in snapshot: inout ManifestSnapshot) -> Bool {
+        guard let index = snapshot.skills.firstIndex(where: { $0.slug == slug }) else { return false }
+        if let tags { snapshot.skills[index].tags = tags }
+        if let scope { snapshot.skills[index].scope = scope }
+        return true
+    }
+
     private static func set(_ value: String, present: Bool, in values: inout [String]) {
         if present {
             if !values.contains(value) { values.append(value) }
         } else { values.removeAll { $0 == value } }
+    }
+}
+
+/// Immutable, context-free values for retaining refused fields across worker rebuilds.
+/// Only requested fields project, and newer queued edits apply after these values.
+struct RefusedManifestProjection {
+    enum Field {
+        case change(ManifestChange)
+        case intent(DeployIntentRecord)
+    }
+    let fields: [Field]
+    let cachedLocal: ManifestSnapshot?
+
+    func project(onto snapshot: inout ManifestSnapshot) {
+        for field in fields { project(field, onto: &snapshot) }
+    }
+
+    func project(_ field: Field, onto snapshot: inout ManifestSnapshot) {
+        if case .change(let change) = field {
+            do { try change.validate(in: snapshot) } catch { return }
+            if case .createSkill(let original) = change {
+                projectCreate(original, onto: &snapshot)
+                return
+            }
+        }
+        if let cachedLocal {
+            apply(field, local: cachedLocal, onto: &snapshot)
+        } else {
+            switch field {
+            case .change(let change): change.apply(to: &snapshot)
+            case .intent(let intent): snapshot.deployIntents.removeAll { $0 == intent }
+            }
+        }
+    }
+
+    private func projectCreate(_ original: SkillOverlay, onto snapshot: inout ManifestSnapshot) {
+        let current: SkillOverlay
+        if let cachedLocal {
+            guard let local = cachedLocal.skills.first(where: { $0.slug == original.slug }) else { return }
+            current = local
+        } else { current = original }
+        ManifestChange.createSkill(current).apply(to: &snapshot)
+    }
+
+    private func apply(_ field: Field, local: ManifestSnapshot, onto snapshot: inout ManifestSnapshot) {
+        switch field {
+        case .intent(let intent):
+            if local.deployIntents.contains(intent) {
+                if !snapshot.deployIntents.contains(intent) { snapshot.deployIntents.append(intent) }
+            } else { snapshot.deployIntents.removeAll { $0 == intent } }
+        case .change(let change):
+            if case .categorySkill(let name, let slug, _) = change {
+                guard let record = local.categories.first(where: { $0.name == name }) else {
+                    // A newly read retirement field can name a category the window has never seen.
+                    if case .categorySkill(_, _, false) = change { change.apply(to: &snapshot) }
+                    return
+                }
+                let update = ManifestChange.categorySkill(name, slug, record.skillSlugs.contains(slug))
+                if !update.apply(to: &snapshot) { ManifestChange.createCategory(record).apply(to: &snapshot) }
+            } else { applySkill(change, local: local, onto: &snapshot) }
+        }
+    }
+
+    private func applySkill(_ change: ManifestChange, local: ManifestSnapshot, onto snapshot: inout ManifestSnapshot) {
+        switch change {
+        case .deleteSkill(let slug):
+            if !local.skills.contains(where: { $0.slug == slug }) { ManifestChange.deleteSkill(slug).apply(to: &snapshot) }
+        case .skillMetadata(let slug, let tags, let scope):
+            guard let current = local.skills.first(where: { $0.slug == slug }) else { return }
+            let update = ManifestChange.skillMetadata(slug, tags == nil ? nil : current.tags, scope == nil ? nil : current.scope)
+            if !update.apply(to: &snapshot) { ManifestChange.createSkill(current).apply(to: &snapshot) }
+        default: change.apply(to: &snapshot)
+        }
     }
 }

@@ -42,3 +42,27 @@ enum TestPaths {
             userSkillsRoot: deployPaths.userSkillsRoot)
     }
 }
+
+/// Matches a publisher's temporary entry or one of its children using the real store namespace.
+struct TestStoreTemporary {
+    let parent: String
+    private let prefix: String
+
+    init(root: String, files: FileServiceProtocol, kind: String = "vendor") throws {
+        let location = try VendorTemporaryDirectory.namespace(storeRoot: root, fileService: files, kind: kind)
+        parent = location.parent
+        prefix = location.prefix
+    }
+
+    func paths(files: FileServiceProtocol) throws -> [String] {
+        guard files.directoryExists(at: parent) else { return [] }
+        return try files.listDirectory(at: parent).map { parent + "/" + $0 }.filter { contains($0) }
+    }
+
+    func contains(_ path: String) -> Bool {
+        guard path.hasPrefix(parent + "/") else { return false }
+        let relative = path.dropFirst(parent.count + 1)
+        guard let name = relative.split(separator: "/").first else { return false }
+        return VendorTemporaryDirectory.contains(String(name), prefix: prefix)
+    }
+}

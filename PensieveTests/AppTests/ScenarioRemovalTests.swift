@@ -70,7 +70,9 @@ final class ScenarioRemovalTests: XCTestCase {
         await runtime.bootstrapTask.value
         await TestWait.until(failureMessage: "runtime startup did not run before the sidebar rendered") {
             host.layoutSubtreeIfNeeded()
-            return runtime.launchWorkInvocationCount == 1 && self.sidebar(in: host) != nil
+            return runtime.launchWorkInvocationCount == 1
+                && (runtime.launchWorkCompleted || runtime.storeQuarantined)
+                && self.sidebar(in: host) != nil
         }
         await runtime.mainWindowAppeared()
         XCTAssertEqual(runtime.storeQuarantined, deferred)

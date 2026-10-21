@@ -85,3 +85,43 @@ extension FileServiceProtocol {
             metadata: Data("\(String(describing: identity)):\(String(describing: metadata))".utf8))
     }
 }
+
+enum StoreContainerError: LocalizedError {
+    case linked(String)
+    case notDirectory(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notDirectory(let path):
+            "“\((path as NSString).abbreviatingWithTildeInPath)” isn't a folder. Pensieve needs a real folder there."
+        case .linked(let path):
+            "“\((path as NSString).abbreviatingWithTildeInPath)” is a link to another folder. "
+                + "Pensieve needs a real folder there."
+        }
+    }
+}
+
+extension FileServiceProtocol {
+    /// Store-owned containers may be absent, but a present entry must be a real directory.
+    /// Links above the store root still resolve normally; links inside it are never admitted.
+    func storeContainerExists(at path: String) throws -> Bool {
+        guard let type = try entryTypeWithoutFollowingLinks(at: path) else { return false }
+        if type == .symlink { throw StoreContainerError.linked(path) }
+        guard type == .directory else { throw StoreContainerError.notDirectory(path) }
+        return true
+    }
+
+    /// Compare one directory entry with its resolved parent. Missing leaves inherit the parent's
+    /// spelling, so links in ancestors and /private aliases resolve identically on both sides.
+    func isRealpathContained(_ path: String) -> Bool {
+        guard !isSymlink(at: path) else { return false }
+        let parent = (path as NSString).deletingLastPathComponent
+        let leaf = (path as NSString).lastPathComponent
+        let expected = realPath(at: parent) + "/" + leaf
+        do { return try resolveRealPath(at: path) == expected } catch {
+            // Only a missing entry may inherit its parent's spelling. Resolution failures
+            // for present or unreadable entries must not turn the literal path into proof.
+            do { return try entryTypeWithoutFollowingLinks(at: path) == nil } catch { return false }
+        }
+    }
+}

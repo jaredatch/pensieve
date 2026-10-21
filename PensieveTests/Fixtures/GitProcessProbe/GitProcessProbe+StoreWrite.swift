@@ -7,6 +7,8 @@ extension GitProcessProbe {
             let files = FileService()
             let skills = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
             switch mode {
+            case "store-write-cleanup":
+                try files.cleanStoreIntermediates(at: root)
             case "store-write-create":
                 _ = try skills.createSkill(name: "new", description: "New skill", body: "new body")
             case "store-write-body":

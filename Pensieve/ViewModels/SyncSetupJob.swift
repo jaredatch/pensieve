@@ -64,7 +64,7 @@ struct SyncSetupJob {
 
     private func checkedAction(spec: RemoteSpec, credential: GitCredential) throws -> CheckedAction {
         let hasGitDir = fileService.directoryExists(at: root + "/.git")
-        switch SyncSetupModel.firstSyncPlan(hasGitDir: hasGitDir, hasLocalSkills: localSkillsExist()) {
+        switch SyncSetupModel.firstSyncPlan(hasGitDir: hasGitDir, hasLocalSkills: try localSkillsExist()) {
         case .alreadyConfigured:
             let hasLocalBranches = try git.hasLocalBranches(at: root)
             if hasLocalBranches {
@@ -264,9 +264,9 @@ struct SyncSetupJob {
         try git.push(at: root, credential: credential)
     }
 
-    func localSkillsExist() -> Bool {
+    func localSkillsExist() throws -> Bool {
         let skillsDir = root + "/skills"
-        guard fileService.directoryExists(at: skillsDir),
+        guard try fileService.storeContainerExists(at: skillsDir),
               let entries = try? fileService.listDirectory(at: skillsDir) else { return false }
         return !entries.isEmpty
     }

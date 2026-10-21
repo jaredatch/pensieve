@@ -170,7 +170,7 @@ extension ManifestSaveTests {
         XCTAssertEqual(h.saves.statusMessage, "Your change will save when sync finishes.")
         XCTAssertTrue(h.saves.hasActiveSaves, "Confirmed repair is actively saving for Quit")
         XCTAssertEqual(try h.manifestBytes(), before)
-        files.refuseReplacement = true
+        files.refusedReplacement = try TestStoreTemporary(root: h.root, files: files, kind: "manifest-build")
         holder.release()
         await repair.value
         XCTAssertNotNil(h.saves.repairError)
@@ -178,7 +178,7 @@ extension ManifestSaveTests {
         XCTAssertEqual(h.alpha.tags, ["Waiting"])
         XCTAssertEqual(h.saves.pendingCount, 1)
         XCTAssertTrue(h.saves.libraryDamaged)
-        files.refuseReplacement = false
+        files.refusedReplacement = nil
         h.saves.requestRepair()
         await h.saves.replaceWithThisMac(context: h.context)
         await h.saves.waitUntilIdle()
@@ -205,13 +205,13 @@ extension ManifestSaveTests {
         XCTAssertTrue(h.saves.showsRepairConfirmation)
         h.saves.cancelRepair()
         XCTAssertTrue(sync.showsFooter(saves: h.saves), "Cancel must keep the repair entry available")
-        files.refuseReplacement = true
+        files.refusedReplacement = try TestStoreTemporary(root: h.root, files: files, kind: "manifest-build")
         h.saves.requestRepair()
         await h.saves.replaceWithThisMac(context: h.context)
         XCTAssertNotNil(h.saves.repairError)
         XCTAssertFalse(h.saves.isWaiting)
         XCTAssertTrue(sync.showsFooter(saves: h.saves), "Failed repair must keep the repair entry available")
-        files.refuseReplacement = false
+        files.refusedReplacement = nil
         h.saves.requestRepair()
         await h.saves.replaceWithThisMac(context: h.context)
         XCTAssertNil(h.saves.repairError)

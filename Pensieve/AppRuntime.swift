@@ -39,9 +39,9 @@ final class AppRuntime {
     private let gitState: RuntimeGitState
     private let defaults: UserDefaults
     private let launchReconcile: LaunchReconcile
-    private let launchBackfill: LaunchBackfill
+    let launchBackfill: LaunchBackfill
     private let hasRemoteConfigured: () -> Bool
-    private let convergence: PostSyncConverging
+    let convergence: PostSyncConverging
     private let coordinatorConfigure: CoordinatorConfigure
     private let updateCheckApply: (([UUID: SkillUpdateCheckResult]) throws -> Void)?
     private let updateCheckOperation: UpdateCheckOperation
@@ -56,10 +56,10 @@ final class AppRuntime {
     private var didPerformLaunchWork = false
     private var didCompleteLaunchIngest = false
     private var didFinishInitialLaunchCallbacks = false
-
     private var didSignalLaunchIngest = false
     private var launchIngestHeadStamp: String?
-    private var needsLaunchBackfillAfterCoordinator = false
+    @ObservationIgnored var successfulLibraryReads = 0
+    var needsLaunchBackfillAfterCoordinator = false
     private var forceLaunchPreflight = false
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
@@ -286,12 +286,12 @@ private extension AppRuntime {
         if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
         applyLibraryLaunchOutcome(outcome.rebuild) { [weak self] in
-            await self?.performDeferredLaunchBackfillIfNeeded(afterRepair: true)
+            await self?.performDeferredLaunchBackfillIfNeeded(trigger: .repair)
         }
         needsLaunchBackfillAfterCoordinator = outcome.rebuild.manifestDamaged
             || (!outcome.rebuild.storeUnreadable && !outcome.ingestionNeedsRetry && !result.backfilled)
         if needsLaunchBackfillAfterCoordinator, !outcome.rebuild.manifestDamaged { forceLaunchPreflight = true }
-        if result.backfilled { platformVM.refreshDeployIndex(); convergence.runAfterLaunchIngest() }
+        if result.backfilled { finishLaunchBackfill() }
         launchIngestHeadStamp = outcome.ingestedHeadStamp
         didCompleteLaunchIngest = outcome.rebuild.storeUnreadable
             || !outcome.ingestionNeedsRetry
@@ -320,17 +320,6 @@ private extension AppRuntime {
 }
 
 extension AppRuntime {
-    func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false, afterSync: SyncCycleResult? = nil) async {
-        defer { if let afterSync { convergence.run(after: afterSync) } }
-        if let afterSync { guard case .synced = afterSync else { return } }
-        guard needsLaunchBackfillAfterCoordinator, library.manifestSaves?.libraryDamaged != true,
-              library.manifestSaves?.requiresNewerVersion != true else { return }
-        needsLaunchBackfillAfterCoordinator = false
-        await BlockingWork.run { [container, launchBackfill] in launchBackfill(ModelContext(container)) }
-        platformVM.refreshDeployIndex()
-        if afterRepair { convergence.runAfterLaunchIngest() }
-    }
-
     /// The model excludes cycles until conflict resolution finishes. Git evidence remains ordered.
     func beginConflictResolution() throws -> (SyncCycleResult) -> Void {
         guard syncModel.canStartConflictResolution else { throw SyncError.syncInProgress }

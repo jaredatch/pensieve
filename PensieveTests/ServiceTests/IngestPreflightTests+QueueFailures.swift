@@ -62,9 +62,63 @@ extension IngestPreflightTests {
     }
 
     func testQueueRebuildFailuresKeepUnrelatedEditsAndRequireImportOrDeployIngest() async throws {
+        try await checkQueueManifestReadRefusal()
         for writer in ["import", "deploy"] {
             for failure in ["Skill", "Category", "MachineDeployIntent", "save", "scan"] {
                 try await checkQueueFailure(failure, writer: writer)
+            }
+        }
+    }
+
+    private func checkQueueManifestReadRefusal() async throws {
+        for contents in ["schema_version: 99\n", "damaged"] {
+            var firstMessage: String?
+            for duringScan in [false, true] {
+                let f = try NativeTestWork.run {
+                    try IncompleteIngestFixture(base: self.tempDir + "/read-refusal-\(contents.count)-\(duringScan)")
+                }
+                let context = try damageContext(f)
+                let ingest = StoreIngestState.shared(for: context.container)
+                let admitted = GitHeadStamp().state(root: f.app)
+                let recording = RecordingSaveManifest()
+                let pull = {
+                    try f.files.writeFile(at: f.peer + "/manifest/manifest.yaml", content: contents)
+                    XCTAssertTrue(try f.git.stageAllAndCommit(at: f.peer, message: "outside manifest"))
+                    try f.git.push(at: f.peer, credential: nil)
+                    guard case .fastForwarded = try f.git.fastForwardOnly(at: f.app, credential: nil) else {
+                        return XCTFail("Fixture must pull the unreadable manifest")
+                    }
+                }
+                if duringScan {
+                    try NativeTestWork.run {
+                        try f.changePeer()
+                        _ = try f.git.fastForwardOnly(at: f.app, credential: nil)
+                    }
+                    recording.afterRebuildSnapshot = pull
+                } else { try NativeTestWork.run { try pull() } }
+                let saves = ManifestSaveModel(manifest: recording, root: f.app, lockPath: f.base + "/sync.lock")
+                let store = SkillStore(fileService: f.files, baseDir: f.app + "/skills", storeRoot: f.app)
+                let library = SkillLibraryViewModel(skillStore: store,
+                    fileWatchService: FileWatchService(rootDir: f.app + "/skills"), manifestRoot: f.app, manifestSaves: saves)
+                let category = try XCTUnwrap(context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Kept" })
+                CategoryStore(manifestSaves: saves).rename(category, to: "Renamed", context: context)
+                await saves.waitUntilIdle()
+                XCTAssertFalse(ingest.needsRebuild, "A manifest refusal must not fence push as incomplete ingest")
+                XCTAssertFalse(ingest.requiresRebuild(at: admitted), "Keep the previously ingested HEAD")
+                XCTAssertTrue(recording.writes.isEmpty)
+                if contents == "damaged" {
+                    XCTAssertTrue(saves.pausedForRepair)
+                    XCTAssertTrue(saves.libraryDamaged)
+                } else {
+                    let message = try XCTUnwrap(saves.categoryNotice?.message)
+                    XCTAssertTrue(message.contains("Update Pensieve"), message)
+                    XCTAssertFalse(message.contains("Rebuilding"), message)
+                    if duringScan { XCTAssertEqual(message, firstMessage) } else { firstMessage = message }
+                    XCTAssertEqual(category.name, "Kept")
+                    await saves.refreshDamage()
+                    XCTAssertTrue(library.categoryEditsFenced, "The newer-version fence still applies")
+                    XCTAssertEqual(saves.requiresNewerVersion, true)
+                }
             }
         }
     }

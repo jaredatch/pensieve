@@ -324,22 +324,26 @@ extension SkillInstallServiceTests {
                     from: fetched,
                     context: makeInstallContext()
                 )
-            )
+            ) { error in
+                XCTAssertTrue(error is FailingCopyFileService.CopyFailure, "Must reach the injected copy failure: \(error)")
+            }
             XCTAssertFalse(fileService.directoryExists(at: root + "/skills/vendor"))
-            XCTAssertTrue(vendorTempPaths(under: root).isEmpty)
-            let siblingPrefix = (root as NSString).lastPathComponent + ".vendor-"
-            XCTAssertTrue(try fileService.listDirectory(at: tempDir).filter {
-                $0.hasPrefix(siblingPrefix) && $0.hasSuffix(".tmp")
-            }.isEmpty)
+            XCTAssertTrue(try vendorTempPaths(under: root).isEmpty)
+            try assertNoVendorTemps(root: root)
             XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
         }
     }
 
-    private func vendorTempPaths(under root: String) -> [String] {
-        guard let enumerator = FileManager.default.enumerator(atPath: root) else { return [] }
-        return enumerator.compactMap { $0 as? String }.filter { entry in
-            let name = (entry as NSString).lastPathComponent; return name.hasSuffix(".tmp")
-                && (name.contains(".vendor-") || name.hasPrefix(".pensieve-vendor-"))
-        }
+    func assertNoVendorTemps(root: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let location = try VendorTemporaryDirectory.namespace(storeRoot: root, fileService: fileService)
+        guard fileService.directoryExists(at: location.parent) else { return }
+        XCTAssertFalse(try fileService.listDirectory(at: location.parent).contains { $0.hasPrefix(location.prefix) },
+                       file: file, line: line)
+    }
+
+    private func vendorTempPaths(under root: String) throws -> [String] {
+        let temporary = try TestStoreTemporary(root: root, files: fileService)
+        guard fileService.directoryExists(at: temporary.parent) else { return [] }
+        return try temporary.paths(files: fileService)
     }
 }

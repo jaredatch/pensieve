@@ -118,6 +118,17 @@ final class CategoryFixtureRecordingCursorCompiler: CursorCompilerProtocol {
 }
 
 final class CategoryFixtureStubFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        if isSymlink(at: path) { return .symlink }
+        if directoryExists(at: path) { return .directory }
+        return fileExists(at: path) ? .regular : nil
+    }
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     var links: Set<String> = []
     var files: Set<String> = []
     func readFile(at path: String) throws -> String { "" }

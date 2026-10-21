@@ -144,7 +144,7 @@ final class DeployReconciler: DeployReconciling {
         for agent in agentSkillDirs {
             let agentDir = agent.path
             guard agent.platform.usesSymlinks else { continue }
-            if fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
+            if !fileService.isRealpathContained(agentDir) {
                 result.skippedDirs.append(agentDir)
                 continue
             }
@@ -154,18 +154,6 @@ final class DeployReconciler: DeployReconciling {
         // Prune counts physical success, even when the derived state file cannot be retired.
         result.removedKeys = removal.outcomes.filter(\.removed).map(\.key)
         return result
-    }
-
-    /// True iff `dir`'s realpath equals its own literal parent's realpath + last component — i.e. the
-    /// leaf is not a symlink redirecting the dir elsewhere. Mirrors `SkillStore.safeSkillDirectory`'s
-    /// realpath-containment shape and stays robust to benign ancestor symlinks (e.g. `/var`→`/private/var`)
-    /// because both sides resolve them identically.
-    private func isRealpathContained(_ dir: String) -> Bool {
-        let parent = (dir as NSString).deletingLastPathComponent
-        let last = (dir as NSString).lastPathComponent
-        let realDir = URL(fileURLWithPath: dir).resolvingSymlinksInPath().path
-        let realParent = URL(fileURLWithPath: parent).resolvingSymlinksInPath().path
-        return realDir == realParent + "/" + last
     }
 
     /// Gather Pensieve link candidates without changing artifacts or their records.

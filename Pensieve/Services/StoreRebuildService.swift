@@ -62,6 +62,15 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
     func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext,
                  manifestIsAuthoritative: Bool? = nil) -> RebuildResult {
         var result = RebuildResult()
+        do {
+            _ = try fileService.storeContainerExists(at: root + "/skills")
+            _ = try fileService.storeContainerExists(at: root + "/manifest")
+        } catch {
+            result.skillListFailed = true
+            result.reportIngestFailure("Couldn't read store containers; skipped reconciliation to preserve local rows: "
+                + error.localizedDescription)
+            return result
+        }
         let manifestIsAuthoritative = manifestIsAuthoritative ?? manifestHasContent(root: root)
         let filePresentSlugs = rebuildSkills(
             root: root,
@@ -179,14 +188,16 @@ extension StoreRebuildService {
     /// Distinguish a listing failure from a genuinely absent skills directory. Treating a
     /// transient failure as empty would delete every row during an authoritative rebuild.
     private func listSkillEntries(at skillsDir: String, result: inout RebuildResult) -> [String]? {
-        guard fileService.directoryExists(at: skillsDir) else { return [] }
-        guard let entries = try? fileService.listDirectory(at: skillsDir) else {
+        do {
+            guard try fileService.storeContainerExists(at: skillsDir) else { return [] }
+            return try fileService.listDirectory(at: skillsDir).sorted()
+        } catch {
             result.skillListFailed = true
             result.reportIngestFailure(
-                "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows.")
+                "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows. "
+                    + error.localizedDescription)
             return nil
         }
-        return entries.sorted()
     }
 
     private func deleteOrphanRows(
@@ -205,6 +216,7 @@ extension StoreRebuildService {
 
     func manifestHasContent(root: String) -> Bool {
         let manifestRoot = root + "/manifest"
+        guard (try? fileService.storeContainerExists(at: manifestRoot)) == true else { return false }
         if fileService.fileExists(at: manifestRoot + "/projects.yaml") { return true }
         for directory in ["skills", "categories"] {
             if let entries = try? fileService.listDirectory(at: manifestRoot + "/" + directory),

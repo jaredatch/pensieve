@@ -67,7 +67,7 @@ actor SyncCoordinator {
         audit: SyncAuditWriting,
         machine: (identity: MachineIdentityProviding, stateService: MachineStateServicing),
         now: @escaping () -> Date = Date.init,
-        headStamp: (() -> String?)? = nil
+        headStamp: (() -> GitHeadStamp.State)? = nil
     ) {
         self.engine = engine
         self.git = git
@@ -78,8 +78,7 @@ actor SyncCoordinator {
         self.machineIdentity = machine.identity
         self.machineStateService = machine.stateService
         self.now = now
-        self.headState = headStamp.map { read in { read().map(GitHeadStamp.State.resolved) ?? .unreadable } }
-            ?? { GitHeadStamp().state(root: root) }
+        self.headState = headStamp ?? { GitHeadStamp().state(root: root) }
     }
 
     func seedLastIngestedHeadStamp(_ stamp: String?) {
@@ -131,11 +130,22 @@ actor SyncCoordinator {
             result = cycleResult(from: outcome, preflightWarnings: preflightWarnings,
                                  preparedHeadStamp: preparedHeadStamp, preflightAdvanced: preflightAdvanced)
         } catch {
-            cycleError = error
-            result = Self.cycleFailure(authentication.reporting(error))
+            if let recovery = error as? ManifestRecoveryFailure {
+                cycleError = recovery.underlying
+                result = .manifestDamaged(recoveryMessage(recovery.underlying, authentication: authentication))
+            } else {
+                cycleError = error
+                result = Self.cycleFailure(authentication.reporting(error))
+            }
         }
         Self.recordAudit(for: result, error: cycleError, audit: audit)
         return result
+    }
+
+    private func recoveryMessage(_ error: Error, authentication: SyncAuthentication) -> String {
+        let damage = ManifestError.damaged.localizedDescription
+        guard let advice = authentication.reporting(error) as? SyncAuthentication.Failure else { return damage }
+        return damage + ". " + advice.localizedDescription
     }
 
     private func ingestIfNeeded(context: ModelContext, stamp: GitHeadStamp.State) throws -> RebuildResult? {
@@ -144,10 +154,14 @@ actor SyncCoordinator {
                                            headStamp: { self.headState().oid })
     }
 
-    /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.
+    /// Recovery keeps damage and app-authored credential advice in the UI; audit retains the underlying error.
     private static func recordAudit(for result: SyncCycleResult, error: Error?, audit: SyncAuditWriting) {
         let fields = result.auditFields
-        if let error, case GitError.authenticationFailed = error {
+        if let error, case ManifestError.damaged = error {
+            audit.record(category: fields.category, detail: fields.detail)
+        } else if let error, case .manifestDamaged = result {
+            audit.record(category: fields.category, detail: error.localizedDescription)
+        } else if let error, case GitError.authenticationFailed = error {
             audit.record(category: fields.category, detail: error.localizedDescription)
         } else {
             audit.record(category: fields.category, detail: fields.detail)

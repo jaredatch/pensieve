@@ -9,12 +9,40 @@ enum FastForwardResult: Equatable {
     case diverged
 }
 
-/// Fast-forward-only sync primitives (PLAN-12 / 12.4). Split into their own file (like
-/// `ManifestService+Snapshot`/`SkillSerializer+Skill`) so `GitService.swift` stays under the
-/// file-length cap without compressing its security-hardening comments. Concrete-only for now:
-/// `GitServiceProtocol` exposure lands in Stage 12.6, when the daemon injects a stub for its
-/// branch tests.
+/// Fast-forward primitives shared by the app's damaged-manifest recovery and the daemon.
 extension GitService {
+    /// Unlike staging, the damage check includes excluded and nested-repository additions under
+    /// manifest/. A local .env.yaml can break a category read even though sync would not stage it.
+    @_disfavoredOverload
+    func manifestMatchesHead(at path: String) throws -> Bool {
+        let store = try storeOperation(at: path)
+        let args = ["diff", "--quiet", "HEAD", "--", ":(literal)manifest"]
+        let difference = try store.run(args)
+        if difference.exit == 1 { return false }
+        guard difference.exit == 0 else { throw commandError(difference, args: ["-C", path] + args) }
+        let listingArgs = ["ls-files", "--others", "--directory", "-z", "--", ":(literal)manifest"]
+        let untracked = try store.runData(listingArgs)
+        guard untracked.exit == 0 else { throw dataCommandError(untracked, args: ["-C", path] + listingArgs) }
+        // Git can collapse untracked directories. Excluded leaves are checked as bytes;
+        // visible containers match only when the reader permits them and no visible child remains.
+        func matches(_ entry: Data.SubSequence) throws -> Bool {
+            let entry = entry.last == 0x2F ? entry.dropLast() : entry
+            let parts = entry.split(separator: 0x2F)
+            guard parts.first?.elementsEqual("manifest".utf8) == true, let leaf = parts.last else { return false }
+            let relative = entry.dropFirst("manifest/".utf8.count)
+            if StoreExclusions.isExcludedFile(entry) || StoreExclusions.isExcludedDirectory(leaf),
+               ManifestReaderPolicy.ignoresEntry(at: relative) { return true }
+            guard ManifestReaderPolicy.ignoresEntry(at: relative, kind: .emptyDirectory),
+                  let name = String(bytes: entry, encoding: .utf8),
+                  try fileService.entryTypeWithoutFollowingLinks(at: path + "/" + name) == .directory else { return false }
+            let prefix = Data(entry) + Data([0x2F])
+            return try fileService.listDirectory(at: path + "/" + name).allSatisfy {
+                try matches(prefix + Data($0.utf8))
+            }
+        }
+        return try untracked.stdout.split(separator: 0).allSatisfy(matches)
+    }
+
     /// True iff the worktree has no uncommitted changes sync would stage. New nested repositories
     /// stay local; tracked files and ordinary untracked files (including skill-ignored ones) count.
     /// A failed/non-zero

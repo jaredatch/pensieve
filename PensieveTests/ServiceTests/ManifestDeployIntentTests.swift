@@ -90,6 +90,22 @@ final class ManifestDeployIntentTests: XCTestCase {
         assertCorrupt()
     }
 
+    func testExcludedDeployEntriesAreIgnoredButOtherEntriesStayStrict() throws {
+        try service.write(snapshot([record()]), toRoot: tempDir)
+        let expected = try service.read(fromRoot: tempDir).deployIntents
+        for addition in [".DS_Store", Self.machineA + "/.DS_Store", "node_modules/cache",
+                         Self.machineA + "/node_modules/cache"] {
+            try fileService.writeFile(at: tempDir + "/manifest/deploys/" + addition, content: "ignored\n")
+            XCTAssertEqual(try service.read(fromRoot: tempDir).deployIntents, expected, addition)
+        }
+        for addition in ["not-a-machine", Self.machineA + "/stray.txt"] {
+            let path = tempDir + "/manifest/deploys/" + addition
+            try fileService.writeFile(at: path, content: "stray\n")
+            assertCorrupt()
+            try fileService.deleteFile(at: path)
+        }
+    }
+
     func testNonCanonicalMachineDirFailsClosed() throws {
         try writeRaw(machine: Self.machineA.lowercased(), file: "alpha.yaml", body: validBody())
         assertCorrupt()

@@ -122,7 +122,8 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
 /// resolved before containment; escapes record XCTFail and are quarantined under one fixed
 /// sandbox child. Deliberately NOT defended: `replaceItem` (extension-only, statically
 /// dispatched — uninterceptable by any conformer — and unreachable from LinkService, the
-/// only production consumer of this seam); fixtures planted by tests through the RAW
+/// original production consumer of this seam). Publisher allocation delegates device admission,
+/// then uses a same-device sandbox sibling so later I/O remains contained. Fixtures planted through the RAW
 /// FileService, which bypass this double knowingly.
 final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     private let wrapped: FileServiceProtocol
@@ -353,6 +354,19 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         return try wrapped.resolveRealPath(at: physical)
     }
 
+    func storeTemporaryParent(root: String) throws -> String {
+        let physicalRoot = resolved(root)
+        let allocated = try wrapped.storeTemporaryParent(root: physicalRoot)
+        guard let physicalSandbox else { return allocated }
+        let parent = resolved(physicalSandbox + "/publisher-temps")
+        guard let device = wrapped.fileIdentity(at: allocated, followingLinks: true)?.device,
+              wrapped.fileIdentity(at: physicalSandbox, followingLinks: true)?.device == device,
+              parent != physicalRoot, !parent.hasPrefix(physicalRoot + "/") else {
+            throw CocoaError(.featureUnsupported)
+        }
+        try wrapped.createDirectory(at: parent)
+        return parent
+    }
 }
 
 struct LinkServiceScriptedContext {

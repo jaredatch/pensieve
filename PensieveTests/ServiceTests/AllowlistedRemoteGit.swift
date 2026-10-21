@@ -7,8 +7,14 @@ import Foundation
 /// `GitService.pullRebase`/`push` run `git … origin main` (git resolves the URL from `.git/config`);
 /// `remoteURL(at:)` feeds only the guard + error strings. (PLAN-10 / 10.3 — file:// test reconciliation.)
 final class AllowlistedRemoteGit: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { wrapped.isWorktreeClean(at: path) }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+        try wrapped.fastForwardOnly(at: path, credential: credential)
+    }
+    func manifestMatchesHead(at path: String) throws -> Bool { try wrapped.manifestMatchesHead(at: path) }
     private let wrapped: GitServiceProtocol
     private let acceptedRemote: String
+    var beforeLocalCommit: ((String) throws -> Void)?
 
     init(wrapping wrapped: GitServiceProtocol, acceptedRemote: String = "https://fixture.test/x.git") {
         self.wrapped = wrapped
@@ -16,11 +22,20 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     }
 
     func scopedToStore(_ root: String) -> GitServiceProtocol {
-        AllowlistedRemoteGit(wrapping: wrapped.scopedToStore(root), acceptedRemote: acceptedRemote)
+        let scoped = AllowlistedRemoteGit(wrapping: wrapped.scopedToStore(root), acceptedRemote: acceptedRemote)
+        scoped.beforeLocalCommit = beforeLocalCommit
+        return scoped
     }
 
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
         try wrapped.prepareStoreRules(at: root, files: files)
+    }
+
+    func hasUncommittedChanges(at path: String) -> Bool { wrapped.hasUncommittedChanges(at: path) }
+
+    func localCommitMatches(_ expected: GitTreeExpectation, from parent: String, to head: String,
+                            at root: String) throws -> Bool {
+        try wrapped.localCommitMatches(expected, from: parent, to: head, at: root)
     }
 
     func probeUsability() throws -> GitUsability { try wrapped.probeUsability() }
@@ -43,7 +58,8 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     }
     @discardableResult
     func stageAllAndCommit(at path: String, message: String) throws -> Bool {
-        try wrapped.stageAllAndCommit(at: path, message: message)
+        try beforeLocalCommit?(path)
+        return try wrapped.stageAllAndCommit(at: path, message: message)
     }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         try wrapped.pullRebase(at: path, credential: credential)
@@ -80,7 +96,9 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     func stagePath(_ path: String, at root: String) throws { try wrapped.stagePath(path, at: root) }
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool {
-        try wrapped.collapseToSingleCommit(at: root, message: message, credential: credential, fetchedRevision: fetchedRevision)
+        try beforeLocalCommit?(root)
+        return try wrapped.collapseToSingleCommit(at: root, message: message,
+                                                  credential: credential, fetchedRevision: fetchedRevision)
     }
     func hasCommitsToPush(at path: String) throws -> Bool { try wrapped.hasCommitsToPush(at: path) }
     func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {

@@ -125,4 +125,7 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     func symlinkTarget(at path: String) throws -> String { try files.symlinkTarget(at: path) }
     func isSymlink(at path: String) -> Bool { files.isSymlink(at: path) }
     func contentsHash(at path: String) throws -> String { try files.contentsHash(at: path) }
+
+    func resolveRealPath(at path: String) throws -> String { try files.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try files.storeTemporaryParent(root: root) }
 }

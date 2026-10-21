@@ -41,6 +41,16 @@ final class PlatformViewModelTests: XCTestCase {
         func contentsHash(at path: String) throws -> String { "hash" }
     }
     private struct CleanFileService: FileServiceProtocol {
+        // Canonical folders in this in-memory fixture have no ancestor aliases.
+        func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+            if isSymlink(at: path) { return .symlink }
+            if directoryExists(at: path) { return .directory }
+            return fileExists(at: path) ? .regular : nil
+        }
+        func resolveRealPath(at path: String) throws -> String {
+            guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+            return path
+        }
         var projectDirectories: Set<String> = []
         func readFile(at path: String) throws -> String { "" }
         func writeFile(at path: String, content: String) throws {}
@@ -58,7 +68,6 @@ final class PlatformViewModelTests: XCTestCase {
         func listDirectory(at path: String) throws -> [String] { [] }
         func contentsHash(at path: String) throws -> String { "hash" }
     }
-
     private final class NoopLinkService: LinkServiceProtocol {
         func removalOperation(skill: Skill, platform: PlatformTarget,
                               projectPath: String?) -> DeployRemovalOperation {
@@ -70,41 +79,32 @@ final class PlatformViewModelTests: XCTestCase {
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
             linkProjectPaths.append(projectPath)
         }
-
         func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
             unlinkProjectPaths.append(projectPath)
             return false
         }
         func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { linked }
-
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { linked }
-        func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-            "/tmp/link/" + skill.directoryName
-        }
+        func linkPath(skill: Skill, platform: PlatformTarget,
+                      projectPath: String?) -> String { "/tmp/link/" + skill.directoryName }
         func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
             "/tmp/target/" + skill.directoryName
         }
         func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
     }
-
     private struct StubCursorCompiler: CursorCompilerProtocol {
         func removalOperation(skill: Skill, platform: PlatformTarget,
                               projectPath: String?) -> DeployRemovalOperation {
             adapterRemovalOperation(skill: skill, projectPath: projectPath)
         }
-
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
-        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
-            return false
-        }
+        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool { false }
         func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
         func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
 
         func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
-        func outputPath(skill: Skill, projectPath: String?) -> String {
-            "/tmp/cursor/" + skill.directoryName + ".mdc"
-        }
+        func outputPath(skill: Skill, projectPath: String?) -> String { "/tmp/cursor/" + skill.directoryName + ".mdc" }
     }
 
     @MainActor

@@ -13,6 +13,9 @@ final class GitProtocolDispatchTests: XCTestCase {
     func testGitServiceProtocolDispatchesPublicWitnesses() throws {
         let operations = GitDispatchOperations()
         let service: GitServiceProtocol = operations
+        XCTAssertTrue(service.isWorktreeClean(at: "fixture"))
+        expectCalled("fastForwardOnly(at,credential)", try service.fastForwardOnly(at: "fixture", credential: .sshAgent))
+        expectCalled("manifestMatchesHead(at)", try service.manifestMatchesHead(at: "fixture"))
         expectCalled("probeUsability()", try service.probeUsability())
         expectCalled("remoteURL(at)", try service.remoteURL(at: "fixture"))
         expectCalled("initRepository(at)", try service.initRepository(at: "fixture"))
@@ -34,6 +37,7 @@ final class GitProtocolDispatchTests: XCTestCase {
         expectCalled("hasRemoteOriginConfigured(at)", try service.hasRemoteOriginConfigured(at: "fixture"))
         expectCalled("stageAllAndCommit(at,message)", try service.stageAllAndCommit(at: "fixture", message: "fixture"))
         XCTAssertEqual(operations.calls, [
+            "isWorktreeClean(at)", "fastForwardOnly(at,credential)", "manifestMatchesHead(at)",
             "probeUsability()",
             "remoteURL(at)",
             "initRepository(at)",
@@ -62,10 +66,18 @@ final class GitProtocolDispatchTests: XCTestCase {
         XCTAssertEqual(forwarded.calls, ["abortRebase(at,refusedFolder)"])
     }
 
+    private func assertLocalCommitDispatch(_ service: GitServiceProtocol) {
+        XCTAssertFalse(service.hasUncommittedChanges(at: "fixture"))
+        let expected = GitTreeExpectation(files: [:], deletablePaths: [], deletablePrefixes: [], ignoredPrefixes: [])
+        expectCalled("localCommitMatches(_,from,to,at)",
+            try service.localCommitMatches(expected, from: "parent", to: "head", at: "fixture"))
+    }
+
     func testGitServiceProtocolDispatchesConflictAndHistoryWitnesses() throws {
         assertRefusedFolderForwarding()
         let operations = GitDispatchOperations()
         let service: GitServiceProtocol = operations
+        assertLocalCommitDispatch(service)
         let entry = ConflictEntry(mode: "100644", objectID: "object", bytes: Data())
         expectCalled("preflightStoreUpdate(at,credential)",
             try service.preflightStoreUpdate(at: "fixture", credential: .sshAgent))
@@ -91,7 +103,7 @@ final class GitProtocolDispatchTests: XCTestCase {
         _ = service.log(forPath: "fixture", at: "fixture", limit: 1)
         XCTAssertEqual(service.show(sha: "fixture", path: "fixture", at: "fixture"), "selected version")
         XCTAssertEqual(operations.calls, [
-            "preflightStoreUpdate(at,credential)",
+            "hasUncommittedChanges(at)", "localCommitMatches(_,from,to,at)", "preflightStoreUpdate(at,credential)",
             "pullRebase(at,credential)",
             "pullRebase(at,fetchedRevision)",
             "push(at,credential)",

@@ -95,7 +95,8 @@ final class CLIReadHandlerTests: XCTestCase {
         }
         XCTAssertEqual(response.envelope.data, .array([.object([
             "slug": .string("runtime-skill"), "name": .string("Runtime skill"), "description": .string(""),
-            "tags": .array([])])]))
+            "tags": .array([])])]),
+            "CLI reply ok=\(response.envelope.ok), error=\(String(describing: response.envelope.error))")
         let longPaths = AppRuntimePaths(storeRoot: directory.path + "/store2",
             appSupportDir: directory.path + "/" + String(repeating: "x", count: 104))
         let longRuntime = try AppRuntime(scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),

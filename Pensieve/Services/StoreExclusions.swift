@@ -34,3 +34,34 @@ enum StoreExclusions {
             || (components.count == 1 && name.starts(with: ".pensieve-ignore-".utf8))
     }
 }
+
+/// Which untracked entries are invisible to the manifest readers.
+enum ManifestReaderPolicy {
+    enum EntryKind { case leaf, emptyDirectory }
+
+    /// Reader visibility for a byte path relative to manifest/. Recovery uses the same policy
+    /// before decoding Git's untracked names; the flat readers inspect only their immediate child.
+    static func ignoresEntry(at relativePath: Data.SubSequence, kind: EntryKind = .leaf) -> Bool {
+        let parts = relativePath.split(separator: 0x2F)
+        guard let first = parts.first else { return false }
+        if kind == .emptyDirectory {
+            if parts.count == 1 {
+                return ["categories", "skills", "deploys"].contains { first.elementsEqual($0.utf8) }
+            }
+            guard first.elementsEqual("deploys".utf8), parts.count == 2,
+                  let machine = String(bytes: parts[1], encoding: .utf8),
+                  let uuid = UUID(uuidString: machine) else { return false }
+            return machine == uuid.uuidString
+        }
+        if first.elementsEqual("categories".utf8) || first.elementsEqual("skills".utf8) {
+            return parts.count > 1 && !parts[1].suffix(5).elementsEqual(".yaml".utf8)
+        }
+        if first.elementsEqual("deploys".utf8) {
+            guard parts.count > 1 else { return false }
+            return StoreExclusions.isExcludedFile(relativePath)
+                || parts.dropFirst().contains(where: StoreExclusions.isExcludedDirectory)
+        }
+        return !first.elementsEqual("manifest.yaml".utf8) && !first.elementsEqual("projects.yaml".utf8)
+    }
+
+}

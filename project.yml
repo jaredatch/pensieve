@@ -133,6 +133,7 @@ targets:
       - path: Pensieve/Services/GitServiceProtocol+CallSite.swift
       - path: Pensieve/Services/FastForwardGitService+CallSite.swift
       - path: Pensieve/Services/StoreGitOperation+CallSite.swift
+      - path: Pensieve/Services/GitService+LocalCommit.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
@@ -162,6 +163,7 @@ targets:
       - path: Pensieve/Models/PlatformTarget.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/GitDirectoryText.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
       base:
@@ -206,6 +208,7 @@ targets:
       - path: Pensieve/Services/GitServiceProtocol+CallSite.swift
       - path: Pensieve/Services/FastForwardGitService+CallSite.swift
       - path: Pensieve/Services/StoreGitOperation+CallSite.swift
+      - path: Pensieve/Services/GitService+LocalCommit.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
@@ -242,6 +245,7 @@ targets:
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/GitDirectoryText.swift
       - path: Pensieve/Utilities/RuntimePaths.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
@@ -282,6 +286,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/GitDirectoryText.swift
       - path: Pensieve/Services/CLIProtocol.swift
       - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/SocketPeerCredentials.swift

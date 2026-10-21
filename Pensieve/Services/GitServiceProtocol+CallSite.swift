@@ -2,6 +2,14 @@ import Foundation
 
 // Source defaults capture the caller; typed references dispatch public protocol witnesses.
 extension GitServiceProtocol {
+    func manifestMatchesHead(at path: String,
+                             file: StaticString = #fileID, line: UInt = #line) throws -> Bool {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            let operation: (String) throws -> Bool = self.manifestMatchesHead
+            return try operation(path)
+        }
+    }
+
     func initRepository(at path: String,
                         file: StaticString = #fileID, line: UInt = #line) throws {
         try GitThreadGuard.withCallSite(file: file, line: line) {

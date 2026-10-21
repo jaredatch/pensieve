@@ -18,6 +18,34 @@ final class FileServiceTests: XCTestCase {
         }
     }
 
+    func testPublicationAcrossDevicesRefusesWithoutCopying() throws {
+        let probe = try StoreWriteCrashProbe(directory: tempDir)
+        try probe.withVolume { volume in
+            let snapshot = ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
+                                            categories: [], projects: [], skills: [])
+            XCTAssertThrowsError(try ManifestService(fileService: fileService).write(snapshot, toRoot: volume)) { error in
+                XCTAssertEqual((error as NSError).code, Int(EXDEV), "A volume-root store has no outside staging location")
+            }
+            XCTAssertFalse(fileService.directoryExists(at: volume + "/manifest"))
+            for existing in [false, true] {
+                let source = tempDir + "/source-\(existing)"
+                let destination = volume + "/destination-\(existing)"
+                try fileService.writeFile(at: source + "/keep", content: "source")
+                if existing { try fileService.writeFile(at: destination + "/keep", content: "destination") }
+                XCTAssertThrowsError(try fileService.replaceItem(at: destination, with: source)) { error in
+                    XCTAssertEqual((error as NSError).domain, NSPOSIXErrorDomain)
+                    XCTAssertEqual((error as NSError).code, Int(EXDEV))
+                }
+                XCTAssertEqual(try fileService.readFile(at: source + "/keep"), "source")
+                if existing {
+                    XCTAssertEqual(try fileService.readFile(at: destination + "/keep"), "destination")
+                } else {
+                    XCTAssertFalse(fileService.directoryExists(at: destination))
+                }
+            }
+        }
+    }
+
     func testReplaceItemPreservesDanglingDestinationAndSourceOnFailure() throws {
         let source = tempDir + "/replacement"
         let destination = tempDir + "/dangling"
@@ -251,7 +279,44 @@ final class FileServiceTests: XCTestCase {
     }
 }
 
-private struct InertMetadataFileService: FileServiceProtocol {
+extension FileServiceTests {
+    func testWritableMetadataRefusesOversizedGitdirFile() throws {
+        let metadata = tempDir + "/metadata", root = tempDir + "/store"
+        try fileService.createDirectory(at: metadata)
+        try fileService.createDirectory(at: root)
+        try fileService.writeFile(at: root + "/.git", content:
+            "gitdir: ../metadata\n" + String(repeating: "\n", count: 64 * 1_024))
+        XCTAssertThrowsError(try fileService.storeMetadataDirectory(root: root))
+        try fileService.writeFile(at: root + "/.git", content: "gitdir: ../metadata\n")
+        XCTAssertEqual(try fileService.storeMetadataDirectory(root: root), try fileService.resolveRealPath(at: metadata))
+    }
+
+    func testRelativeStoreLocationTerminatesWhenCwdCannotResolve() throws {
+        let files = InertMetadataFileService()
+        XCTAssertThrowsError(try files.resolvedStoreLocation(root: "skills")) { error in
+            XCTAssertEqual((error as NSError).code, CocoaError.fileNoSuchFile.rawValue)
+        }
+        XCTAssertLessThanOrEqual(files.resolutionAttempts, 2, "An unresolvable dot must terminate parent traversal")
+        files.resolutionAttempts = 0
+        files.resolvableCwd = "/resolved/cwd"
+        XCTAssertEqual(try files.resolvedStoreLocation(root: "skills").path, "/resolved/cwd/skills")
+    }
+
+}
+
+/// Models only metadata primitives. Relative-path cases bound probes so a recursion regression fails without crashing.
+private final class InertMetadataFileService: FileServiceProtocol {
+    var resolutionAttempts = 0
+    var resolvableCwd: String?
+    func resolveRealPath(at path: String) throws -> String {
+        resolutionAttempts += 1
+        if path == ".", let resolvableCwd { return resolvableCwd }
+        throw CocoaError(.fileNoSuchFile)
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        guard resolutionAttempts < 16 else { throw CocoaError(.fileReadUnknown) }
+        return nil
+    }
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws {}
     func deleteFile(at path: String) throws {}

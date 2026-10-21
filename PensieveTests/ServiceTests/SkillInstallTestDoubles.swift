@@ -16,6 +16,8 @@ struct ReverseListingFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -27,6 +29,11 @@ struct ReverseListingFileService: FileServiceProtocol {
         try wrapped.listDirectory(at: path).reversed()
     }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 struct FailingCopyFileService: FileServiceProtocol {
@@ -49,8 +56,13 @@ struct FailingCopyFileService: FileServiceProtocol {
     }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -60,6 +72,8 @@ struct FailingCopyFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 final class RecordingVendorFileService: FileServiceProtocol {
@@ -88,6 +102,8 @@ final class RecordingVendorFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws {
         if !reachedSwap {
             pathsCreatedBeforeSwap.append(path)
@@ -106,6 +122,11 @@ final class RecordingVendorFileService: FileServiceProtocol {
         reachedSwap = true
         try wrapped.replaceItem(at: path, with: sourcePath)
     }
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
@@ -131,6 +152,8 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -149,6 +172,11 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
     }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 final class CrashManifest: ManifestReadWriting {

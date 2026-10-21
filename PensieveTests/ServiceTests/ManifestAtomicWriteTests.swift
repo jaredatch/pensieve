@@ -8,6 +8,7 @@ private final class FailOnNthWriteFileService: FileServiceProtocol {
     struct InducedFailure: Error {}
     private let wrapped: FileService
     private let failOnWrite: Int
+    var refuseTemporaryAllocation = false
     private var writeCount = 0
     private(set) var capturedWritePaths: [String] = []
     init(wrapped: FileService, failOnWrite: Int) {
@@ -19,6 +20,10 @@ private final class FailOnNthWriteFileService: FileServiceProtocol {
         capturedWritePaths.append(path)
         if writeCount == failOnWrite { throw InducedFailure() }
         try wrapped.writeFile(at: path, content: content)
+    }
+    func storeTemporaryParent(root: String) throws -> String {
+        if refuseTemporaryAllocation { throw InducedFailure() }
+        return try wrapped.storeTemporaryParent(root: root)
     }
     func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
@@ -40,6 +45,9 @@ private final class FailOnNthWriteFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+
+    func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
 }
 
 /// PLAN-12 / 12.3 — the atomic manifest write: build a temp tree, then swap it in.
@@ -56,8 +64,9 @@ final class ManifestAtomicWriteTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        for path in [tempDir!, tempDir! + ".manifest-build.tmp"] where FileManager.default.fileExists(atPath: path) {
-            try FileManager.default.removeItem(atPath: path)
+        let temporary = try TestStoreTemporary(root: tempDir, files: fileService, kind: "manifest-build")
+        for path in [temporary.parent, tempDir!] where fileService.directoryExists(at: path) {
+            try fileService.deleteDirectory(at: path)
         }
     }
 
@@ -93,19 +102,46 @@ final class ManifestAtomicWriteTests: XCTestCase {
     // touches while building goes to that sibling temp; only the final atomic swap (a rename, not a write)
     // lands inside `manifest/`.
     func testManifestBuildTempLivesOutsideStoreRoot() throws {
-        let capturing = FailOnNthWriteFileService(wrapped: fileService, failOnWrite: 99)   // never fail; just capture
-        try ManifestService(fileService: capturing).write(sampleAtomicSnapshot(), toRoot: tempDir)
-        let insideRoot = capturing.capturedWritePaths.filter { $0.hasPrefix(tempDir + "/") }
-        XCTAssertTrue(insideRoot.isEmpty,
-                      "manifest build writes must target a temp OUTSIDE the store root; leaked inside: \(insideRoot)")
+        try StoreWriteCrashProbe(directory: tempDir).withVolume { volume in
+            let root = tempDir + "/linked"
+            try fileService.createDirectory(at: volume + "/store")
+            try fileService.createSymlink(at: root, pointingTo: volume + "/store")
+            let capturing = FailOnNthWriteFileService(wrapped: fileService, failOnWrite: 99)
+            try ManifestService(fileService: capturing).write(sampleAtomicSnapshot(), toRoot: root)
+            XCTAssertFalse(capturing.capturedWritePaths.isEmpty)
+            for path in capturing.capturedWritePaths {
+                XCTAssertFalse(path.hasPrefix(root + "/"), path)
+                XCTAssertFalse(path.hasPrefix(volume + "/store/"), path)
+            }
+            // The tree has been renamed away, so inspect its allocation directory.
+            let tempTree = (try XCTUnwrap(capturing.capturedWritePaths.first) as NSString).deletingLastPathComponent
+            XCTAssertEqual(fileService.fileIdentity(at: (tempTree as NSString).deletingLastPathComponent,
+                                                    followingLinks: true)?.device,
+                           fileService.fileIdentity(at: volume, followingLinks: true)?.device)
+            XCTAssertEqual(try service.read(fromRoot: root).skills.map(\.slug), ["swift-style"])
+        }
     }
 
     // A first-ever manifest write on a FRESH store must BOOTSTRAP the store root: the temp is built outside
     // `root`, so the swap's move into `root/manifest` would fail with a missing parent unless `write` creates
     // `root` first. (The other tests' setUp pre-creates the root, which hid this on-fresh-store path.)
     func testWriteBootstrapsFreshStoreRoot() throws {
-        let freshRoot = tempDir + "/does-not-exist-yet"   // NOT created
+        try assertFreshStoreRoot(tempDir + "/does-not-exist-yet")
+        try StoreWriteCrashProbe(directory: tempDir).withVolume { volume in
+            try assertFreshStoreRoot(volume + "/absent-parent/store")
+        }
+    }
+
+    private func assertFreshStoreRoot(_ freshRoot: String) throws {
         XCTAssertFalse(fileService.directoryExists(at: freshRoot))
+        for refuseAllocation in [false, true] {
+            let faulty = FailOnNthWriteFileService(wrapped: fileService, failOnWrite: 2)
+            faulty.refuseTemporaryAllocation = refuseAllocation
+            XCTAssertThrowsError(
+                try ManifestService(fileService: faulty).write(sampleAtomicSnapshot(), toRoot: freshRoot)
+            ) { error in XCTAssertTrue(error is FailOnNthWriteFileService.InducedFailure) }
+            XCTAssertFalse(fileService.directoryExists(at: freshRoot), "A failed first build must leave the root absent")
+        }
         try service.write(sampleAtomicSnapshot(), toRoot: freshRoot)
         let read = try service.read(fromRoot: freshRoot)
         XCTAssertEqual(read.categories.map { $0.name }, ["Swift"])

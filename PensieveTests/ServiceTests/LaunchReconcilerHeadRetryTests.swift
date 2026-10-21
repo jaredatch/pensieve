@@ -44,6 +44,9 @@ private final class RecordingHeadRetryMigrationService: StoreMigrationServicePro
 }
 
 private final class DefiniteBornHeadRetryGitService: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { false }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+    func manifestMatchesHead(at path: String) throws -> Bool { false }
     func initRepository(at path: String) throws {}
     func setRemote(_ url: String, at path: String) throws {}
     func removeRemote(at path: String) throws {}
@@ -334,6 +337,7 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
     }
 
     private func seedManifestAndHead() throws -> String {
+        try TestPaths.git.initRepository(at: tempDir)
         try manifest.write(
             ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
             toRoot: tempDir

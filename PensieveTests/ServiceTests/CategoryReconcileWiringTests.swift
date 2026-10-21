@@ -10,9 +10,7 @@ private struct RecordedLink: Hashable {
     let projectPath: String?
 }
 
-private struct StubFailure: LocalizedError {
-    let errorDescription: String? = "stub failure"
-}
+private struct StubFailure: LocalizedError { let errorDescription: String? = "stub failure" }
 
 private struct SeededRule {
     let skill: Skill
@@ -47,22 +45,17 @@ private final class RecordingLinkService: LinkServiceProtocol {
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         linked.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
-
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         linked.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
-
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         (projectPath ?? "/tmp/user-wide") + "/links/" + platform.rawValue + "/" + skill.directoryName
     }
-
     func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         (projectPath ?? "/tmp/user-wide") + "/targets/" + platform.rawValue + "/" + skill.directoryName
     }
-
     func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
 }
-
 private final class StubDetection: AgentDetectionServiceProtocol {
     var installed: [PlatformTarget]
 
@@ -75,6 +68,17 @@ private final class StubDetection: AgentDetectionServiceProtocol {
 }
 
 private struct StubFileService: FileServiceProtocol {
+    // Canonical folders in this in-memory fixture have no ancestor aliases.
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        if isSymlink(at: path) { return .symlink }
+        if directoryExists(at: path) { return .directory }
+        return fileExists(at: path) ? .regular : nil
+    }
+    func resolveRealPath(at path: String) throws -> String {
+        guard !isSymlink(at: path) else { throw CocoaError(.fileReadUnknown) }
+        return path
+    }
+
     let linkService: RecordingLinkService
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws {}
@@ -185,14 +189,10 @@ final class CategoryReconcileWiringTests: XCTestCase {
     }
 
     @MainActor
-    private func skillCount(context: ModelContext) throws -> Int {
-        try context.fetch(FetchDescriptor<Skill>()).count
-    }
+    private func skillCount(context: ModelContext) throws -> Int { try context.fetch(FetchDescriptor<Skill>()).count }
 
     @MainActor
-    private func projectCount(context: ModelContext) throws -> Int {
-        try context.fetch(FetchDescriptor<Project>()).count
-    }
+    private func projectCount(context: ModelContext) throws -> Int { try context.fetch(FetchDescriptor<Project>()).count }
 
     @MainActor
     func testSetSkillReconcilesAssignAndUnassign() throws {

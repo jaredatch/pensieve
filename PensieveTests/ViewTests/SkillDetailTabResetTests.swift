@@ -153,6 +153,9 @@ private struct SkillHistoryTabResetHarness: View {
 }
 
 private final class SkillDetailTabResetGit: GitServiceProtocol {
+    func isWorktreeClean(at path: String) -> Bool { false }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
+    func manifestMatchesHead(at path: String) throws -> Bool { false }
     let thirdCommit: GitCommit
     private(set) var logPaths: [String] = []
 

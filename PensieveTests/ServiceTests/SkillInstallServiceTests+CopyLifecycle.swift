@@ -55,7 +55,7 @@ extension SkillInstallServiceTests {
         XCTAssertNil(library.withFingerprintLock { library.lastWrittenBody["new-vendor"] })
         XCTAssertEqual(try installer.stableContentHash(at: root + "/skills/vendor"), beforeHash)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).first?.installedOrigin, origin)
-        XCTAssertFalse(try fileService.listDirectory(at: tempDir).contains { $0.hasPrefix("failure-store.vendor-") })
+        try assertNoVendorTemps(root: root)
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: root + "-sync.lock"))
         lock.release()
     }
@@ -108,9 +108,7 @@ extension SkillInstallServiceTests {
             XCTAssertTrue(try ModelContext(container).fetch(FetchDescriptor<Skill>()).isEmpty)
         }
         XCTAssertTrue(held, "Cancel must arrive after a descriptor chunk was copied")
-        XCTAssertFalse(try fileService.listDirectory(at: tempDir).contains {
-            $0.hasPrefix((root as NSString).lastPathComponent + ".vendor-")
-        })
+        try assertNoVendorTemps(root: root)
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: root + "-sync.lock"))
         lock.release()
     }

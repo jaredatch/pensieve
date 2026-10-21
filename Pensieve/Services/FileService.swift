@@ -16,6 +16,10 @@ protocol FileServiceProtocol {
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
+    /// Shared namespace key for store publishers, including a not-yet-created store.
+    func storeKey(root: String) throws -> String
+    /// Existing outside directory on the store device for rename-only publication.
+    func storeTemporaryParent(root: String) throws -> String
     func cleanStoreIntermediates(at root: String) throws
     func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws
     func writeExecutableFile(at path: String, content: String) throws
@@ -41,6 +45,8 @@ protocol FileServiceProtocol {
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
+    /// Remove only an empty directory entry, without following a link.
+    func removeEmptyDirectory(at path: String) throws
     /// Atomically publish a sibling directory over an absent or empty directory only.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
@@ -199,7 +205,7 @@ extension FileServiceProtocol {
     /// `RENAME_SWAP`) followed by best-effort removal of the displaced old item, so a concurrent reader
     /// sees either the WHOLE old item or the WHOLE new item — never a partial one. When `path` does not
     /// exist yet, the source is atomically moved into place. `sourcePath` MUST be on the same volume as
-    /// `path` (a sibling temp path) — a cross-volume swap is not atomic and `renamex_np` rejects it.
+    /// `path` (an outside temporary on that device) — a cross-volume swap is not atomic and `renamex_np` rejects it.
     /// Like `writeExecutableFile`, this default lives in the FileService layer — the one layer permitted
     /// to touch `FileManager`/Darwin — so it is inside the single-chokepoint boundary, not a bypass.
     /// (PLAN-12 / 12.3 — the atomic manifest write.)
@@ -211,7 +217,10 @@ extension FileServiceProtocol {
             }
             try? FileManager.default.removeItem(atPath: sourcePath)   // now holds the displaced old item
         } else {
-            try FileManager.default.moveItem(atPath: sourcePath, toPath: path)   // atomic create
+            guard renamex_np(sourcePath, path, UInt32(RENAME_EXCL)) == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+                              userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
+            }
         }
     }
 

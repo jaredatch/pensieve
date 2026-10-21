@@ -34,8 +34,9 @@ extension AppRuntimePathsTests {
         try context.save()
         try assertTemporaryDeploymentFactories(paths: paths, files: files, context: context)
         let coordinator = SyncCoordinator(modelContainer: context.container)
+        let temporary = try TestStoreTemporary(root: paths.storeRoot, files: files, kind: "machine-state")
         var machineWrites: [String] = []
-        files.beforeFileWrite = { if $0.contains(".machine-state-") { machineWrites.append($0) } }
+        files.beforeFileWrite = { if temporary.contains($0) { machineWrites.append($0) } }
         defer { files.beforeFileWrite = nil }
         await paths.configureCoordinator(coordinator, defaults: try isolatedDefaults(), fileService: files)
         let result = await coordinator.runCycle()
@@ -47,8 +48,7 @@ extension AppRuntimePathsTests {
         XCTAssertEqual(states.first?.agents, [])
         XCTAssertTrue(try NativeTestWork.run {
             try git.runOrThrow(["--git-dir", remote, "show", "HEAD:skills/runtime/SKILL.md"], in: nil)
-        }
-            .stdout.contains("local sync body"))
+        }.stdout.contains("local sync body"))
         XCTAssertTrue(files.isExecutableFile(at: paths.gitAskpassHelperPath))
         XCTAssertTrue(try files.readFile(at: paths.appSupportDir + "/daemon.log").contains("synced"))
         let scanPath = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: .claudeCode)) + "/scanned/SKILL.md"

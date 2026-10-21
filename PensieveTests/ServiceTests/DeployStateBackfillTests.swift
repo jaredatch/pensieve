@@ -45,6 +45,12 @@ final class DeployStateBackfillTests: XCTestCase {
         let foreignLink = claudeRoot + "/foreign"
         try fileService.createSymlink(at: ownedLink, pointingTo: paths.pensieveSkillsDir + "/owned")
         try fileService.createSymlink(at: foreignLink, pointingTo: tempDir + "/outside/foreign")
+        for slug in ["dangling", "loop"] {
+            let canonical = paths.pensieveSkillsDir + "/" + slug
+            try fileService.createSymlink(at: canonical,
+                                          pointingTo: slug == "loop" ? canonical : tempDir + "/absent")
+            try fileService.createSymlink(at: claudeRoot + "/" + slug, pointingTo: canonical)
+        }
         try store.replaceAll([stateRecord(slug: "owned", platform: .claudeCode, artifactPath: ownedLink,
                                           recordedAt: "2026-01-01T00:00:00Z")])
 
@@ -317,5 +323,20 @@ private extension DeployStateBackfillTests {
             artifactPath: artifactPath,
             recordedAt: recordedAt
         )
+    }
+}
+
+extension DeployStateBackfillTests {
+    @MainActor
+    func testBackfillRefusesLinkedUserSkillsFolder() throws {
+        let context = try makeContext()
+        try makeCanonicalSkill("owned")
+        let folder = try XCTUnwrap(paths.userSkillsRoot(.claudeCode))
+        let outside = tempDir + "/outside"
+        try fileService.createSymlink(at: outside + "/owned", pointingTo: paths.pensieveSkillsDir + "/owned")
+        try fileService.createSymlink(at: folder, pointingTo: outside)
+        makeBackfill().backfill(context: context)
+        XCTAssertTrue(try store.read().records.isEmpty, "A linked user-wide folder must not establish ownership")
+        XCTAssertEqual(try fileService.symlinkTarget(at: outside + "/owned"), paths.pensieveSkillsDir + "/owned")
     }
 }

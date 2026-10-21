@@ -5,7 +5,8 @@ import XCTest
 /// Runs the production writers in the existing disposable helper. A dylib intercepts their real
 /// write, rename, lock and flush syscalls to kill the child, refuse optional work or insert a race.
 /// Namespace races launch one more disposable writer. Directory creation can be observed for volume
-/// probes. It invents no intermediate name and intercepts no process outside these helper children.
+/// probes; root resolution can fail after its first successful admission. It invents no intermediate name
+/// and intercepts no process outside these helper children.
 struct StoreWriteCrashProbe {
     let library: String
 
@@ -48,15 +49,28 @@ struct StoreWriteCrashProbe {
 
     /// Mounts only a new fixture image beside this probe; the real system allocator chooses its temp location.
     func withVolume(_ body: (String) throws -> Void) throws {
+        let volume = try attachVolume()
+        defer { detachVolume(volume) }
+        try body(volume)
+    }
+
+    func withVolume(_ body: (String) async throws -> Void) async throws {
+        let volume = try attachVolume()
+        defer { detachVolume(volume) }
+        try await body(volume)
+    }
+
+    private func attachVolume() throws -> String {
         let volume = library + ".volume"
         let disk = library + ".sparseimage"
         try FileService().createDirectory(at: volume)
         try diskTool(["create", "-size", "64m", "-fs", "APFS", "-type", "SPARSE", "-volname", "WriterFixture", disk])
         try diskTool(["attach", "-nobrowse", "-mountpoint", volume, disk])
-        defer {
-            do { try diskTool(["detach", volume]) } catch { XCTFail("Fixture detach failed: \(error)") }
-        }
-        try body(volume)
+        return volume
+    }
+
+    private func detachVolume(_ volume: String) {
+        do { try diskTool(["detach", volume]) } catch { XCTFail("Fixture detach failed: \(error)") }
     }
 
     private func diskTool(_ arguments: [String]) throws {
@@ -119,7 +133,14 @@ struct StoreWriteCrashProbe {
         return result;
     }
     static char resolved_temporary[MAXPATHLEN];
+    static int root_resolutions;
     static char *resolving(const char *path, char *output) {
+        const char *root = getenv("STORE_PROBE_ROOT");
+        if (point("root-resolution-fails") && root && !strcmp(path, root) && ++root_resolutions > 1) {
+            int fd = open(getenv("STORE_CRASH_TRACE"), O_CREAT|O_WRONLY|O_TRUNC, 0600);
+            if (fd >= 0) { write(fd, "root resolution failed", 22); close(fd); }
+            errno = EIO; return NULL;
+        }
         char *result = realpath(path, output);
         if (result && strstr(result, "/TemporaryItems")) strlcpy(resolved_temporary, result, sizeof(resolved_temporary));
         return result;

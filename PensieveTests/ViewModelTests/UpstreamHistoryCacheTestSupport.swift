@@ -188,6 +188,12 @@ class CountingHistoryFileService: FileServiceProtocol {
     func touchRegularFile(at path: String, date: Date) throws {
         try base.touchRegularFile(at: path, date: date)
     }
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try base.entryTypeWithoutFollowingLinks(at: path)
+    }
+    func resolveRealPath(at path: String) throws -> String { try base.resolveRealPath(at: path) }
+    func storeTemporaryParent(root: String) throws -> String { try base.storeTemporaryParent(root: root) }
 }
 
 final class RecordingTouchHistoryFileService: CountingHistoryFileService {
