@@ -72,7 +72,7 @@ Code style, naming, and organization — only the decisions an agent could other
 
 ## 11. Project generation (XcodeGen)
 
-- **Never edit `Pensieve.xcodeproj` directly.** Edit `project.yml` and run `xcodegen generate`. A `FileChanged` hook in `.claude/settings.json` auto-runs `xcodegen generate` when `project.yml` changes — but a Codex/headless executor without that hook must run it manually after editing `project.yml`.
+- **Never edit `Pensieve.xcodeproj` directly.** Edit `project.yml` and run `script/generate.sh`. A `FileChanged` hook in `.claude/settings.json` auto-runs it when `project.yml` changes — but a Codex/headless executor without that hook must run it manually after editing `project.yml`.
 - New Swift files must be added under the right target's `sources:` in `project.yml`, then regenerated.
 
 ## 12. Public surface

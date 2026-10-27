@@ -56,7 +56,7 @@ jobs:
       - name: Generate Xcode project
         timeout-minutes: 2
         run: |
-          xcodegen generate
+          ./script/generate.sh
 
       - name: Sign, notarize, and publish
         # Setup, signing and upload leave 10 minutes below the job cap.

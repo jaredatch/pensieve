@@ -42,7 +42,7 @@ description: Swift and SwiftUI conventions for the Pensieve codebase. Load when 
 
 ## Project Generation
 
-- **Never modify `.xcodeproj` directly** — edit `project.yml` and run `xcodegen generate`
+- **Never modify `.xcodeproj` directly** — edit `project.yml` and run `script/generate.sh`
 - When adding new Swift files, add them to the appropriate target in `project.yml` under `sources`
 - SPM dependencies are declared in `project.yml` under `packages` and linked in target `dependencies`
 

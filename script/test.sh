@@ -132,7 +132,7 @@ if [ "${1:-}" != "--filter" ] && [ "$#" -ne 0 ]; then
 fi
 
 cd "$REPO"
-xcodegen generate
+"$REPO/script/generate.sh"
 mkdir -p "$HOME" "$CLANG_MODULE_CACHE_PATH" "$XDG_CACHE_HOME"
 
 # The suite runs in parallel, one test class per worker. A parallel run prints no "Executed N tests" line, so the

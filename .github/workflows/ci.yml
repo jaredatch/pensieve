@@ -56,7 +56,7 @@ jobs:
       - name: Generate Xcode project
         timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
         run: |
-          xcodegen generate
+          ./script/generate.sh
 
       - name: Compute replay range
         timeout-minutes: 1 # Worst measured: 0 s; bound >= 3x.

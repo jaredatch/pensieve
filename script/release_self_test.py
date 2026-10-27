@@ -314,7 +314,7 @@ class PackageArtifactTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         checkout = Path(self.temporary.name)
         (checkout / "script").mkdir()
-        for name in ("package.sh", "package_artifacts.py"):
+        for name in ("package.sh", "generate.sh", "package_artifacts.py"):
             shutil.copy2(ROOT / "script" / name, checkout / "script" / name)
         (checkout / "VERSION").write_text(VERSION)
         (checkout / "project.yml").write_text('MARKETING_VERSION: "1.0.0"\n')
@@ -900,7 +900,7 @@ sys.exit(result.returncode)
         temporary = self.root / "tmp"
         temporary.mkdir()
         (self.root / "script").mkdir()
-        for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py", "package_artifacts.py"):
+        for name in ("release.sh", "release_recovery.sh", "package.sh", "generate.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py", "package_artifacts.py"):
             if (ROOT / "script" / name).exists(): shutil.copy2(ROOT / "script" / name, self.root / "script" / name)
         shutil.copytree(ROOT / "release/homebrew", self.root / "release/homebrew")
         shutil.copy2(ROOT / "release/minimum-macos.txt", self.root / "release/minimum-macos.txt")

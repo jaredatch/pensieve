@@ -52,7 +52,7 @@ OPAQUE_ALLOWLIST = frozenset()
 # Deliberate briefing edits require a reviewed pin update and a private record.
 PUBLIC_BRIEFING_SHA256 = {
     'CLAUDE.md': '5b9ddfe47b6fc2685bfa9944526d0174641e5c3f9b0a05f06fd5c20ea1726a00',
-    'AGENTS.md': 'abbed1a08146130b5ee0460f5ca5c99e67355f933b2055dc992bcae68a80625c',
+    'AGENTS.md': '270d681321e7429044690d43ae0c5f67c3af97c233a90f901ce02f6dedd34736',
 }
 EMAIL_FILENAME_SUFFIXES = IMAGE_SUFFIXES - {'.ai', '.mov'}
 MARKUP_SUFFIXES = frozenset(('.md', '.markdown', '.html', '.htm'))

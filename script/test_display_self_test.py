@@ -21,7 +21,7 @@ class DisplayLifecycleTests(unittest.TestCase):
         scripts = self.root / "script"
         scripts.mkdir()
         source = Path(__file__).resolve().parent
-        for name in ("test.sh", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py",
+        for name in ("test.sh", "generate.sh", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py",
                      "runtime-path-members.json", "check-path-syntax.py"):
             shutil.copy2(source / name, scripts / name)
         for name in ("Pensieve", "PensieveDaemon", "PensieveCLI", "bin"):

@@ -34,7 +34,7 @@ if [ "$#" -gt 1 ]; then
 fi
 
 cd "$REPO"
-xcodegen generate
+"$REPO/script/generate.sh"
 mkdir -p "$HOME" "$CLANG_MODULE_CACHE_PATH" "$XDG_CACHE_HOME"
 xcodebuild build \
   -scheme "$SCHEME" \

@@ -67,7 +67,7 @@ build_app() {
   cd "$REPO"
   local build_number
   build_number="$("$REPO/script/build-number.sh")"
-  xcodegen generate
+  "$REPO/script/generate.sh"
   # Xcode's incremental copy phases do not remove resources retired by the project.
   rm -rf "$DERIVED_DATA/Build/Products/Release/$APP_NAME"
   # xcodebuild always signs ad-hoc here, even when --sign carries a real identity:

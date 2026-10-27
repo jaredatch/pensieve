@@ -50,7 +50,7 @@ cd pensieve
 script/build_and_run.sh
 ```
 
-That generates the project, builds the app and opens it. `script/test.sh` runs the test suite. If you'd rather work in Xcode, run `xcodegen generate` and open `Pensieve.xcodeproj`.
+That generates the project, builds the app and opens it. `script/test.sh` runs the test suite. If you'd rather work in Xcode, run `script/generate.sh` and open `Pensieve.xcodeproj`.
 
 The scripts build for Apple silicon only. Release builds are universal.
 

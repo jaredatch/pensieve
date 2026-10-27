@@ -1296,10 +1296,10 @@
 		2A5D7B61082192659FBC2FEA /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 6;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
 			files = (
-				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
+				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1318,10 +1318,10 @@
 		93E582B3BFE204FAFE24F297 /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Helpers;
-			dstSubfolderSpec = 1;
+			dstPath = "";
+			dstSubfolderSpec = 6;
 			files = (
-				14CDA6F5E6AE80788AE2D9BA /* PensieveCLI in Embed Dependencies */,
+				E44963724D79099F767144D2 /* PensieveDaemon in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;

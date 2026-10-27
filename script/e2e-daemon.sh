@@ -19,7 +19,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$DERIVED_DATA/ModuleCache.noindex"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$CLANG_MODULE_CACHE_PATH"
 
 cd "$REPO"
-xcodegen generate
+"$REPO/script/generate.sh"
 
 xcodebuild build \
   -scheme PensieveDaemon \

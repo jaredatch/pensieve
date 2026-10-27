@@ -3,7 +3,7 @@ name: test
 description: Run the Pensieve test suite
 ---
 
-Run the Pensieve test suite through the repo's wrapper, which runs `xcodegen generate` then `xcodebuild test` with repo-local DerivedData and module caches, and prints `PENSIEVE_TEST_COUNT=<n>` at the end. Run it from the repo root (paths are repo-relative; never hardcode a checkout path):
+Run the Pensieve test suite through the repo's wrapper, which runs `script/generate.sh` then `xcodebuild test` with repo-local DerivedData and module caches, and prints `PENSIEVE_TEST_COUNT=<n>` at the end. Run it from the repo root (paths are repo-relative; never hardcode a checkout path):
 
 ```bash
 script/test.sh 2>&1 | tail -40

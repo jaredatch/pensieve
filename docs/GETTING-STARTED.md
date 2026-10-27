@@ -36,7 +36,7 @@ If you'd rather build from source (an Apple silicon Mac with Xcode 26):
 ```sh
 brew install xcodegen
 git clone https://github.com/jaredatch/pensieve.git && cd pensieve
-xcodegen generate
+script/generate.sh
 open Pensieve.xcodeproj   # then press Run in Xcode
 ```
 

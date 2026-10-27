@@ -25,7 +25,7 @@ script/test.sh                       # run the test suite
 script/lint.sh                       # SwiftLint in strict mode
 ```
 
-`script/test.sh --filter PensieveTests/SomeTests` runs one test class. The project file is generated, so change `project.yml` and run `xcodegen generate` rather than editing `Pensieve.xcodeproj`.
+`script/test.sh --filter PensieveTests/SomeTests` runs one test class. The project file is generated, so change `project.yml` and run `script/generate.sh` rather than editing `Pensieve.xcodeproj`.
 
 ## Committing
 

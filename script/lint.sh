@@ -24,7 +24,7 @@ for path in Path('PensieveTests').rglob('*.swift'):
         failed = True
 sys.exit(1 if failed else 0)
 PY
-xcodegen generate
+"$REPO/script/generate.sh"
 
 if command -v swiftlint >/dev/null 2>&1; then
   swiftlint --strict
