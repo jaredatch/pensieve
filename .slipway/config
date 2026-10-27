@@ -1,0 +1,14 @@
+# Slipway: this project's pin and settings, one `key = value` per line. `slipway install` sets version; the rest is edited by hand.
+version = 0.1.7
+agent_account = kramer-bot
+repo = jaredatch/pensieve
+main_branch = master
+module = macos
+orchestrator = claude claude-fable-5-1 high bypassPermissions
+builder = codex@0.164.0 gpt-6.1-sol high danger-full-access
+reader.claude = claude claude-opus-5-5 high plan
+reader.codex = codex gpt-6-astra high read-only
+macos.scheme = Pensieve
+macos.smoke = python3 script/cli_contract_test.py --binary DerivedData/Build/Products/Debug/Pensieve.app/Contents/Helpers/pensieve
+macos.smoke_home = real
+macos.test_env = TEST_RUNNER_SWIFTUI_VIEW_DEBUG=1 TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT={tmp} TEST_RUNNER_GIT_CEILING_DIRECTORIES={tmp}

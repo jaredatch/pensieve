@@ -41,3 +41,7 @@ private/
 __pycache__/
 
 /.claude/commands
+# Slipway: per-host links into ~/.slipway/<version>/, made by `slipway install`
+.claude/skills/slipway
+.agents/skills/slipway
+.grok/skills/slipway

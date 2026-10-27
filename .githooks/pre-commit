@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Slipway hook shim: git runs this; it runs the same-named hook of the Slipway version this branch pins in
+# .slipway/config as committed at HEAD (the working copy only before the first commit), from ~/.slipway/<version>/hooks/,
+# so an edit to the version line can't redirect the hooks. Written by `slipway install`; don't edit it, it's replaced.
+set -u
+v=$(git show HEAD:.slipway/config 2>/dev/null | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' | head -1 | sed 's/[[:space:]]*$//')
+if [ -z "$v" ]; then v=$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' .slipway/config 2>/dev/null | head -1 | sed 's/[[:space:]]*$//'); fi
+if [ -z "$v" ]; then
+  echo "slipway: no version in .slipway/config, so the ${0##*/} hook can't run; run slipway install" >&2; exit 1
+fi
+hook="$HOME/.slipway/$v/hooks/${0##*/}"
+if [ ! -x "$hook" ]; then
+  echo "slipway: this project pins Slipway $v, which isn't installed here ($hook is missing); run slipway install" >&2; exit 1
+fi
+exec "$hook" "$@"
