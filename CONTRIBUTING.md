@@ -36,7 +36,7 @@ The reader checks for leaks, and CI scans pushed commits after the push to maste
 If your clone ran the old hook installer, remove its local configuration:
 
 ```sh
-git config --unset core.hooksPath
+case "$(git config core.hooksPath)" in script/hooks|../script/hooks) git config --unset core.hooksPath ;; esac
 git config --remove-section merge.execplan-log
 ```
 
