@@ -677,19 +677,25 @@ class WorkflowTests < Minitest::Test
   def test_ci_test_baseline_includes_wrapper_self_test
     assert_ci_test_baseline_includes_wrapper_self_test
     step = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test').fetch('steps').find { |entry| entry['id'] == 'tests' }
-    Dir.mktmpdir('pensieve-ci-floor-') do |directory|
+    Dir.mktmpdir('pensieve-ci-test-') do |directory|
       Dir.mkdir(File.join(directory, 'script'))
       runner = File.join(directory, 'script/test.sh')
-      File.write(runner, "#!/bin/sh\n[ \"${1:-}\" = --self-test ] || echo PENSIEVE_TEST_COUNT=2707\n")
+      File.write(runner, <<~SH)
+        #!/bin/sh
+        printf '%s\\n' "$*" >> calls
+        if [ "${1:-}" = --self-test ]; then
+          exit "${FAIL_SELF_TEST:-0}"
+        fi
+        exit "${FAIL_SUITE:-0}"
+      SH
       File.chmod(0755, runner)
-      [['2707', true], ['002707', true], ["2707\n# metadata", true], ['2708', false],
-       ['', false], ['x', false], ['1x', false], ['+2707', false], [' 2707', false],
-       ['2707 ', false], ['2707.0', false], ["2707\r", false]].each do |floor, expected|
-        File.write(File.join(directory, '.test-count'), floor + "\n")
-        script = step.fetch('run').gsub('/tmp/ci-test.out', File.join(directory, 'test.out'))
-        stdout, stderr, status = Open3.capture3('/bin/bash', '-c', script, chdir: directory)
-        assert_equal expected, status.success?, "floor #{floor.inspect}: #{stdout}#{stderr}"
-        assert_includes stdout + stderr, '::error::' unless expected
+      [{}, { 'FAIL_SELF_TEST' => '7' }, { 'FAIL_SUITE' => '9' }].each do |environment|
+        File.write(File.join(directory, 'calls'), '')
+        stdout, stderr, status = Open3.capture3(environment, '/bin/bash', '-e', '-o', 'pipefail', '-c',
+                                               step.fetch('run'), chdir: directory)
+        assert_equal environment.empty?, status.success?, "#{environment.inspect}: #{stdout}#{stderr}"
+        expected = environment.key?('FAIL_SELF_TEST') ? ["--self-test\n"] : ["--self-test\n", "\n"]
+        assert_equal expected, File.readlines(File.join(directory, 'calls'))
       end
     end
   end
@@ -768,16 +774,14 @@ class WorkflowTests < Minitest::Test
   # Apply 2x for a slower runner before adding it to each historical runner baseline.
   CI_RUNNER_FACTOR = 2
   # Largest per-commit averages among multi-commit runs 37143791867 (2),
-  # 37192623397 (17), and 37218019371 (17): the last took 20 s and 28 s.
+  # 37192623397 (17), and 37218019371 (17): the last took 20 s.
   CI_PER_COMMIT_SECONDS = {
-    'Check public hygiene in pushed commits' => 20.0 / 17,
-    'Replay commit guards' => 28.0 / 17
+    'Check public hygiene in pushed commits' => 20.0 / 17
   }.freeze
   # Run 37063706683 replayed one commit: retain its entire step duration as
   # fixed overhead, then add the multi-commit average conservatively.
   CI_REPLAY_FIXED_SECONDS = {
-    'Check public hygiene in pushed commits' => 22,
-    'Replay commit guards' => 35
+    'Check public hygiene in pushed commits' => 22
   }.freeze
   # Workflow/recovery: worst of three serial wall-time samples, rounded up to milliseconds.
   # Measured 2026-10-05 on Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83).

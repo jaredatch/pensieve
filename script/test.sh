@@ -52,7 +52,7 @@ if [ "${1:-}" = "--self-test" ]; then
   exit 0
 fi
 
-# One test run per machine (the playbook's modules/macos-swift.md § Wrapper scripts): take the machine's test lock
+# One test run per machine: take the machine's test lock
 # before anything else, so a second run from any checkout waits in line. The wrapper owns the locked descriptors,
 # so INT/TERM reaches its cleanup before the kernel drops the lock. wait_lock (above) waits on those descriptors.
 # Two lanes: a full suite first queues behind any other full suite on test-full.lock, and a --filter run skips that
@@ -257,7 +257,7 @@ fi
 
 # A --filter that matches no test class/method makes xcodebuild exit 0 having run nothing — a vacuous pass a
 # Verify block would read as green. Refuse it. The full run (no filter) is untouched: a zero count there is
-# the suite's own business and the count floor (ratchet.sh) catches it.
+# reported as PENSIEVE_TEST_COUNT for the caller to evaluate.
 if [ -n "${filter:-}" ] && [ "$count" -eq 0 ] && [ "$status" -eq 0 ]; then
   echo "test.sh: --filter matched zero tests (vacuous pass refused)" >&2
   exit 1

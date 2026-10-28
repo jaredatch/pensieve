@@ -1,0 +1,10 @@
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -126,7 +126,6 @@
+         timeout-minutes: 158 # Worst estimate: 3147 s = 3127 s runner + ceil(2 x 9.826 s local wrapper self-test); bound >= 3x.
+         id: tests
+         run: |
+-          ./script/test.sh --self-test
+           ./script/test.sh
+
+       - name: Test CLI contract
