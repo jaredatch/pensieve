@@ -24,12 +24,6 @@ from urllib.parse import unquote, urlsplit
 PATHS = 'script/private-paths.txt'
 SETTINGS = 'script/public-hygiene.json'
 ACCEPTANCES = 'script/public-hygiene-acceptances.json'
-KIT = frozenset('script/' + name for name in (
-    'ratchet.sh', 'refreeze.sh', 'ci-replay.sh', 'tmp-tidy.sh',
-    'briefing-lint.sh', 'acceptance-extract.awk', 'install-hooks.sh', 'drive-stage.sh',
-    'hooks/pre-commit', 'hooks/commit-msg', 'hooks/pre-push',
-))
-KIT_CONFIG = frozenset(('script/ratchet.conf', 'script/herdr.conf'))
 FIXTURE_USERS = frozenset(('test', 'x', 'k', 'kk', 'fixture', 'other', 'me', 'user', 'Shared'))
 EMAIL_DOMAINS = frozenset(('example.com', 'example.org', 'example.net',
                            'pensieve.local', 'github.com'))
@@ -373,7 +367,7 @@ def image_file(path, data):
 def line_rules(path, line, paths, terms, public=False, suffix=None):
     suffix = Path(path).suffix.lower() if suffix is None else suffix
     rules = []
-    if path not in KIT and DECISION.search(line):
+    if DECISION.search(line):
         rules.append('decision-cite')
     home_line = line.replace(r'\/', '/')
     home_patterns = (HOME_PATH, PROJECT_HOME)
@@ -409,16 +403,8 @@ def line_rules(path, line, paths, terms, public=False, suffix=None):
         rules.append('personal-term')
     # Exact manifest and ignore declarations define locations rather than cite them.
     declaration = path in (PATHS, '.gitignore') and line.rstrip('\r') in paths
-    config_declaration = public and path in KIT_CONFIG and bool(re.fullmatch(
-        r'(?:RATCHET_(?:LOG=docs/' r'LOG\.md|PLANS_DIR=docs/' r'plans|ALLOWLIST=docs/test-allowlist\.md)'
-        r'|(?:RATCHET|XP)_RESUME_NOTE="?tmp' r'/clear-continue\.md"?)', line))
-    command_setup = ('XP_WORKTREE_SETUP="xcodegen generate && mkdir -p .claude && { '
-                     '[ -L .claude/' 'commands ] || { [ ! -e .claude/' 'commands ] && '
-                     'ln -s ..' '/pri' 'vate/.claude/' 'commands .claude/' 'commands; }; }"')
-    config_declaration |= public and path == 'script/herdr.conf' and line == command_setup
-    exempt = KIT if public else KIT | KIT_CONFIG
     old_repo = public and re.search(r'(?i)(?<![\w.-])jaredatch/' r'pensieve-app(?![\w-])', line)
-    if path not in exempt and not declaration and not config_declaration and (
+    if not declaration and (
             private_cite(line, paths, path, suffix) or old_repo):
         rules.append('private-path-cite')
     return rules

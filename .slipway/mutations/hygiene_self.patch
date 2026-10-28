@@ -1,0 +1,11 @@
+--- a/script/public_hygiene.py
++++ b/script/public_hygiene.py
+@@ -367,7 +367,7 @@
+ def line_rules(path, line, paths, terms, public=False, suffix=None):
+     suffix = Path(path).suffix.lower() if suffix is None else suffix
+     rules = []
+-    if DECISION.search(line):
++    if not path.startswith('script/') and DECISION.search(line):
+         rules.append('decision-cite')
+     home_line = line.replace(r'\/', '/')
+     home_patterns = (HOME_PATH, PROJECT_HOME)
