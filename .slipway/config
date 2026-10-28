@@ -1,5 +1,5 @@
 # Slipway: this project's pin and settings, one `key = value` per line. `slipway install` sets version; the rest is edited by hand.
-version = 0.1.10
+version = 0.1.11
 agent_account = kramer-bot
 repo = jaredatch/pensieve
 main_branch = master
