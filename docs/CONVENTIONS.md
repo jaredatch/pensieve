@@ -1,10 +1,10 @@
 # CONVENTIONS.md — Pensieve
 
-Code style, naming, and organization — only the decisions an agent could otherwise get wrong, and the places where this project diverges from the macOS/Swift module's defaults. The Executor reads this before writing code; the Planner keeps it honest. Standard Swift style is assumed and not restated.
+Code style, naming, and organization for agents working on Pensieve. Read this before writing code and keep it consistent with the code. Standard Swift style is assumed.
 
 ## 1. Language baseline & strictness
 
-- **Swift 5.10**, macOS **26.0** deployment target (`project.yml`). **Not** Swift 6, and strict concurrency is **not** enabled. The macOS/Swift module lists "Swift 6 + strict concurrency / async-everywhere" as a default — Pensieve has not adopted it yet. Write to 5.10 reality; promoting to Swift 6 is a deliberate future decision requiring a written rationale, not something to slip in mid-stage.
+- **Swift 5.10**, macOS **26.0** deployment target (`project.yml`). **Not** Swift 6, and strict concurrency is **not** enabled. Promoting to Swift 6 and strict concurrency requires a written rationale and a separate change.
 - No force-unwrapping (`!`) in production code; tests may force-unwrap a known fixture invariant.
 - `guard let` for early returns over nested `if let`.
 
@@ -30,12 +30,12 @@ Code style, naming, and organization — only the decisions an agent could other
 - SwiftData reads in views use `@Query`; the container is built once by `AppRuntime.makeContainer` and attached to the main window, View Changes and Settings scenes in `PensieveApp.swift`.
 - **Pure SwiftUI by default; AppKit only as a narrow bridge.** The bridges that exist, each justified in its own doc comment: the sidebar (`SidebarOutline`, an `NSViewRepresentable` over an `NSOutlineView` source list), the tag editor (`TagTokenField`, an `NSViewRepresentable` over an `NSTokenField`; its coordinator owns the editing baseline — SwiftUI has no token field), the editor host (`MarkdownEditorWebView`, an `NSViewRepresentable` over a hardened `WKWebView` — §14), `NSOpenPanel` in `AddProjectSheet` and `ContentView.importFromFolder` for directory selection, the window-close veto (`WindowCloseGuard`, a delegate proxy that answers `windowShouldClose` for an unsaved draft), `ViewChangesWindowLifecycle` for auxiliary-window close observation and AppKit restoration policy, and `PensieveAppDelegate` for process lifecycle. New AppKit use is allowed only where a SwiftUI wrapper visibly diverges from the tier-1 Apple-app pattern, needs a justifying comment, its own selection-bridge tests, and stays minimal.
 - **Body reads no disk.** A SwiftUI `body` never calls a filesystem-reading method (`platformVM.isDeployed`, a `FileService` probe); it reads a value loaded once off the render path (`DetailContentSnapshot`, `ProjectSkillsSnapshot`) or observable state (`PlatformViewModel.deployIndex`). The same rule bars anything that blocks or shells out from `body` or a computed property it reaches: a subprocess `waitUntilExit` inside the render pass pumps a nested run loop and crashes, it does not hang.
-- **Name the control before tuning it.** A tier-1 look (Finder's sidebar, Mail's list) is a specific AppKit or SwiftUI control; establish which, and whether SwiftUI's wrapper renders it identically on the current OS (probe with a bare sample app if unsure), before touching a property. Where the wrapper visibly diverges, use the AppKit control (PLAN-28 retired two imitation commits). → playbook macos-swift module (EVO-56).
-- **App-wide shortcuts live in the menu bar's command groups**. A `keyboardShortcut` on a button inside a toolbar `Menu` is never a key equivalent. A menu item whose enabled state tracks a model wraps in a `View`, so the model reads happen in that view's `body`. The existing New Skill and Save wrappers date from macOS 14. A command that a *view* observes through a notification (`.importSkills`) is received by every main window — macOS window tabbing opened a second one even with New Window retired, until `WindowPolicy` turned tabbing off — so the observer still acts only when its window `appearsActive` (PLAN-30 / 30.2: two choosers per ⌘⇧I). → playbook macos-swift module (EVO-56).
+- **Name the control before tuning it.** A tier-1 look (Finder's sidebar, Mail's list) is a specific AppKit or SwiftUI control; establish which, and whether SwiftUI's wrapper renders it identically on the current OS (probe with a bare sample app if unsure), before touching a property. Where the wrapper visibly diverges, use the AppKit control (PLAN-28 retired two imitation commits).
+- **App-wide shortcuts live in the menu bar's command groups**. A `keyboardShortcut` on a button inside a toolbar `Menu` is never a key equivalent. A menu item whose enabled state tracks a model wraps in a `View`, so the model reads happen in that view's `body`. The existing New Skill and Save wrappers date from macOS 14. A command that a *view* observes through a notification (`.importSkills`) is received by every main window — macOS window tabbing opened a second one even with New Window retired, until `WindowPolicy` turned tabbing off — so the observer still acts only when its window `appearsActive` (PLAN-30 / 30.2: two choosers per ⌘⇧I).
 - **A focused scene value outlives a sheet, so gate destructive commands on `controlActiveState`.** A menu item enabled only by a published action stays live while that window's own sheet holds the keyboard, and its key equivalent outranks a text field inside the sheet (PLAN-34 / 34.2-m: ⌘⌫ typed in New Skill's name field raised the delete confirmation for the skill behind it). Publish `controlActiveState == .key` as a second focused scene value and require it — `appearsActive` stays `true` under the window's own sheet, which is exactly why `.importSkills` uses it and a delete command cannot.
 - **Library change fences.** Add controls and their funnels read `SkillLibraryViewModel.addsFenced`: launch ingestion, an unreadable store or an unavailable library blocks adds. Category rename, removal and membership controls read `categoryEditsFenced`, which covers a newer manifest schema and an unavailable library. A damaged manifest keeps category edits available; their saves wait for repair. Other edits read `libraryUnavailable` / `isWriteFenced`. Disabled controls outside menus show `addFenceReason` as help. `persistentFenceReason` also supplies the empty Projects and Categories descriptions and the category header footer; launch adds no reason to body text.
 - **A disabled control's tooltip in a grouped `Form` goes on its row.** On macOS 26 a disabled `Toggle`'s `.help` shows over its label but never over its switch, in either modifier order. Help on a container holding the `Toggle` (an `HStack` with a content shape, or `LabeledContent`) shows over both (PLAN-55 / 55.3-c2). Disabled menu items show no tooltip at all, so a reason a menu can't show belongs on a control outside the menu.
-- **A bridge coordinator's state gets a lifecycle table.** An `NSViewRepresentable` whose coordinator keeps state (an editing baseline, a session, a cache) has that state's lifecycle written in its plan as a table — seeded where, refreshed on which callback, what happens on end-editing, termination, deletion, and a SwiftUI update that changes no input — each row a criterion or a gate clause (PLAN-30 / 30.1: two halts and two refreezes for a baseline seeded on the wrong callback and never refreshed after `.adoptStored`).
+- **A bridge coordinator's state gets a lifecycle table.** An `NSViewRepresentable` whose coordinator keeps state (an editing baseline, a session, a cache) has that state's lifecycle written in its plan as a table — seeded where, refreshed on which callback, what happens on end-editing, termination, deletion, and a SwiftUI update that changes no input — each row a criterion or a gate clause (PLAN-30 / 30.1: repeated corrections for a baseline seeded on the wrong callback and never refreshed after `.adoptStored`).
 
 ## 5. Logging
 
@@ -66,8 +66,8 @@ Code style, naming, and organization — only the decisions an agent could other
 ## 10. Git hygiene & linting
 
 - **Default branch is `master`** (the remote's `HEAD` → `origin/master`). Never push to `master` directly.
-- Commit messages: **Conventional Commits** (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`). Under the ExecPlan loop, a stage commit's message **also** carries the stage reference `PLAN-NN / NN.X` so the docs-commit guard can pair it with changes to the plan file (`docs/TESTING.md`, the ratchet guard). Outside a stage, the ratchet's other forms: `PLAN-NN / review` for a review verdict or fix, `PLAN-NN / close` for the close, `PLAN-NN / patch` for a bounded change to a closed plan's surface, `PLAN-NN / fix` for a fix batch that spans Stages, built in a fresh Codex session (`script/drive-stage.sh --fix` — playbook 0.19), `PLAN-NN / refreeze` for a re-stamp (the ratchet's refreeze-trace leg requires it, with the `.acceptance-amends` line staged — playbook 0.16), else `note:` opens the subject. Stage explicit paths, never `git add -A` (untracked scratch must never enter a commit).
-- Branch naming: `feature/…`, `fix/…` for ad-hoc work; `plan-NN/stage-N-<slug>` for ExecPlan stages.
+- Commit messages follow **Conventional Commits** (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`). Stage explicit paths, never `git add -A`, so untracked scratch stays out of commits.
+- Branch naming: `feature/…`, `fix/…`.
 - **SwiftLint is wired as a real gate** through `script/lint.sh`, which regenerates the project and runs `swiftlint --strict` with whatever SwiftLint is on `PATH` (no version is pinned; it falls back to `swift-format lint`, then to a printed notice, when neither is installed). The tracked `.swiftlint.yml` scopes linting to `Pensieve`, `PensieveCLI` and `PensieveTests`, excludes build outputs, and only tunes rules that encode project conventions (`line_length` 130, `function_parameter_count` 6, `redundant_discardable_let` off). New code must pass the wrapper cleanly.
 
 ## 11. Project generation (XcodeGen)
@@ -114,14 +114,14 @@ The FileService containment primitive refuses a leaf link and compares the entry
 
 ## 16. Shell scripts — bash 3.2 and BSD tools
 
-The wrappers, guards, and every frozen `Verify:` block run under macOS's `/bin/bash` 3.2 and BSD userland (CI's runner too). Four rules, each earned by a proof that lied:
+The wrappers, guards, and executable checks run under macOS's `/bin/bash` 3.2 and BSD userland (CI's runner too). Four rules, each earned by a proof that lied:
 
 - **BSD `sed` silently ignores GNU-only forms** (`0,/re/`) and leaves the file untouched, so a "red" proof over an unmutated tree proves nothing. Land mutations with a tool that reports presence (a Python edit, `perl -pi`) and `grep -c` the mutated text before trusting the red (PLAN-18 / 18.1a; PLAN-26 / 26.5).
 - **bash 3.2:** guard empty-array expansion with `${arr[@]+"${arr[@]}"}`; no `mapfile`, no associative arrays.
 - **A load-bearing check under `set -o pipefail` must be pipe-free.** `printf "$big" | grep -q` SIGPIPEs when `grep` exits at the first match, flips the pipeline status to 141, and `|| fail`-style wiring then silently skips exactly the oversized input the guard exists to catch. Capture to a variable or file first, or use a herestring (`grep -q <<< "$big"`).
 - **Run the wrapper gates (lint / test / smoke) serially.** Concurrent runs race XcodeGen's `Pensieve.xcodeproj` write (`NSCocoaErrorDomain Code=516`) and fail spuriously at project generation.
 
-→ playbook macos-swift module (EVO-56).
+Apply these rules to scripts and executable checks alike.
 
 ## 17. CI triggers and commit messages
 
@@ -131,8 +131,8 @@ the workflow has no path filters. Records commits may keep skip markers.
 
 The Linux hygiene workflow checks every public branch and tag push. The macOS
 build still runs on master pushes and manual dispatch, with its existing path
-filters. Change those triggers only with the maintainer's approval. The Executor
-never pushes; the Planner uses the maintainer's permission on the push command.
+filters. Change those triggers only with the maintainer's approval. Agents push
+only with the maintainer's permission.
 
 ## 18. Docs voice — who each doc is for
 

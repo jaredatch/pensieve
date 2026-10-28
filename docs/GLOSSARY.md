@@ -1,6 +1,6 @@
 # GLOSSARY — Pensieve
 
-Domain and technical vocabulary, so a stateless agent reads plans and code without guessing. (ExecPlan-method terms — ExecPlan, Stage, Planner/Executor/Reviewer, tier — are defined in the Playbook, not repeated here.)
+Domain and technical vocabulary for agents reading Pensieve's code and documentation.
 
 | Term | Definition | Source |
 |---|---|---|
