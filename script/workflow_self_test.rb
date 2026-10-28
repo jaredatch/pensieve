@@ -355,7 +355,7 @@ class WorkflowTests < Minitest::Test
       fixture = Marshal.load(Marshal.dump(@workflows))
       fixture.fetch('release.yml').fetch('jobs').fetch('cask')['if'] = condition
       error = assert_raises(Minitest::Assertion) { assert_cask_job_shape(fixture) }
-      assert_includes error.message, condition
+      assert_includes error.message, condition.inspect
       assert_includes error.message, 'cannot evaluate condition'
     end
   end
