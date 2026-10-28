@@ -12,7 +12,7 @@ For a bug, these help most:
 - which agents you deploy to
 - what you did, what you expected, and what happened instead
 
-Pull requests aren't accepted yet. Every change to Pensieve goes through a planning and review process that isn't set up for outside contributions. That may change. Until then, an issue describing the fix is the best way to get it made.
+Pull requests aren't accepted yet. Pensieve uses Slipway: an issue assigned to kramer-bot is built and read by agents from different model families and landed by a script after its checks pass. That process isn't set up for outside contributions yet. Until then, an issue describing the fix is the best way to get it made.
 
 ## Building and testing
 
@@ -29,10 +29,18 @@ script/lint.sh                       # SwiftLint in strict mode
 
 ## Committing
 
-Run `script/install-hooks.sh` once after cloning. It points git at the hooks in `script/hooks/`, which check every commit before it lands:
+There are no hooks to install. Run `script/public-hygiene.sh --tree` before committing. The public hygiene guard refuses personal details and references to private records, including home paths, real email addresses, private hostnames, and internal decision numbers. It also checks image locations. Refusals name the rule, file and line. The maintainer keeps an additional private list of personal names and hosts; a clone without that list cannot check those terms.
 
-- The ratchet (`script/ratchet.sh`) refuses secrets, skipped or disabled tests, and a drop in the test count. The count only goes up.
-- The public hygiene guard (`script/public-hygiene.sh`) keeps personal and private details out of the repository. It refuses a line that adds a path in someone's home folder, a real email address, a Tailscale hostname (`*.ts.net`), a cite of one of the project's private records, or an internal decision number. The maintainer also keeps a private list of personal names and hosts that it refuses. Your clone won't have that list, so a passing guard doesn't mean every private name was caught. It also refuses an image added outside the app's asset catalog. The refusal names the rule, the file and the line, and says how to fix it. Run `script/public-hygiene.sh --tree` to check the whole tree.
+The reader checks for leaks, and CI scans pushed commits after the push to master. Slipway installs no commit-time project check or pre-push hygiene batch.
+
+If your clone ran the old hook installer, remove its local configuration:
+
+```sh
+git config --unset core.hooksPath
+git config --remove-section merge.execplan-log
+```
+
+Delete the `merge=execplan-log` line from `info/attributes` in the common Git directory (`git rev-parse --git-common-dir`). Apply the same cleanup in any repository the installer wired alongside this one. These commands remove local settings; a setting that is already absent needs no cleanup.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`. Stage files by name rather than with `git add -A`.
 

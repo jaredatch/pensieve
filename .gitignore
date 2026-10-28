@@ -12,7 +12,7 @@ webeditor/node_modules/
 # macOS
 .DS_Store
 
-# ExecPlan review scratch (untracked by convention)
+# Local review scratch (untracked by convention)
 tmp/
 
 # Local agent/harness state (tracked settings and skills remain shared)
@@ -33,7 +33,7 @@ tmp/
 .env
 .env.*
 *ed25519*
-# on-disk archives of closed plans (playbook EVO-52) and personal files — never tracked
+# Local archives and personal files (never tracked)
 /archive/
 private/
 

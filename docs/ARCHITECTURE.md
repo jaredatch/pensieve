@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Pensieve
 
-The durable shape of the system: layers, boundaries, and the key abstractions the Executor must respect. The Planner keeps this current; the Executor treats the boundaries here as load-bearing (the Never list forbids bypassing them). It is reverse-engineered from the code and documents *what is*, only where an agent could otherwise get it wrong.
+The system's layers, boundaries, and abstractions are constraints for every agent working on Pensieve; keep them current and document what the code does wherever an agent could otherwise get it wrong.
 
 ## 1. Layers
 
