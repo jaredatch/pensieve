@@ -1,1 +1,3 @@
 verdict tier=t0 result=green fingerprint=5fee056365e40328af00e69ba0a27fb9ba5856d4a65f336e96f4c832793e6c74 tree=a2cad5881b6fd7745987fa86916369c7be2c9dc8 base=5cc552afa6a787362583d261bbfc4cb6c43cd392 checks=- selected=none passed=none failed=none flaky=none smoke=skipped module=macos time=2026-10-28T20:02:53Z
+
+verdict tier=t1 result=green fingerprint=35f857bcdc18d057822eccc6192c1c6e67437c66304f8ab3eca15f370e39cd1a tree=a2cad5881b6fd7745987fa86916369c7be2c9dc8 base=5cc552afa6a787362583d261bbfc4cb6c43cd392 checks=gone=red-by-mutation,docs=red-by-mutation,workflow=red-by-mutation,wrapper=red-by-mutation,hygiene_self=red-by-mutation,hygiene_tree=red-by-mutation selected=none passed=none failed=none flaky=none smoke=ok module=macos time=2026-10-28T20:26:06Z
