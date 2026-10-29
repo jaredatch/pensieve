@@ -1,0 +1,4 @@
+paths = Pensieve/Services/GitService.swift PensieveTests/ViewModelTests/ConflictFolderResolutionTests.swift PensieveTests/ViewModelTests/ConflictFolderResolutionTests+Recovery.swift PensieveTests/Fixtures/SyncConflictByteFixture+Folders.swift
+risk = Pensieve/Services/GitService.swift
+check.origHead = tests PensieveTests/ConflictFolderResolutionTests/testRefusedAbortWithUnreadableOrigHeadReportsRefusal
+mutation.origHead = .slipway/mutations/origHead.patch
