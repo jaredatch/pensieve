@@ -14,10 +14,6 @@ extension ConflictFolderResolutionTests {
             credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
         await model.loadAndReport(container: fixture.contextB.container)
         guard case let .ready(groups) = model.phase else { return XCTFail("Conflict must load for \(occupant)") }
-        let original = try NativeTestWork.run {
-            try fixture.git.runOrThrow(["-C", fixture.storeB, "rev-parse", "HEAD"], in: nil)
-                .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
         for group in groups { model.choose(group.id, .thisMachine) }
         try fixture.files.writeFile(at: fixture.root + "/folder-armed", content: occupant)
         await model.applyAndReport(container: fixture.contextB.container)
@@ -26,6 +22,10 @@ extension ConflictFolderResolutionTests {
             let writer = Darwin.open(origHead, O_WRONLY | O_NONBLOCK)
             if writer >= 0 { Darwin.close(writer) }
             await TestWait.until(failureMessage: "FIFO reader did not finish after release") { !model.isApplying }
+        }
+        let original = try NativeTestWork.run {
+            try fixture.git.runOrThrow(["-C", fixture.storeB, "rev-parse", "ORIG_HEAD"], in: nil)
+                .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         try assertOrigHeadInstallation(occupant, fixture: fixture, original: original)
         let trace = try fixture.files.readFile(at: fixture.root + "/abort-results")
@@ -39,12 +39,12 @@ extension ConflictFolderResolutionTests {
             XCTFail("\(occupant): expected refused abort, got \(model.phase); "
                 + "selection error: \(model.selectionError ?? "none"); abort trace: \(trace.debugDescription)")
         }
-        XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: folder), .directory, occupant)
-        XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra", occupant)
         let expected: FileEntryType? = occupant == "link" ? .symlink
             : occupant == "oversized" ? .regular : occupant == "FIFO" ? .other : nil
         XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: origHead), expected,
                        "\(occupant): abort must preserve the metadata occupant")
+        XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: folder), .directory, occupant)
+        XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra", occupant)
     }
 
     private func assertOrigHeadInstallation(_ occupant: String, fixture: SyncConflictByteFixture,
