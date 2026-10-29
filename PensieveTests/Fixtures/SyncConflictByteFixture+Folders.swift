@@ -2,6 +2,42 @@ import XCTest
 @testable import Pensieve
 
 extension SyncConflictByteFixture {
+    /// Installs a real metadata occupant after Git refuses abort, then records what lstat
+    /// and readlink actually saw. A failed hook cannot supply installation evidence.
+    func origHeadReplacementCommand(_ occupant: String) throws -> String {
+        let script = root + "/replace-orig-head.py"
+        try files.writeFile(at: script, content: """
+            import json, os, stat, sys
+            path, saved, evidence, occupant = sys.argv[1:]
+            with open(path, 'rb') as stream:
+                original = stream.read()
+            with open(saved, 'wb') as stream:
+                stream.write(original)
+            os.unlink(path)
+            if occupant == 'link':
+                os.symlink(saved, path)
+            elif occupant == 'oversized':
+                with open(path, 'wb') as stream:
+                    stream.write(original + b'\\n' * (64 * 1024 + 1))
+            elif occupant == 'FIFO':
+                os.mkfifo(path)
+            result = {'missing': not os.path.lexists(path)}
+            if not result['missing']:
+                info = os.lstat(path)
+                result['mode'] = stat.S_IFMT(info.st_mode)
+                result['size'] = info.st_size
+                if stat.S_ISLNK(info.st_mode):
+                    result['target'] = os.readlink(path)
+                elif stat.S_ISREG(info.st_mode):
+                    with open(path, 'r') as stream:
+                        result['trimmed'] = stream.read().strip()
+            with open(evidence, 'w') as stream:
+                json.dump(result, stream)
+            """ + "\n")
+        return "/usr/bin/python3 '\(script)' '\(storeB)/.git/rebase-merge/orig-head' "
+            + "'\(root)/saved-orig-head' '\(root)/orig-head-evidence.json' '\(occupant)'"
+    }
+
     /// Runs native git without rewriting its index. Only an armed resolve changes
     /// the worktree after rebase; snapshots bracket Pensieve's resolution before git aborts.
     /// Neither wrapper supplies conflict versions, comparison answers or resolution results.

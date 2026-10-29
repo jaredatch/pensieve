@@ -1,7 +1,74 @@
+import Darwin
 import XCTest
 @testable import Pensieve
 
 extension ConflictFolderResolutionTests {
+    func assertUnreadableOrigHeadReportsRefusal(_ occupant: String) async throws {
+        let fixture = try makeFixture(link: false)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let folder = fixture.storeB + "/" + fixture.path
+        let origHead = fixture.storeB + "/.git/rebase-merge/orig-head"
+        let engine = try fixture.folderObservationEngine(change: "printf extra > '\(folder)/extra'",
+            afterAbortFailure: fixture.origHeadReplacementCommand(occupant))
+        let model = ConflictResolutionModel(engine: engine, git: fixture.git,
+            credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+        await model.loadAndReport(container: fixture.contextB.container)
+        guard case let .ready(groups) = model.phase else { return XCTFail("Conflict must load for \(occupant)") }
+        let original = try NativeTestWork.run {
+            try fixture.git.runOrThrow(["-C", fixture.storeB, "rev-parse", "HEAD"], in: nil)
+                .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        for group in groups { model.choose(group.id, .thisMachine) }
+        try fixture.files.writeFile(at: fixture.root + "/folder-armed", content: occupant)
+        await model.applyAndReport(container: fixture.contextB.container)
+        if occupant == "FIFO", model.isApplying {
+            // Unblock an unbounded reader after its wait fails, then join resolution before teardown.
+            let writer = Darwin.open(origHead, O_WRONLY | O_NONBLOCK)
+            if writer >= 0 { Darwin.close(writer) }
+            await TestWait.until(failureMessage: "FIFO reader did not finish after release") { !model.isApplying }
+        }
+        try assertOrigHeadInstallation(occupant, fixture: fixture, original: original)
+        let trace = try fixture.files.readFile(at: fixture.root + "/abort-results")
+        XCTAssertEqual(trace, "128\n", "\(occupant): native abort must run exactly once")
+        if case let .error(message) = model.phase {
+            XCTAssertTrue(message.contains("can’t replace the folder"), message)
+            assertMoveFolderMessage(message, path: fixture.path)
+            XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
+            XCTAssertTrue(message.contains("would lose untracked files"), message)
+        } else {
+            XCTFail("\(occupant): expected refused abort, got \(model.phase); "
+                + "selection error: \(model.selectionError ?? "none"); abort trace: \(trace.debugDescription)")
+        }
+        XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: folder), .directory, occupant)
+        XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra", occupant)
+        let expected: FileEntryType? = occupant == "link" ? .symlink
+            : occupant == "oversized" ? .regular : occupant == "FIFO" ? .other : nil
+        XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: origHead), expected,
+                       "\(occupant): abort must preserve the metadata occupant")
+    }
+
+    private func assertOrigHeadInstallation(_ occupant: String, fixture: SyncConflictByteFixture,
+                                           original: String) throws {
+        let evidence = try XCTUnwrap(JSONSerialization.jsonObject(with:
+            fixture.files.readData(at: fixture.root + "/orig-head-evidence.json")) as? [String: Any])
+        let saved = try fixture.files.readFile(at: fixture.root + "/saved-orig-head")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(GitObjectID.parse(saved, casePolicy: .lowercase), original, occupant)
+        switch occupant {
+        case "link":
+            XCTAssertEqual(evidence["mode"] as? Int, Int(S_IFLNK))
+            XCTAssertEqual(evidence["target"] as? String, fixture.root + "/saved-orig-head")
+        case "oversized":
+            XCTAssertEqual(evidence["mode"] as? Int, Int(S_IFREG))
+            XCTAssertGreaterThan(try XCTUnwrap(evidence["size"] as? Int), 64 * 1_024)
+            XCTAssertEqual(evidence["trimmed"] as? String, original)
+        case "FIFO":
+            XCTAssertEqual(evidence["mode"] as? Int, Int(S_IFIFO), "lstat must prove this is a FIFO")
+        default:
+            XCTAssertEqual(evidence["missing"] as? Bool, true)
+        }
+    }
+
     func assertLaterAbortPreservesFolder(_ fixture: SyncConflictByteFixture,
                                          model: ConflictResolutionModel) async throws {
         let folder = fixture.storeB + "/" + fixture.path
