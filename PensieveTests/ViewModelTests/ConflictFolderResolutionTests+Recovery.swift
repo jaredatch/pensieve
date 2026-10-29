@@ -48,7 +48,7 @@ extension ConflictFolderResolutionTests {
     }
 
     private func assertOrigHeadInstallation(_ occupant: String, fixture: SyncConflictByteFixture,
-                                           original: String) throws {
+                                            original: String) throws {
         let evidence = try XCTUnwrap(JSONSerialization.jsonObject(with:
             fixture.files.readData(at: fixture.root + "/orig-head-evidence.json")) as? [String: Any])
         let saved = try fixture.files.readFile(at: fixture.root + "/saved-orig-head")

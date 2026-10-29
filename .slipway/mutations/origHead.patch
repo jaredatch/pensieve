@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/GitService.swift
++++ b/Pensieve/Services/GitService.swift
+@@ -822,8 +822,7 @@
+             let result = try runOrThrow(["-C", root, "rev-parse", "--git-path", backend + "/orig-head"], in: nil)
+             let path = GitDirectoryText.resolve(result.stdout.trimmingCharacters(in: .newlines), relativeTo: root)
+             if try fileService.entryExistsWithoutFollowingLinks(at: path) {
+-                let commit = try GitDirectoryText.read(at: path, fileService: fileService)
+-                    .trimmingCharacters(in: .whitespacesAndNewlines)
++                let commit = try fileService.readFile(at: path).trimmingCharacters(in: .whitespacesAndNewlines)
+                 guard let oid = GitObjectID.parse(commit, casePolicy: .lowercase) else { break }
+                 return oid
+             }
