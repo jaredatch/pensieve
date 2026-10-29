@@ -818,11 +818,12 @@ extension GitService {
 
     private func rebaseOriginalCommit(at root: String) throws -> String {
         for backend in ["rebase-merge", "rebase-apply"] {
-            let result = try runOrThrow(["-C", root, "rev-parse", "--path-format=absolute",
-                                         "--git-path", backend + "/orig-head"], in: nil)
-            let path = result.stdout.trimmingCharacters(in: .newlines)
+            // Absolute path formatting resolves the leaf before the no-follow reader can reject it.
+            let result = try runOrThrow(["-C", root, "rev-parse", "--git-path", backend + "/orig-head"], in: nil)
+            let path = GitDirectoryText.resolve(result.stdout.trimmingCharacters(in: .newlines), relativeTo: root)
             if try fileService.entryExistsWithoutFollowingLinks(at: path) {
-                let commit = try fileService.readFile(at: path).trimmingCharacters(in: .whitespacesAndNewlines)
+                let commit = try GitDirectoryText.read(at: path, fileService: fileService)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let oid = GitObjectID.parse(commit, casePolicy: .lowercase) else { break }
                 return oid
             }
