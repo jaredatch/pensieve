@@ -39,6 +39,14 @@ final class ConflictFolderResolutionTests: XCTestCase {
         try await assertRefusals(link: false, nested: true)
     }
 
+    func testRefusedAbortWithUnreadableOrigHeadReportsRefusal() async throws {
+        for occupant in ["link", "oversized", "FIFO", "missing"] {
+            let failures = testRun?.failureCount
+            try await assertUnreadableOrigHeadReportsRefusal(occupant)
+            if testRun?.failureCount != failures { return }
+        }
+    }
+
     func testRefusedSymlinkPickPreservesTopLevelEntriesUntilAbort() async throws {
         try await assertRefusals(link: true, nested: false)
     }
