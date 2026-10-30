@@ -27,12 +27,27 @@ final class ConflictFolderResolutionTests: XCTestCase {
     }
 
     func testRefusedFilePickPreservesTopLevelEntriesUntilAbort() async throws {
-        for extra in [false, true] { try await assertUnrelatedAbortFailure(extra: extra) }
-        try await assertAuxiliaryAdmission()
-        try await assertPartialIndexFailure()
-        try await assertInspectionAbortRefusal()
-        try await assertAbortProofFailure()
         try await assertRefusals(link: false, nested: false)
+    }
+
+    func testUnrelatedIndexLockPreservesRefusedFolderUntilRecovery() async throws {
+        for extra in [false, true] { try await assertUnrelatedAbortFailure(extra: extra) }
+    }
+
+    func testAuxiliaryFolderBlockingAbortReportsFailureAndRecovers() async throws {
+        try await assertAuxiliaryAdmission()
+    }
+
+    func testPartialIndexWriteFailureHandsIntactFolderToAbort() async throws {
+        try await assertPartialIndexFailure()
+    }
+
+    func testInspectionAbortFailureReportsRefusalOnce() async throws {
+        try await assertInspectionAbortRefusal()
+    }
+
+    func testVanishedAbortProofPreservesGitRefusal() async throws {
+        try await assertAbortProofFailure()
     }
 
     func testRefusedFilePickPreservesNestedEntriesUntilAbort() async throws {
