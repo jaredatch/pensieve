@@ -11,6 +11,7 @@ enum ManifestChange {
     case skillMetadata(String, [String]?, SkillScope?)
     case deleteSkill(String)
     case retireSkill(String)
+    case renameSkill(String, String)
 
     var isDeletion: Bool {
         switch self {
@@ -22,6 +23,16 @@ enum ManifestChange {
     /// Validate before durable publication and before projecting pending edits into the window.
     /// A conflicting pending rename is refused and undone before its projection is accepted.
     func validate(in snapshot: ManifestSnapshot) throws {
+        if case .renameSkill(let old, let new) = self {
+            guard SkillStore.isPathSafeSlug(new), ManifestService.isAdmittedIntentComponent(new) else {
+                throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
+            }
+            if snapshot.skills.contains(where: { $0.slug == old }),
+               snapshot.skills.contains(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }) {
+                throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
+            }
+            return
+        }
         guard case .renameCategory(let old, let new) = self,
               let target = snapshot.categories.firstIndex(where: { $0.name == old }) else { return }
         let others = snapshot.categories.indices.filter { $0 != target }.map { snapshot.categories[$0].name }
@@ -70,10 +81,26 @@ enum ManifestChange {
             let count = snapshot.skills.count
             snapshot.skills.removeAll { $0.slug == slug }
             return snapshot.skills.count != count
+        case .renameSkill(let old, let new):
+            return renameSkill(old, to: new, in: &snapshot)
         case .retireSkill(let slug):
             snapshot.deployIntents.removeAll { $0.skillSlug == slug }
             for index in snapshot.categories.indices { snapshot.categories[index].skillSlugs.removeAll { $0 == slug } }
         default: return false
+        }
+        return true
+    }
+
+    private func renameSkill(_ old: String, to new: String, in snapshot: inout ManifestSnapshot) -> Bool {
+        guard let index = snapshot.skills.firstIndex(where: { $0.slug == old }) else {
+            return snapshot.skills.contains { $0.slug == new }
+        }
+        snapshot.skills[index].slug = new
+        for index in snapshot.deployIntents.indices where snapshot.deployIntents[index].skillSlug == old {
+            snapshot.deployIntents[index].skillSlug = new
+        }
+        for index in snapshot.categories.indices {
+            snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map { $0 == old ? new : $0 }
         }
         return true
     }

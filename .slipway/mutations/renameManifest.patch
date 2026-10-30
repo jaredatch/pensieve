@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -96,9 +96,6 @@
+             return snapshot.skills.contains { $0.slug == new }
+         }
+         snapshot.skills[index].slug = new
+-        for index in snapshot.deployIntents.indices where snapshot.deployIntents[index].skillSlug == old {
+-            snapshot.deployIntents[index].skillSlug = new
+-        }
+         for index in snapshot.categories.indices {
+             snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map { $0 == old ? new : $0 }
+         }

@@ -1,0 +1,22 @@
+--- a/Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift
++++ b/Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift
+@@ -7,9 +7,6 @@
+         if let problem = Self.renameNameProblem(name) { return problem }
+         let slug = SkillStore.slugify(name)
+         do {
+-            if let taken = try context.fetch(FetchDescriptor<Skill>()).first(where: {
+-                $0.id != skill.id && $0.directoryName.lowercased() == slug.lowercased()
+-            }) { return "The folder \(taken.directoryName) is taken. Choose another name." }
+             if slug == skill.directoryName { return nil }
+             if try skillStore.slugEntryExists(slug) {
+                 let spelling = try fileService.listDirectory(at: skillsDirectory)
+@@ -24,9 +21,6 @@
+         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Enter a skill name." }
+         guard name.lowercased().utf8.contains(where: { (97...122).contains($0) || (48...57).contains($0) }) else {
+             return "The folder name needs a letter or digit."
+-        }
+-        guard SkillStore.slugify(name).utf8.count <= 64 else {
+-            return "The folder name is limited to 64 bytes, which the deploy records require."
+         }
+         return nil
+     }

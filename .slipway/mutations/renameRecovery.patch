@@ -1,0 +1,20 @@
+--- a/Pensieve/ViewModels/SkillRenameFlow.swift
++++ b/Pensieve/ViewModels/SkillRenameFlow.swift
+@@ -188,7 +188,7 @@
+             for (category, slugs) in memberships { category.skillSlugs = slugs }
+             context.processPendingChanges()
+             do {
+-                if moved {
++                if moved && oldSlug == newSlug {
+                     try library.skillStore.renameSkill(directoryName: newSlug, to: oldSlug)
+                     moved = false
+                 }
+@@ -236,7 +236,7 @@
+         }
+
+         private func abandonWaitingCleanup() {
+-            do { try platform.abandonWaitingSkillCleanup(cleanup) } catch {
++            do { if oldSlug == newSlug { try platform.abandonWaitingSkillCleanup(cleanup) } } catch {
+                 library.error = (library.error ?? "")
+                     + " Couldn't withdraw this attempt's waiting cleanup: \(error.localizedDescription)."
+             }

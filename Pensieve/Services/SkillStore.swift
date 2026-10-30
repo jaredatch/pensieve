@@ -39,6 +39,8 @@ protocol SkillStoreProtocol {
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult
     /// Write raw SKILL.md content verbatim - no frontmatter synthesis. Low-level primitive.
     func writeBody(directoryName: String, body: String) throws
+    /// Move one canonical skill folder exclusively; every destination entry is an occupant.
+    func renameSkill(directoryName: String, to newDirectoryName: String) throws
     /// Delete a skill directory and its contents.
     func deleteSkill(directoryName: String) throws
     /// List all skill directory names.
@@ -50,6 +52,10 @@ protocol SkillStoreProtocol {
 }
 
 extension SkillStoreProtocol {
+    func renameSkill(directoryName: String, to newDirectoryName: String) throws {
+        throw CocoaError(.featureUnsupported)
+    }
+
     func createSkill(name: String, content: String, copying sourceDirectory: String,
                      avoiding: Set<String>) throws -> SkillFolderImportResult { throw CocoaError(.featureUnsupported) }
     /// Doubles enumerate their modeled store; never fall through to host filesystem I/O.
@@ -172,6 +178,17 @@ final class SkillStore: SkillStoreProtocol {
     func writeBody(directoryName: String, body: String) throws {
         let path = try validatedSkillDirectory(directoryName) + "/SKILL.md"
         try fileService.writeStoreFile(at: path, content: body, root: storeRoot, control: false)
+    }
+
+    func renameSkill(directoryName: String, to newDirectoryName: String) throws {
+        let source = try validatedSkillDirectory(directoryName)
+        guard Self.isPathSafeSlug(newDirectoryName) else { throw SkillStoreError.invalidDirectory(newDirectoryName) }
+        if try slugEntryExists(newDirectoryName) {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(POSIXErrorCode.EEXIST.rawValue),
+                          userInfo: [NSFilePathErrorKey: baseDir + "/" + newDirectoryName])
+        }
+        let destination = try validatedSkillDirectory(newDirectoryName)
+        try fileService.publishNewDirectory(at: source, to: destination)
     }
 
     func deleteSkill(directoryName: String) throws {

@@ -117,6 +117,7 @@ struct PensieveApp: App {
             CommandGroup(after: .saveItem) {
                 SaveSkillCommand(library: runtime.library)
                 ExportSkillCommand()
+                RenameSkillCommand(library: runtime.library)
                 Divider()
                 DeleteSkillCommand()
             }
@@ -225,6 +226,10 @@ private struct AddSkillFromGitHubActionKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
+private struct RenameSelectedSkillActionKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
 private struct DeleteSelectedSkillActionKey: FocusedValueKey {
     typealias Value = () -> Void
 }
@@ -237,6 +242,11 @@ extension FocusedValues {
     var addSkillFromGitHub: (() -> Void)? {
         get { self[AddSkillFromGitHubActionKey.self] }
         set { self[AddSkillFromGitHubActionKey.self] = newValue }
+    }
+
+    var renameSelectedSkill: (() -> Void)? {
+        get { self[RenameSelectedSkillActionKey.self] }
+        set { self[RenameSelectedSkillActionKey.self] = newValue }
     }
 
     var deleteSelectedSkill: (() -> Void)? {
@@ -368,5 +378,19 @@ final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
         UpdateChannelPolicy.allowedChannels(
             betaOptIn: defaults.bool(forKey: UpdateChannelPolicy.betaUpdatesEnabledKey)
         )
+    }
+}
+
+/// File and More share the detail's draft gate and rename sheet.
+private struct RenameSkillCommand: View {
+    let library: SkillLibraryViewModel
+    @FocusedValue(\.renameSelectedSkill) private var renameSelectedSkill
+    @FocusedValue(\.skillDetailWindowIsKey) private var detailWindowIsKey
+
+    var body: some View {
+        Button("Rename Skill…") { renameSelectedSkill?() }
+            .disabled(library.addsFenced || !DeleteSkillCommandRule.isEnabled(
+                hasAction: renameSelectedSkill != nil, windowIsKey: detailWindowIsKey))
+            .help(library.addFenceReason ?? "Rename skill")
     }
 }
