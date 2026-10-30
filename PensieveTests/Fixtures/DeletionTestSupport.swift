@@ -203,6 +203,13 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
         entries.insert(directoryName)
     }
 
+    func renameSkill(directoryName: String, to newDirectoryName: String) throws {
+        guard bodies[directoryName] != nil, !entries.contains(newDirectoryName) else { throw DeletionTestError() }
+        bodies[newDirectoryName] = bodies.removeValue(forKey: directoryName)
+        entries.remove(directoryName)
+        entries.insert(newDirectoryName)
+    }
+
     func deleteSkill(directoryName: String) throws {
         deleteCalls.append(directoryName)
         guard !deleteFailures.contains(directoryName), bodies[directoryName] != nil else {

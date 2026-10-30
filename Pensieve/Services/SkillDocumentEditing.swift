@@ -58,7 +58,7 @@ enum SkillDocumentEditing {
         return SkillRewriteResult(content: output, didChange: !output.utf8.elementsEqual(original.utf8))
     }
 
-    /// One admission point for edited frontmatter, reusable by a future folder-rename operation.
+    /// One admission point for edited frontmatter, also used by Rename with its explicitly requested new name.
     static func validateFrontmatter(_ parsed: ParsedSkill, currentName: String) throws {
         guard let file = parsed.preservedFile,
               let loaded = try? CheckedYAMLLoader.composeAndLoad(yaml: file.frontmatterSource),

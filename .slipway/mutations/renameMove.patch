@@ -1,0 +1,16 @@
+--- a/Pensieve/Services/SkillStore.swift
++++ b/Pensieve/Services/SkillStore.swift
+@@ -183,12 +183,8 @@
+     func renameSkill(directoryName: String, to newDirectoryName: String) throws {
+         let source = try validatedSkillDirectory(directoryName)
+         guard Self.isPathSafeSlug(newDirectoryName) else { throw SkillStoreError.invalidDirectory(newDirectoryName) }
+-        if try slugEntryExists(newDirectoryName) {
+-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(POSIXErrorCode.EEXIST.rawValue),
+-                          userInfo: [NSFilePathErrorKey: baseDir + "/" + newDirectoryName])
+-        }
+         let destination = try validatedSkillDirectory(newDirectoryName)
+-        try fileService.publishNewDirectory(at: source, to: destination)
++        try fileService.publishDirectory(at: source, to: destination)
+     }
+
+     func deleteSkill(directoryName: String) throws {

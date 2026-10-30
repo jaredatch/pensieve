@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The detail toolbar's More menu: Reveal in Finder, View on GitHub, Copy Local Path,
-/// Check for Updates, Deploy…, then Delete Skill. View on GitHub and Check for Updates are a linked skill's;
+/// Check for Updates, Deploy…, Rename…, then Delete Skill. View on GitHub and Check for Updates are a linked skill's;
 /// an unlinked skill gets Connect to Repository… in their place — PLAN-19's adoption entry, which the
 /// Repository block carried. Delete keeps ⌘⌫ (File › Delete Skill) and the list's context menu.
 struct SkillMoreMenu: View {
@@ -12,6 +12,8 @@ struct SkillMoreMenu: View {
     let onCheckForUpdates: () -> Void
     let onConnect: () -> Void
     let onDeploy: () -> Void
+    let onRename: () -> Void
+    var renameDisabledReason: String?
     let onDelete: () -> Void
 
     var body: some View {
@@ -29,6 +31,9 @@ struct SkillMoreMenu: View {
                 Button("Connect to Repository…", action: onConnect)
             }
             Button("Deploy…", action: onDeploy)
+            Button("Rename…", action: onRename)
+                .disabled(renameDisabledReason != nil)
+                .help(renameDisabledReason ?? "Rename skill")
             Divider()
             Button("Delete Skill", role: .destructive, action: onDelete)
         } label: {

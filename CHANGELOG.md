@@ -6,6 +6,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Added
 
+- Rename a skill from More › Rename… or File › Rename Skill…. Pensieve moves its folder and updates deployments, categories and sync records together.
+
 - The `pensieve` command can list, install, update, deploy and remove skills, manage projects, and sync through the app. Homebrew installs it automatically; other installs have an Install… button in Settings › General › Command Line. `pensieve doctor` checks the setup and gives hints for failed checks.
 - Add the bundled `pensieve` skill from Settings to teach agents how to use the command. Updates preserve your edits unless you choose Replace….
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
