@@ -32,6 +32,7 @@ struct DetailView: View {
     @State private var contentMode: SkillContentPresentation.Mode = .rendered
     @State private var loaded: LoadedSnapshot?
     @State private var showDeleteConfirmation = false
+    @State private var showRenameSheet = false
 
     private struct LoadedSnapshot {
         let key: ReloadKey
@@ -96,12 +97,23 @@ struct DetailView: View {
         .onAppear { returnToDraftIfAny() }
         .onChange(of: skill.id) { _, _ in
             showDeleteConfirmation = false
+            showRenameSheet = false
             returnToDraftIfAny()
         }
         .toolbar { toolbarItems }
+        .focusedSceneValue(\.renameSelectedSkill, requestRename)
         .focusedSceneValue(\.deleteSelectedSkill, requestDelete)
         .focusedSceneValue(\.exportSelectedSkill, { SkillExportPanel.present(skill: skill, library: library) })
         .focusedSceneValue(\.skillDetailWindowIsKey, controlActiveState == .key)
+        .sheet(isPresented: $showRenameSheet) {
+            EntityNameSheet(title: "Rename Skill", fieldLabel: "Skill Name", actionTitle: "Rename",
+                initialName: skill.name, validate: { library.renameValidationMessage($0, skill: skill, context: context) },
+                onCommit: { name in
+                    _ = SkillRenameFlow.rename(skill: skill, to: name, library: library, platformVM: platformVM,
+                                               projects: projects, context: context)
+                })
+        }
+        .onChange(of: library.addsFenced) { _, fenced in if fenced { showRenameSheet = false } }
         .confirmationDialog("Delete “\(skill.name)”?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 let deleted = SkillDeletionFlow.delete(
@@ -293,8 +305,19 @@ private extension DetailView {
                 onCheckForUpdates: checkForUpdates,
                 onConnect: onConnectToRepository,
                 onDeploy: onBulkDeploy,
+                onRename: requestRename,
+                renameDisabledReason: library.addFenceReason,
                 onDelete: requestDelete
             )
+        }
+    }
+
+    func requestRename() {
+        guard !library.addsFenced else { return }
+        library.confirmLeaving(skill) { proceed in
+            guard proceed, !library.addsFenced else { return }
+            library.discardDraft(skill)
+            showRenameSheet = true
         }
     }
 

@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/SkillRenameFlow.swift
++++ b/Pensieve/ViewModels/SkillRenameFlow.swift
+@@ -162,7 +162,7 @@
+             skill.updatedAt = Date()
+             guard oldSlug != newSlug else { return }
+             skill.directoryName = newSlug
+-            for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>()) where intent.skillSlug == oldSlug {
++            for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>()) where intent.skillSlug == newSlug {
+                 context.insert(MachineDeployIntent(machineID: intent.machineID, skillSlug: newSlug,
+                     platformRaw: intent.platformRaw, projectKey: intent.projectKey))
+                 context.delete(intent)
