@@ -31,11 +31,16 @@ final class SkillHistoryAsyncTests: XCTestCase {
             await fulfillment(of: [entered], timeout: TestWait.firstRenderTimeoutSeconds)
             await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
                                  failureMessage: "held History must render its progress indicator", diagnostics: {
-                "sheet=\(sheet) visible=\(host.window.isVisible) key=\(host.window.isKeyWindow)"
-                    + " nodes=\(RenderedViewTestSupport.values(in: host.view).count) texts=\(Self.texts(in: host.view))"
+                let rendered = RenderedViewTestSupport.values(in: host.view)
+                let types = rendered.map { String(reflecting: type(of: $0)) }
+                let texts = rendered.compactMap { $0 as? Text }.flatMap(RenderedViewTestSupport.strings)
+                return "sheet=\(sheet) visible=\(host.window.isVisible) key=\(host.window.isKeyWindow)"
+                    + " occlusion=\(host.window.occlusionState.rawValue) types=\(types) texts=\(texts)"
             }, {
-                host.view.needsLayout = true
-                return Self.hasProgress(in: host.view) && Self.texts(in: host.view).contains("Loading history…")
+                let rendered = RenderedViewTestSupport.values(in: host.view)
+                let progress = rendered.contains { String(reflecting: type(of: $0)).hasPrefix("SwiftUI.ProgressView<") }
+                let texts = rendered.compactMap { $0 as? Text }.flatMap(RenderedViewTestSupport.strings)
+                return progress && texts.contains("Loading history…")
             })
             XCTAssertFalse(Self.texts(in: host.view).contains(sheet ? "No history" : "No versions saved yet."))
             gate.open()
@@ -234,7 +239,6 @@ final class SkillHistoryAsyncTests: XCTestCase {
             }
         }
     }
-
 }
 
 extension SkillHistoryAsyncTests {
@@ -323,10 +327,6 @@ extension SkillHistoryAsyncTests {
 
     nonisolated static func commit(_ sha: String) -> GitCommit {
         GitCommit(sha: sha, author: "Author", date: Date(timeIntervalSince1970: 1), subject: sha)
-    }
-
-    private static func hasProgress(in host: NSHostingView<AnyView>) -> Bool {
-        RenderedViewTestSupport.values(in: host).contains { String(reflecting: type(of: $0)).hasPrefix("SwiftUI.ProgressView<") }
     }
 
     /// The host exposes rendered SwiftUI text but no AX button nodes here. Follow the existing
