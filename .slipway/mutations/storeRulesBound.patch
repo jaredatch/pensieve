@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/GitService+StoreRules.swift
++++ b/Pensieve/Services/GitService+StoreRules.swift
+@@ -164,7 +164,7 @@
+         case nil:
+             break
+         case .regular?:
+-            if (try? GitDirectoryText.read(at: path, fileService: files, maximumBytes: expected.utf8.count)) == expected {
++            if (try? files.readFile(at: path)) == expected {
+                 return
+             }
+         default:

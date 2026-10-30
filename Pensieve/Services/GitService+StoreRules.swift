@@ -144,9 +144,7 @@ struct StoreGitOperation {
             let attributes = "* -text -eol -ident -filter -working-tree-encoding\nskills/** !merge\n"
                 + StoreIgnoreRules.receiptFile + " merge=union\n"
             let path = info + "/attributes"
-            if (try? git.fileService.readFile(at: path)) != attributes {
-                try git.fileService.writeFile(at: path, content: attributes)
-            }
+            try Self.repairMetadataFile(at: path, expected: attributes, root: root, files: git.fileService)
         } catch {
             guard aborting else { throw error }
             failure = error
@@ -156,10 +154,23 @@ struct StoreGitOperation {
         if !aborting {
             let rules = StoreIgnoreRules.ignoreText(paths: retired)
             let path = resolved + "/pensieve-ignore"
-            if (try? git.fileService.readFile(at: path)) != rules {
-                try git.fileService.writeFile(at: path, content: rules)
-            }
+            try Self.repairMetadataFile(at: path, expected: rules, root: root, files: git.fileService)
         }
+    }
+
+    private static func repairMetadataFile(at path: String, expected: String, root: String,
+                                           files: FileServiceProtocol) throws {
+        switch try files.entryTypeWithoutFollowingLinks(at: path) {
+        case nil:
+            break
+        case .regular?:
+            if (try? GitDirectoryText.read(at: path, fileService: files, maximumBytes: expected.utf8.count)) == expected {
+                return
+            }
+        default:
+            throw GitError.repositoryUnreadable(path: root, detail: "\(path) is not a regular file.")
+        }
+        try files.writeFile(at: path, content: expected)
     }
 
     @discardableResult
