@@ -182,6 +182,9 @@ final class RetirementFileService: FileServiceProtocol {
     var writes: [String] = []
     var afterRead: ((String) throws -> Void)?
     func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
         if path == readFailure { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)) }
         let data = try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)

@@ -672,7 +672,7 @@ extension GitServiceTests {
     }
 
     private func assertMetadataRefusal(_ result: Result<Void, Error>, occupant: MetadataOccupant,
-                                      path: String, target: String, expected: String) throws {
+                                       path: String, target: String, expected: String) throws {
         try assertMetadataOccupant(occupant, path: path, target: target, expected: expected)
         guard case let .failure(error) = result else {
             XCTFail("Store operation accepted special metadata node at \(path)")
