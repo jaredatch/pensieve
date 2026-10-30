@@ -7,7 +7,7 @@ Pensieve is a native macOS app that manages AI skills. Read
 
 - All app file I/O goes through FileService. Leaf services are synchronous and throwing.
 - Use Swift 5.10 and the existing SwiftUI and AppKit patterns.
-- Run `./script/lint.sh`, `./script/test.sh` and `./script/build_and_run.sh --headless`.
+- Run `./script/lint.sh` and the tests your change touches (`./script/test.sh --filter <TestClass>`). The full suite runs nightly, so don't run it for every change.
 - Edit `project.yml` instead of the generated Xcode project, then run `script/generate.sh`.
 - Never weaken a test, skip hooks, commit secrets, or push without the maintainer's instruction.
 - Never sign, notarize or publish a release without the maintainer's approval.
