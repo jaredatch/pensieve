@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Pensieve
 
@@ -514,6 +515,209 @@ extension GitServiceTests {
 }
 
 extension GitServiceTests {
+    private var storeRuleTexts: [(name: String, text: String)] {
+        [
+            ("attributes", "* -text -eol -ident -filter -working-tree-encoding\nskills/** !merge\n"
+                + ".pensieve-retired-paths merge=union\n"),
+            ("pensieve-ignore", ".DS_Store\n/.pensieve-ignore-*\n")
+        ]
+    }
+
+    private enum MetadataOccupant: CaseIterable {
+        case linkOther, linkIdentical, dangling, directory, fifo
+
+        var type: FileEntryType {
+            switch self {
+            case .linkOther, .linkIdentical, .dangling: return .symlink
+            case .directory: return .directory
+            case .fifo: return .other
+            }
+        }
+    }
+
+    func testStoreRulesRefuseSpecialNodeAtMetadataFile() throws {
+        try NativeTestWork.run { [self] in try git.initRepository(at: tempDir) }
+        for rule in storeRuleTexts {
+            let path = tempDir + "/.git/info/" + rule.name
+            let target = tempDir + "/target-" + rule.name
+            for occupant in MetadataOccupant.allCases {
+                try NativeTestWork.run { [self] in
+                    try installMetadataOccupant(occupant, path: path, target: target, expected: rule.text)
+                }
+                if occupant == .fifo {
+                    let result = try boundedMetadataOperation(fifo: path)
+                    try NativeTestWork.run { [self] in
+                        try assertMetadataRefusal(result, occupant: occupant, path: path, target: target, expected: rule.text)
+                    }
+                } else {
+                    try NativeTestWork.run { [self] in
+                        let result = Result { _ = try git.storeOperation(at: tempDir) }
+                        try assertMetadataRefusal(result, occupant: occupant, path: path, target: target, expected: rule.text)
+                    }
+                }
+            }
+            try NativeTestWork.run { [self] in
+                let files = FileService()
+                try files.deleteFile(at: path)
+                try files.writeFile(at: path, content: "old regular bytes")
+                try requireMetadata(try files.entryTypeWithoutFollowingLinks(at: path) == .regular, path)
+                _ = try git.storeOperation(at: tempDir)
+                XCTAssertEqual(try files.readFile(at: path), rule.text)
+                try files.deleteFile(at: path)
+                try requireMetadata(try files.entryTypeWithoutFollowingLinks(at: path) == nil, path)
+                _ = try git.storeOperation(at: tempDir)
+                XCTAssertEqual(try files.entryTypeWithoutFollowingLinks(at: path), .regular)
+                XCTAssertEqual(try files.readFile(at: path), rule.text)
+            }
+        }
+    }
+
+    func testStoreRulesReadMetadataFilesBounded() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            var wholeReads: [String] = []
+            var boundedReads: [(path: String, cap: Int)] = []
+            let spy = AskpassWriteObservingFileService(beforeRead: { path, cap in
+                if let cap { boundedReads.append((path, cap)) } else { wholeReads.append(path) }
+            })
+            let observing = GitService(fileService: spy, askpassHelperPath: tempDir + "/askpass")
+            try observing.initRepository(at: tempDir)
+            for rule in storeRuleTexts {
+                try files.writeFile(at: tempDir + "/.git/info/" + rule.name, content: String(repeating: "x", count: 1_048_576))
+            }
+            wholeReads.removeAll()
+            boundedReads.removeAll()
+            _ = try observing.storeOperation(at: tempDir)
+            for rule in storeRuleTexts {
+                let path = tempDir + "/.git/info/" + rule.name
+                XCTAssertEqual(try files.readFile(at: path), rule.text)
+                XCTAssertFalse(wholeReads.contains(path), "Must not read all oversized metadata bytes: \(path)")
+                XCTAssertTrue(boundedReads.filter { $0.path == path }.allSatisfy { $0.cap <= rule.text.utf8.count }, path)
+            }
+        }
+    }
+
+    func testAbortRebaseReportsSpecialMetadataNodeAfterAborting() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let remote = try seededRemote()
+            let local = tempDir + "/local"
+            try files.createDirectory(at: local)
+            try git.initRepository(at: local)
+            try git.setRemote(remote, at: local)
+            try git.fetchBranch("main", at: local, credential: nil)
+            try git.materializeFromFetchHead(at: local)
+            try git.bornBranch("main", at: local)
+            let other = try clone(remote, "other")
+            try write("README.md", "other edit\n", in: other)
+            XCTAssertTrue(try git.stageAllAndCommit(at: other, message: "other edit"))
+            try git.push(at: other, credential: nil)
+            try write("README.md", "local edit\n", in: local)
+            XCTAssertTrue(try git.stageAllAndCommit(at: local, message: "local edit"))
+            let before = try git.commitSHA(at: local)
+            XCTAssertEqual(try git.pullRebase(at: local, credential: nil), .conflicted(["README.md"]))
+            try requireMetadata(git.isRebaseInProgress(at: local), "Fixture must be rebasing")
+            let path = local + "/.git/info/attributes"
+            let target = tempDir + "/abort-target"
+            try installMetadataOccupant(.linkOther, path: path, target: target, expected: storeRuleTexts[0].text)
+            let result = Result { try git.abortRebase(at: local) }
+            XCTAssertFalse(git.isRebaseInProgress(at: local))
+            XCTAssertEqual(try git.commitSHA(at: local), before)
+            XCTAssertEqual(try files.readFile(at: local + "/README.md"), "local edit\n")
+            try assertMetadataRefusal(result, occupant: .linkOther, path: path, target: target, expected: storeRuleTexts[0].text)
+        }
+    }
+
+    private func installMetadataOccupant(_ occupant: MetadataOccupant, path: String, target: String,
+                                         expected: String) throws {
+        let files = FileService()
+        if try files.entryTypeWithoutFollowingLinks(at: path) == .directory {
+            try files.deleteDirectory(at: path)
+        } else {
+            try files.deleteFile(at: path)
+        }
+        if try files.entryTypeWithoutFollowingLinks(at: target) != nil { try files.deleteFile(at: target) }
+        switch occupant {
+        case .linkOther, .linkIdentical:
+            try files.writeFile(at: target, content: occupant == .linkOther ? "user target bytes" : expected)
+            try files.createSymlink(at: path, pointingTo: target)
+        case .dangling:
+            try files.createSymlink(at: path, pointingTo: target)
+        case .directory:
+            try files.createDirectory(at: path)
+            try files.writeFile(at: path + "/keep", content: "user directory bytes")
+        case .fifo:
+            try requireMetadata(mkfifo(path, 0o600) == 0, "Could not install FIFO at \(path)")
+        }
+        try assertMetadataOccupant(occupant, path: path, target: target, expected: expected)
+    }
+
+    private func assertMetadataOccupant(_ occupant: MetadataOccupant, path: String, target: String,
+                                        expected: String) throws {
+        let files = FileService()
+        try requireMetadata(try files.entryTypeWithoutFollowingLinks(at: path) == occupant.type,
+                            "Occupant changed at \(path); expected \(occupant)")
+        if occupant.type == .symlink {
+            try requireMetadata(try files.symlinkTarget(at: path) == target, "Link target changed at \(path)")
+            if occupant == .dangling {
+                try requireMetadata(try files.entryTypeWithoutFollowingLinks(at: target) == nil, "Dangling target was created")
+            } else {
+                try requireMetadata(try files.entryTypeWithoutFollowingLinks(at: target) == .regular, target)
+                try requireMetadata(try files.readFile(at: target) == (occupant == .linkOther ? "user target bytes" : expected),
+                                    "Target bytes changed at \(target)")
+            }
+        } else if occupant == .directory {
+            try requireMetadata(try files.readFile(at: path + "/keep") == "user directory bytes", path)
+        }
+    }
+
+    private func assertMetadataRefusal(_ result: Result<Void, Error>, occupant: MetadataOccupant,
+                                      path: String, target: String, expected: String) throws {
+        try assertMetadataOccupant(occupant, path: path, target: target, expected: expected)
+        guard case let .failure(error) = result else {
+            XCTFail("Store operation accepted special metadata node at \(path)")
+            throw CocoaError(.fileReadUnknown)
+        }
+        try requireMetadata(error.localizedDescription.contains(path), "Refusal must name \(path): \(error)")
+    }
+
+    private func requireMetadata(_ condition: Bool, _ message: String, file: StaticString = #filePath,
+                                 line: UInt = #line) throws {
+        guard condition else {
+            XCTFail(message, file: file, line: line)
+            throw CocoaError(.fileReadUnknown)
+        }
+    }
+
+    /// The writer holds EOF until the operation completes or times out, then releases a blocking
+    /// regression reader. The semaphore joins that worker before fixture teardown; this bounds
+    /// FIFO reads, not arbitrary deadlocks. All other cases use NativeTestWork.
+    private func boundedMetadataOperation(fifo: String) throws -> Result<Void, Error> {
+        let writer = open(fifo, O_RDWR | O_NONBLOCK)
+        guard writer >= 0 else { throw CocoaError(.fileReadUnknown) }
+        let result = MetadataOperationResult()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { [self] in
+            result.value = Result { _ = try git.storeOperation(at: tempDir) }
+            done.signal()
+        }
+        let finished = done.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds) == .success
+        close(writer)
+        if !finished {
+            _ = done.wait(timeout: .now() + 2) // upper-bound: Join after releasing the fixture FIFO reader.
+            XCTFail("Store operation blocked on FIFO at \(fifo)")
+            throw CocoaError(.fileReadUnknown)
+        }
+        return try XCTUnwrap(result.value)
+    }
+}
+
+/// The worker publishes its result before signalling, and the test reads only after joining it.
+private final class MetadataOperationResult {
+    var value: Result<Void, Error>?
+}
+
+extension GitServiceTests {
     func testPullRebaseConflictedThenAbortRestoresCleanState() throws {
         try NativeTestWork.run { [self] in
             let remote = try seededRemote()
@@ -831,18 +1035,22 @@ extension GitServiceTests {
 
 /// Uses the real filesystem and observes completed writes through the existing FileService boundary.
 /// Executable writes inherit the production default, so the observation falls before its next step.
+/// Read attempts expose paths and caps before forwarding, including reads that refuse oversized files.
 private struct AskpassWriteObservingFileService: FileServiceProtocol {
     let beforeWrite: (String) throws -> Void
     let afterWrite: () throws -> Void
     let beforeDelete: (String) -> Void
+    let beforeRead: (String, Int?) -> Void
     private let wrapped = FileService()
 
     init(beforeWrite: @escaping (String) throws -> Void = { _ in },
          beforeDelete: @escaping (String) -> Void = { _ in },
+         beforeRead: @escaping (String, Int?) -> Void = { _, _ in },
          afterWrite: @escaping () throws -> Void = {}) {
         self.beforeWrite = beforeWrite
         self.afterWrite = afterWrite
         self.beforeDelete = beforeDelete
+        self.beforeRead = beforeRead
     }
 
     func writeFile(at path: String, content: String) throws {
@@ -850,7 +1058,14 @@ private struct AskpassWriteObservingFileService: FileServiceProtocol {
         try wrapped.writeFile(at: path, content: content)
         try afterWrite()
     }
-    func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
+    func readFile(at path: String) throws -> String {
+        beforeRead(path, nil)
+        return try wrapped.readFile(at: path)
+    }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        beforeRead(path, maximumBytes)
+        return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
