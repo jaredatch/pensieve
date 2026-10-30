@@ -1,0 +1,14 @@
+paths = Pensieve/Services/SkillStore.swift Pensieve/Services/SkillDocumentEditing.swift Pensieve/Services/ManifestChange.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift Pensieve/Views/SkillViews/Detail/SkillMoreMenu.swift Pensieve/Views/MainWindow/DetailView.swift Pensieve/PensieveApp.swift PensieveTests/ViewModelTests/SkillRenameFlowTests.swift PensieveTests/ServiceTests/SkillStoreRenameTests.swift PensieveTests/ServiceTests/ManifestRenameTests.swift PensieveTests/Fixtures/DeletionTestSupport.swift docs/SPEC.md CHANGELOG.md .slipway/mutations/rename.patch .slipway/mutations/renameValidation.patch .slipway/mutations/renameMove.patch .slipway/mutations/renameRecovery.patch .slipway/mutations/renameManifest.patch
+risk = Pensieve/Services/SkillStore.swift Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/Services/ManifestChange.swift
+check.rename = tests PensieveTests/SkillRenameFlowTests/testRenameMovesFolderRewritesNameAndRekeysRecords
+mutation.rename = .slipway/mutations/rename.patch
+check.refusals = tests PensieveTests/SkillRenameFlowTests/testRenameRefusesTakenNamesAndKeepsTheSkillWhenTheMoveIsRefused
+mutation.refusals = .slipway/mutations/renameValidation.patch
+check.recovery = tests PensieveTests/SkillRenameFlowTests/testRenameRestoresTheSkillWhenAStepAfterTheMoveFails
+mutation.recovery = .slipway/mutations/renameRecovery.patch
+check.move = tests PensieveTests/SkillStoreRenameTests/testRenameSkillMovesAtomicallyAndRefusesEveryOccupant
+mutation.move = .slipway/mutations/renameMove.patch
+check.manifest = tests PensieveTests/ManifestRenameTests/testRenameMovesOverlayIntentsAndCategoryMembership
+mutation.manifest = .slipway/mutations/renameManifest.patch
+check.otherMac = tests PensieveTests/ManifestRenameTests/testOtherMacConvergesToRenamedSkill
+mutation.otherMac = .slipway/mutations/renameManifest.patch
