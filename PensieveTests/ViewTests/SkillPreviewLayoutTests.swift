@@ -120,11 +120,11 @@ final class SkillPreviewLayoutTests: XCTestCase {
         defer { fixture.window.close() }
         fixture.host.appearance = NSAppearance(named: .aqua)
         let item = try await text(content, in: fixture.host)
-        let firstLine = item.accessibilityFrame(for: NSRange(location: 0, length: 1))
+        let capture = try await bulletCenter(in: fixture.host, window: fixture.window, item: item)
+        let firstLine = capture.firstLine
         XCTAssertGreaterThan(firstLine.height, 0, "The rendered first line must expose its vertical bounds")
         XCTAssertGreaterThan(item.accessibilityRange(forLine: 2).length, 0, "The hosted item must wrap to at least three lines")
-        let center = try await bulletCenter(in: fixture.host, window: fixture.window,
-                                            item: item, lineHeight: firstLine.height)
+        let center = capture.center
         XCTAssertGreaterThanOrEqual(center, firstLine.minY, "The bullet center must be inside the first line")
         XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be inside the first line")
     }
@@ -222,36 +222,33 @@ final class SkillPreviewLayoutTests: XCTestCase {
 
 // The hosted-text readers: how a test reaches rendered text and the bullet's pixels.
 extension SkillPreviewLayoutTests {
-    private func text(_ value: String, in host: NSView) async throws -> NSAccessibilityProtocol {
+    private func text(_ value: String, in host: NSHostingView<AnyView>) async throws -> NSAccessibilityProtocol {
         let texts = try await settledTexts([value], in: host)
         return try XCTUnwrap(texts[value])
     }
 
-    /// Hosted MarkdownUI text reaches accessibility through SwiftUI's text-selection overlays: AppKit views that
-    /// follow the rendered text. In a parallel suite they can trail the layout by a pass, and a list's markers get
-    /// theirs last, so a test reads every text it measures in one call and waits until each is present with a frame
-    /// that holds still between two layout passes.
-    private func settledTexts(_ values: [String], in host: NSView) async throws -> [String: NSAccessibilityProtocol] {
+    /// Drain the live host's render work, including preference transactions and AppKit overlays. The async render
+    /// probe rejects pending transactions and work that still requires the main thread; equal AX readings cannot
+    /// establish that. It checks render readiness, never an expected indent, marker width or bullet position.
+    private func settledTexts(
+        _ values: [String], in host: NSHostingView<AnyView>
+    ) async throws -> [String: NSAccessibilityProtocol] {
         var found: [String: NSAccessibilityProtocol] = [:]
-        var previous: [String: CGRect] = [:]
+        var renderReady = false
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Rendered text \(values) must finish hosted layout",
-                             diagnostics: { self.hostedLayoutDescription(host) }, {
-            host.needsLayout = true
-            host.layoutSubtreeIfNeeded()
+                             diagnostics: { "renderReady=\(renderReady) | \(self.hostedLayoutDescription(host))" }, {
+            host._renderForTest(interval: 0)
             let elements = self.elements(in: host)
-            var current: [String: CGRect] = [:]
             found = [:]
             for value in values {
                 guard let element = elements.first(where: {
                     ($0.accessibilityValue() as? String) == value && $0.accessibilityFrame().width > 0
                 }) else { continue }
                 found[value] = element
-                current[value] = element.accessibilityFrame()
             }
-            let settled = current.count == values.count && current == previous
-            previous = current
-            return settled
+            renderReady = host._renderAsyncForTest(interval: 0)
+            return found.count == values.count && renderReady
         })
         for value in values where found[value] == nil {
             XCTFail("Rendered text '\(value)' never appeared")
@@ -274,36 +271,40 @@ extension SkillPreviewLayoutTests {
             + " | rendered: \(rendered.map { $0.prefix(24) })"
     }
 
-    /// The bullet's pixels and the item's overlay frame can each trail the layout by a pass, so the capture repeats
-    /// until the gutter holds dark pixels, re-reading the item's frame each time.
-    private func bulletCenter(in host: NSView, window: NSWindow, item: NSAccessibilityProtocol,
-                              lineHeight: CGFloat) async throws -> CGFloat {
-        var center: CGFloat?
+    /// Capture only after the host accepts an async render. cacheDisplay can itself lay out the host, so read the
+    /// item's frame and first-line bounds after that capture, together on the main actor without another render.
+    private func bulletCenter(
+        in host: NSHostingView<AnyView>, window: NSWindow, item: NSAccessibilityProtocol
+    ) async throws -> (center: CGFloat, firstLine: CGRect) {
+        var capture: (center: CGFloat, firstLine: CGRect)?
         var lastError: Error?
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "The real bullet must produce visible gutter pixels",
                              diagnostics: { "\(String(describing: lastError)) | \(self.hostedLayoutDescription(host))" }, {
-            host.needsLayout = true
-            host.layoutSubtreeIfNeeded()
+            host._renderForTest(interval: 0)
+            guard host._renderAsyncForTest(interval: 0) else { return false }
             do {
-                center = try self.bulletCenterOnce(in: host, window: window, itemFrame: item.accessibilityFrame(),
-                                                   lineHeight: lineHeight)
+                capture = try self.bulletCenterOnce(in: host, window: window, item: item)
                 return true
             } catch {
                 lastError = error
                 return false
             }
         })
-        if let center { return center }
+        if let capture { return capture }
         throw lastError ?? CocoaError(.coderInvalidValue)
     }
 
     private struct CaptureNotReady: Error, CustomStringConvertible { let description: String }
 
-    private func bulletCenterOnce(in host: NSView, window: NSWindow, itemFrame: CGRect,
-                                  lineHeight: CGFloat) throws -> CGFloat {
+    private func bulletCenterOnce(
+        in host: NSView, window: NSWindow, item: NSAccessibilityProtocol
+    ) throws -> (center: CGFloat, firstLine: CGRect) {
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
+        let itemFrame = item.accessibilityFrame()
+        let firstLine = item.accessibilityFrame(for: NSRange(location: 0, length: 1))
+        let lineHeight = firstLine.height
         let screen = window.convertToScreen(host.convert(host.bounds, to: nil))
         let scaleX = CGFloat(bitmap.pixelsWide) / host.bounds.width
         let scaleY = CGFloat(bitmap.pixelsHigh) / host.bounds.height
@@ -340,7 +341,7 @@ extension SkillPreviewLayoutTests {
         guard first > top else {
             throw CaptureNotReady(description: "bullet pixels touch the scan's top edge; item=\(itemFrame) host=\(screen)")
         }
-        return screen.maxY - CGFloat(first + last + 1) / (2 * scaleY)
+        return (screen.maxY - CGFloat(first + last + 1) / (2 * scaleY), firstLine)
     }
 }
 
