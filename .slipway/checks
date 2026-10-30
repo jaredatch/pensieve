@@ -1,0 +1,2 @@
+paths = PensieveTests/ViewModelTests/ConflictFolderResolutionTests.swift PensieveTests/ViewModelTests/ConflictFolderResolutionTests+Native.swift PensieveTests/ViewModelTests/ConflictFolderResolutionTests+Recovery.swift
+behavior = none
