@@ -1,0 +1,2 @@
+paths = PensieveTests/ViewTests/SkillPreviewLayoutTests.swift PensieveTests/ViewTests/SkillHistoryAsyncTests.swift PensieveTests/Fixtures/RenderedViewTestSupport.swift
+behavior = none
