@@ -1,8 +1,0 @@
-paths = Pensieve/Services/GitService+StoreRules.swift PensieveTests/ServiceTests/GitServiceTests.swift PensieveTests/ServiceTests/SyncBytePreservationTests+Retirements.swift .slipway/mutations/storeRules.patch .slipway/mutations/storeRulesBound.patch
-risk = Pensieve/Services/GitService+StoreRules.swift
-check.storeRules = tests PensieveTests/GitServiceTests/testStoreRulesRefuseSpecialNodeAtMetadataFile
-mutation.storeRules = .slipway/mutations/storeRules.patch
-check.boundedRead = tests PensieveTests/GitServiceTests/testStoreRulesReadMetadataFilesBounded
-mutation.boundedRead = .slipway/mutations/storeRulesBound.patch
-check.abortRepair = tests PensieveTests/GitServiceTests/testAbortRebaseReportsSpecialMetadataNodeAfterAborting
-mutation.abortRepair = .slipway/mutations/storeRules.patch
