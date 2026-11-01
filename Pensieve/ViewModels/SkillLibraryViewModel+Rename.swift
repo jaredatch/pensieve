@@ -10,7 +10,7 @@ extension SkillLibraryViewModel {
             if let taken = try context.fetch(FetchDescriptor<Skill>()).first(where: {
                 $0.id != skill.id && $0.directoryName.lowercased() == slug.lowercased()
             }) { return "The folder \(taken.directoryName) is taken. Choose another name." }
-            if slug == skill.directoryName { return nil }
+            if slug == skill.directoryName.lowercased() { return nil }
             if try skillStore.slugEntryExists(slug) {
                 let spelling = try fileService.listDirectory(at: skillsDirectory)
                     .first { $0.lowercased() == slug.lowercased() } ?? slug

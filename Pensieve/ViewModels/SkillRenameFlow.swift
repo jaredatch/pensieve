@@ -62,13 +62,15 @@ enum SkillRenameFlow {
              projects: [Project], context: ModelContext) {
             self.skill = skill; self.name = name; self.library = library; self.platform = platform
             self.projects = projects; self.context = context
-            oldSlug = skill.directoryName; newSlug = SkillStore.slugify(name)
+            oldSlug = skill.directoryName
+            let slug = SkillStore.slugify(name)
+            newSlug = slug == oldSlug.lowercased() ? oldSlug : slug
         }
 
         func prepareDocument() throws -> String {
             if let problem = SkillLibraryViewModel.renameNameProblem(name) { throw RenameError(problem) }
             let rows = try context.fetch(FetchDescriptor<Skill>())
-            if let taken = rows.first(where: { $0.id != skill.id && $0.directoryName.lowercased() == newSlug }) {
+            if let taken = rows.first(where: { $0.id != skill.id && $0.directoryName.lowercased() == newSlug.lowercased() }) {
                 throw RenameError("The folder \(taken.directoryName) is taken.")
             }
             guard let source = String(validating: try library.skillStore.readData(directoryName: oldSlug), as: UTF8.self) else {
