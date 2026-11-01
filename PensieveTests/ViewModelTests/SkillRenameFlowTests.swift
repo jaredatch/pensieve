@@ -203,6 +203,7 @@ final class SkillRenameFlowTests: XCTestCase {
         try assertArtifacts(f, slug: "alpha")
         XCTAssertTrue(try f.platform.waitingRemovalStore.read().isEmpty)
         await f.library.manifestSaves?.waitUntilIdle()
+        try assertCaseOnlyRenameKeepsOwnFolder(f)
     }
 
     func testRenameRestoresTheSkillWhenAStepAfterTheMoveFails() async throws {
@@ -239,5 +240,51 @@ final class SkillRenameFlowTests: XCTestCase {
         XCTAssertEqual(try f.state.read(), state)
         XCTAssertEqual(try f.store.readBody(directoryName: "beta-two"), unsafe)
         XCTAssertFalse(f.files.directoryExists(at: f.store.baseDir + "/next"))
+    }
+}
+
+extension SkillRenameFlowTests {
+    private func assertCaseOnlyRenameKeepsOwnFolder(_ f: Fixture) throws {
+        _ = try f.store.createSkill(name: "temporary", description: "Alpha's job", body: "The body.")
+        try f.store.renameSkill(directoryName: "temporary", to: "MySkill")
+        try f.store.writeBody(directoryName: "MySkill", body: original.replacingOccurrences(of: "alpha", with: "MySkill"))
+        try f.files.writeData(at: f.store.baseDir + "/MySkill/scripts/run.sh", data: script)
+        let skill = Skill(name: "MySkill", skillDescription: "Alpha's job", directoryName: "MySkill")
+        let id = skill.id
+        f.context.insert(skill)
+        f.context.insert(MachineDeployIntent(machineID: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB",
+            skillSlug: "MySkill", platformRaw: "claudeCode"))
+        f.category.skillSlugs.append("MySkill")
+        for (agent, project) in f.pairs {
+            let batch = f.platform.deployBatch(skills: [skill], platforms: [agent],
+                target: project.map { .project($0) } ?? .userWide, context: f.context)
+            XCTAssertFalse(batch.hasFailures)
+        }
+        try f.context.save()
+        let before = try f.state.read()
+        let intentKeys = try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key).sorted()
+        let paths = f.pairs.map { path(f, slug: "MySkill", pair: $0) }
+        let rulePath = path(f, slug: "MySkill", pair: f.pairs[2])
+        let rule = try f.files.readData(at: rulePath)
+        for name in [skill.name, "MYSKILL!"] {
+            XCTAssertNil(f.library.renameValidationMessage(name, skill: skill, context: f.context))
+        }
+        XCTAssertTrue(SkillRenameFlow.rename(skill: skill, to: "MYSKILL!", library: f.library,
+            platformVM: f.platform, projects: f.projects, context: f.context), f.library.error ?? "")
+        XCTAssertEqual(skill.id, id)
+        XCTAssertEqual(skill.directoryName, "MySkill")
+        XCTAssertEqual(skill.name, "MYSKILL!")
+        XCTAssertTrue(try f.files.listDirectory(at: f.store.baseDir).contains("MySkill"))
+        XCTAssertFalse(try f.files.listDirectory(at: f.store.baseDir).contains("myskill"))
+        XCTAssertEqual(SkillParser.parse(try f.store.readBody(directoryName: "MySkill"), retainingBOM: true).name, "MYSKILL!")
+        XCTAssertEqual(try f.files.readData(at: f.store.baseDir + "/MySkill/scripts/run.sh"), script)
+        XCTAssertEqual(try f.state.read(), before)
+        XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key).sorted(), intentKeys)
+        XCTAssertEqual(f.category.skillSlugs, ["alpha", "MySkill"])
+        XCTAssertEqual(try f.files.readData(at: rulePath), rule)
+        for (index, pair) in f.pairs.enumerated() where pair.0.usesSymlinks {
+            XCTAssertEqual(try f.files.symlinkTarget(at: paths[index]), f.store.baseDir + "/MySkill")
+        }
+        XCTAssertEqual(f.library.manifestSaves?.items.count, 0)
     }
 }
