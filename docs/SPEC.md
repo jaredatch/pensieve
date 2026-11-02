@@ -194,6 +194,10 @@ Skill names are slugified for directory names: lowercased, non-alphanumeric stri
 "TypeScript Best Practices" → typescript-best-practices-2 (if collision)
 ```
 
+When two Macs create the same folder name before syncing, the first record to reach the library keeps it. The detail header on the second Mac names the held slug once, asks the user to rename and explains that its tags and scope aren't saved and quitting loses them. The window keeps the typed metadata while the app runs. Rename gives it a new name without moving the first Mac's record, deployments or category memberships. Delete removes only this Mac's skill and deployment intents.
+
+The create belongs to this Mac when its creation date matches the durable record at millisecond precision. Later edits don't change that identity. Two creates of the same slug in the same millisecond are acknowledged as one; this residual collision is accepted. Sync's main write and local-head preparation, imports and deploy-intent writes share a publication boundary that preserves the other Mac's record while a create is refused. Refused metadata is held only for the current process; skill files continue through the ordinary sync conflict path.
+
 ## Install from GitHub
 
 Pensieve accepts three GitHub HTTPS forms: a repository URL, a `/tree/<ref>/<path>` folder URL, or a `/blob/<ref>/<path>/SKILL.md` URL. A direct link can name one skill or a folder of skills. Direct tree/blob links do not support refs containing `/`. Paste the repository URL to discover skills from its default branch instead. Other hosts, schemes, embedded credentials, ports, traversal components, and commit-permalink refs are rejected before git runs.

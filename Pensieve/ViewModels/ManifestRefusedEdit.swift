@@ -10,7 +10,8 @@ final class ManifestRefusedEdit {
     let id = UUID()
     private var registration: StoreIngestState?
     private var projection: RefusedManifestProjection {
-        RefusedManifestProjection(fields: fields ?? [.change(original)], cachedLocal: cachedLocal)
+        RefusedManifestProjection(fields: fields ?? [.change(original)], cachedLocal: cachedLocal,
+                                  collision: collision, intentMove: intentMove)
     }
 
     deinit { registration?.forgetRefused(id) }
@@ -25,10 +26,30 @@ final class ManifestRefusedEdit {
     }
     let context: ModelContext
     private let original: ManifestChange
+    private(set) var collision: SkillOverlay?
+    private var heldBy: SkillOverlay?
+    let intentMove: ManifestLocalIntentMove?
+
+    var createdSkill: SkillOverlay? {
+        if case .createSkill(let skill) = original { return skill }
+        return nil
+    }
+
+    func targets(_ slug: String) -> Bool {
+        switch original {
+        case .createSkill(let skill): return skill.slug == slug
+        case .skillMetadata(let target, _, _): return target == slug
+        default: return false
+        }
+    }
+
+    func hold(with create: ManifestRefusedEdit) { heldBy = create.createdSkill }
+
     private var fields: [Field]?
     private var cachedLocal: ManifestSnapshot?
 
-    init(_ change: ManifestChange, context: ModelContext) {
+    init(_ change: ManifestChange, context: ModelContext, intentMove: ManifestLocalIntentMove? = nil) {
+        self.intentMove = intentMove
         self.context = context
         original = change
         switch change {
@@ -64,6 +85,20 @@ final class ManifestRefusedEdit {
 
     /// Publication can acknowledge cached fields without another main-context read.
     func acknowledge(durable: ManifestSnapshot) -> Bool {
+        if let identity = createdSkill ?? heldBy {
+            let disk = durable.skills.first { $0.slug == identity.slug }
+            collision = disk.flatMap { ManifestService.sameCreation(identity, $0) ? nil : $0 }
+            if createdSkill != nil {
+                let unsaved = disk.map { !ManifestService.sameCreation(identity, $0) } ?? true
+                if !unsaved { fields = [] }
+                updateRegistration()
+                return unsaved
+            }
+            if collision != nil {
+                updateRegistration()
+                return true
+            }
+        }
         if fields == nil { fields = retirementFields(durable: durable) }
         var remaining: [Field] = []
         for field in fields ?? [] {
@@ -77,7 +112,7 @@ final class ManifestRefusedEdit {
     }
 
     func project(onto displayed: inout ManifestSnapshot) {
-        projection.project(onto: &displayed)
+        projection.project(onto: &displayed, keepingLocalCreates: true)
     }
 
     /// A category deleted before retirement may be restored by undo afterward.

@@ -2,6 +2,22 @@ import Foundation
 import SwiftData
 
 extension SkillLibraryViewModel {
+    /// A refused create owns its local folder and values, while the old overlay belongs to a peer.
+    func publishRenamedCreate(_ skill: Skill, from oldSlug: String, machineID: String?, context: ModelContext) {
+        let origin: SkillOrigin
+        if skill.installedOriginData != nil { origin = .installed(skill.installedOrigin ?? .empty) } else {
+            origin = skill.importedFrom.map { .imported(from: $0) } ?? .authored
+        }
+        let current = SkillOverlay(slug: skill.directoryName, createdAt: skill.createdAt,
+            scope: skill.scope, tags: skill.tags, cursor: skill.cursorConfig, agents: [], origin: origin)
+        let previous = manifestSaves?.refused.first { $0.context === context && $0.createdSkill?.slug == oldSlug }
+        let oldSlugs = (previous?.intentMove?.oldSlugs ?? []).union([oldSlug])
+        manifestSaves?.discardRefusedCreate(oldSlug, context: context)
+        regenerateManifest(.createSkill(current), context: context, intentMove: machineID.map {
+            ManifestLocalIntentMove(oldSlugs: oldSlugs, newSlug: skill.directoryName, machineID: $0)
+        })
+    }
+
     /// Sheet admission includes row reservations and every disk entry, without following links.
     func renameValidationMessage(_ name: String, skill: Skill, context: ModelContext) -> String? {
         if let problem = Self.renameNameProblem(name) { return problem }

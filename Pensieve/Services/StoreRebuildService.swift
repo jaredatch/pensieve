@@ -48,7 +48,8 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             return result
         }
 
-        let displayed = StoreIngestState.shared(for: context.container).projectingEdits(onto: snapshot)
+        let displayed = StoreIngestState.shared(for: context.container)
+            .projectingEdits(onto: snapshot, keepingLocalCreates: true)
         result = rebuild(snapshot: displayed.snapshot, fromRoot: root, context: context)
         if !result.ingestIncomplete, var read = result.categoryRead {
             read.retainedWindows = displayed.retainedWindows

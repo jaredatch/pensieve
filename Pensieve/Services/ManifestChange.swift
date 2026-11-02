@@ -11,6 +11,7 @@ enum ManifestChange {
     case skillMetadata(String, [String]?, SkillScope?)
     case deleteSkill(String)
     case retireSkill(String)
+    case retireLocalSkill(String, String)
     case renameSkill(String, String)
 
     var isDeletion: Bool {
@@ -23,6 +24,11 @@ enum ManifestChange {
     /// Validate before durable publication and before projecting pending edits into the window.
     /// A conflicting pending rename is refused and undone before its projection is accepted.
     func validate(in snapshot: ManifestSnapshot) throws {
+        if case .createSkill(let local) = self,
+           let durable = snapshot.skills.first(where: { $0.slug == local.slug }),
+           !ManifestService.sameCreation(local, durable) {
+            throw ManifestSaveError.createCollision(local.slug)
+        }
         if case .renameSkill(let old, let new) = self {
             guard SkillStore.isPathSafeSlug(new), ManifestService.isAdmittedIntentComponent(new) else {
                 throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
@@ -83,6 +89,8 @@ enum ManifestChange {
             return snapshot.skills.count != count
         case .renameSkill(let old, let new):
             return renameSkill(old, to: new, in: &snapshot)
+        case .retireLocalSkill(let slug, let machine):
+            snapshot.deployIntents.removeAll { $0.skillSlug == slug && $0.machineID == machine }
         case .retireSkill(let slug):
             snapshot.deployIntents.removeAll { $0.skillSlug == slug }
             for index in snapshot.categories.indices { snapshot.categories[index].skillSlugs.removeAll { $0 == slug } }
@@ -120,6 +128,25 @@ enum ManifestChange {
     }
 }
 
+/// A refused create's rename moves only this Mac's deployment intent. The folder and row
+/// have already moved, so retain this plain edit alongside the create if publication fails.
+struct ManifestLocalIntentMove {
+    let oldSlugs: Set<String>
+    let newSlug: String
+    let machineID: String
+
+    func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
+        for index in snapshot.deployIntents.indices
+            where oldSlugs.contains(snapshot.deployIntents[index].skillSlug)
+                && snapshot.deployIntents[index].machineID == machineID {
+            snapshot.deployIntents[index].skillSlug = newSlug
+        }
+        for intent in local?.deployIntents ?? [] where intent.skillSlug == newSlug && intent.machineID == machineID {
+            if !snapshot.deployIntents.contains(intent) { snapshot.deployIntents.append(intent) }
+        }
+    }
+}
+
 /// Immutable, context-free values for retaining refused fields across worker rebuilds.
 /// Only requested fields project, and newer queued edits apply after these values.
 struct RefusedManifestProjection {
@@ -129,18 +156,22 @@ struct RefusedManifestProjection {
     }
     let fields: [Field]
     let cachedLocal: ManifestSnapshot?
+    var collision: SkillOverlay?
+    var intentMove: ManifestLocalIntentMove?
 
-    func project(onto snapshot: inout ManifestSnapshot) {
-        for field in fields { project(field, onto: &snapshot) }
+    func project(onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false) {
+        for field in fields { project(field, onto: &snapshot, keepingLocalCreates: keepingLocalCreates) }
+        intentMove?.apply(to: &snapshot, local: cachedLocal)
     }
 
-    func project(_ field: Field, onto snapshot: inout ManifestSnapshot) {
+    func project(_ field: Field, onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false) {
         if case .change(let change) = field {
-            do { try change.validate(in: snapshot) } catch { return }
             if case .createSkill(let original) = change {
-                projectCreate(original, onto: &snapshot)
+                projectCreate(original, onto: &snapshot, keepingLocalCreates: keepingLocalCreates)
                 return
             }
+            if collision != nil, !keepingLocalCreates, case .skillMetadata = change { return }
+            do { try change.validate(in: snapshot) } catch { return }
         }
         if let cachedLocal {
             apply(field, local: cachedLocal, onto: &snapshot)
@@ -152,12 +183,16 @@ struct RefusedManifestProjection {
         }
     }
 
-    private func projectCreate(_ original: SkillOverlay, onto snapshot: inout ManifestSnapshot) {
+    private func projectCreate(_ original: SkillOverlay, onto snapshot: inout ManifestSnapshot,
+                               keepingLocalCreates: Bool) {
         let current: SkillOverlay
         if let cachedLocal {
             guard let local = cachedLocal.skills.first(where: { $0.slug == original.slug }) else { return }
             current = local
         } else { current = original }
+        if keepingLocalCreates {
+            snapshot.skills.removeAll { $0.slug == current.slug }
+        }
         ManifestChange.createSkill(current).apply(to: &snapshot)
     }
 
