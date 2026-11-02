@@ -8,6 +8,92 @@ final class ManifestRenameTests: XCTestCase {
     private let machineA = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
     private let machineB = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
 
+    func testRenamingARefusedCreateKeepsItsValuesUnderTheNewNameAndLeavesTheOtherMacsRecord() async throws {
+        let h = try CollisionCreateFixture()
+        defer { h.cleanup() }
+        await h.saves.waitUntilIdle()
+        try h.rebuild()
+        h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID, skillSlug: "item",
+            platformRaw: PlatformTarget.claudeCode.rawValue))
+        try h.context.save()
+        XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error)
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        try h.assertLocal(slug: "item-2")
+        XCTAssertFalse(h.f.files.directoryExists(at: h.f.app + "/skills/item"))
+        XCTAssertTrue(h.f.files.directoryExists(at: h.f.app + "/skills/item-2"))
+        let intents = try h.context.fetch(FetchDescriptor<MachineDeployIntent>())
+        XCTAssertEqual(intents.first { $0.machineID == ProjectIntentHarness.remoteID }?.skillSlug, "item")
+        XCTAssertEqual(intents.first { $0.machineID == ProjectIntentHarness.localID }?.skillSlug, "item-2")
+        try h.sync()
+        try h.assertPeer()
+        let published = h.f.base + "/renamed-clone"
+        let f = h.f
+        try NativeTestWork.run { try f.git.clone(remote: f.remote, into: published, credential: nil) }
+        let disk = try h.f.manifest.read(fromRoot: published)
+        XCTAssertEqual(disk.skills.first { $0.slug == "item" }, h.peer.skills[0])
+        XCTAssertEqual(disk.deployIntents.first { $0.machineID == ProjectIntentHarness.localID }?.skillSlug, "item-2")
+        let clone = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: published, context: clone)
+        let rows = try clone.fetch(FetchDescriptor<Skill>())
+        XCTAssertEqual(rows.map(\.directoryName), ["item-2"])
+        XCTAssertEqual(rows.first?.tags, h.local.tags)
+        XCTAssertEqual(rows.first?.scope, h.local.scope)
+        XCTAssertEqual(rows.first?.importedFrom, nil)
+        XCTAssertEqual(rows.first?.createdAt.timeIntervalSince1970 ?? 0, h.local.createdAt.timeIntervalSince1970, accuracy: 0.001)
+    }
+
+    func testRenamingARefusedCreateOntoAnotherHeldNameKeepsItsValuesForTheNextRename() async throws {
+        for writeFails in [false, true] {
+            let h = try CollisionCreateFixture()
+            defer { h.cleanup() }
+            await h.saves.waitUntilIdle()
+            var disk = try h.f.manifest.read(fromRoot: h.f.app)
+            let ownIntent = DeployIntentRecord(machineID: ProjectIntentHarness.localID, skillSlug: "item",
+                platformRaw: PlatformTarget.claudeCode.rawValue, projectKey: nil)
+            disk.deployIntents.append(ownIntent)
+            h.context.insert(MachineDeployIntent(machineID: ownIntent.machineID, skillSlug: ownIntent.skillSlug,
+                platformRaw: ownIntent.platformRaw))
+            try h.context.save()
+            try h.f.manifest.write(disk, toRoot: h.f.app)
+            if writeFails { h.recording.failingWrites = 1 } else {
+                var held = h.peer.skills[0]
+                held.slug = "item-2"
+                held.createdAt = Date(timeIntervalSince1970: 1_500_000_000.456)
+                disk.skills.append(held)
+                try h.f.manifest.write(disk, toRoot: h.f.app)
+            }
+            XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+            await h.saves.waitUntilIdle()
+            if writeFails { XCTAssertNotNil(h.library.error) } else {
+                XCTAssertEqual(h.library.error, CollisionCreateFixture.message("item-2"))
+            }
+            XCTAssertEqual(h.saves.refused.count, 1)
+            try h.assertLocal(slug: "item-2")
+            try h.assertPeer()
+            if !writeFails {
+                try h.sync()
+                XCTAssertEqual(try h.f.manifest.read(fromRoot: h.f.app).skills, disk.skills)
+            }
+            XCTAssertTrue(h.rename("item-3"), h.library.error ?? "")
+            await h.saves.waitUntilIdle()
+            XCTAssertTrue(h.saves.refused.isEmpty)
+            XCTAssertNil(h.library.error)
+            try h.assertLocal(slug: "item-3")
+            try h.assertPeer()
+            let own = try XCTUnwrap(try h.f.manifest.read(fromRoot: h.f.app).skills.first {
+                $0.slug == "item-3"
+            })
+            XCTAssertEqual(own.tags, h.local.tags)
+            XCTAssertEqual(own.scope, h.local.scope)
+            XCTAssertEqual(own.origin, h.local.origin)
+            XCTAssertEqual(own.createdAt.timeIntervalSince1970, h.local.createdAt.timeIntervalSince1970, accuracy: 0.001)
+            XCTAssertEqual(try h.f.manifest.read(fromRoot: h.f.app).deployIntents
+                .filter { $0.machineID == ProjectIntentHarness.localID }.map(\.skillSlug), ["item-3"])
+        }
+    }
+
     private func snapshot() -> ManifestSnapshot {
         var origin = InstalledOrigin.empty
         origin.repo = "owner/repo"; origin.path = "skills/alpha"; origin.ref = "main"

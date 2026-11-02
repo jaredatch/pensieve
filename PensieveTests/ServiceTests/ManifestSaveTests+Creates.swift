@@ -3,6 +3,89 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func testSameSlugCreateFromAnotherMacIsRefusedOnceAndKeepsBothMacsValues() async throws {
+        for committed in [false, true] {
+            for unreadable in [false, true] {
+                let h = try CollisionCreateFixture(committed: committed, unreadable: unreadable)
+                defer { h.cleanup() }
+                await h.saves.waitUntilIdle()
+                XCTAssertEqual(h.library.error, CollisionCreateFixture.message("item"))
+                XCTAssertEqual(h.saves.refused.count, 1)
+                try h.assertPeer()
+                try h.assertLocal()
+                h.library.error = "notice already read"
+                let ingest = StoreIngestState.shared(for: h.context.container)
+                XCTAssertFalse(ingest.requiresRebuild(at: GitHeadStamp(fileService: h.f.files).state(root: h.f.app)))
+                try h.sync() // No fixture rebuild: worker rows still contain this Mac's create.
+                try h.assertPeer()
+                try h.assertLocal()
+                try h.rebuild()
+                try h.assertLocal()
+                try h.sync()
+                try h.assertPeer()
+                try h.assertLocal()
+                h.saves.refreshRefused(durable: try h.f.manifest.read(fromRoot: h.f.app))
+                XCTAssertEqual(h.saves.refused.count, 1)
+                let other = Skill(name: "Other", directoryName: "other")
+                h.context.insert(other)
+                try h.f.files.writeFile(at: h.f.app + "/skills/other/SKILL.md",
+                    content: "---\nname: Other\ndescription: job\n---\nbody\n")
+                try h.context.save()
+                let dependencies = DeployIntentDependencies.live(
+                    identity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
+                    stateService: InertMachineStateService(), root: h.f.app,
+                    lockPath: h.f.base + "/sync.lock", notifier: {}, reconcile: { _ in BatchResult() })
+                let deploy = DeployMutationService(platformVM: h.platform, dependencies: dependencies)
+                try deploy.setRemote(true, machineID: ProjectIntentHarness.remoteID, projectKey: nil,
+                    skill: other, platform: .claudeCode, context: h.context)
+                try h.assertPeer()
+                XCTAssertEqual(h.library.error, "notice already read", "Refusal reports only once")
+                // Identity acknowledges even when the tags and scope differ from the submitted create.
+                var own = try h.f.manifest.read(fromRoot: h.f.app)
+                var edited = h.local
+                edited.tags = ["later"]
+                edited.scope = .project
+                own.skills = [edited]
+                try h.f.manifest.write(own, toRoot: h.f.app)
+                h.saves.refreshRefused(durable: try h.f.manifest.read(fromRoot: h.f.app))
+                XCTAssertTrue(h.saves.refused.isEmpty)
+            }
+        }
+    }
+
+    func testEditsAndDeleteOnARefusedCreateStayWithIt() async throws {
+        for failDelete in [false, true] {
+            let h = try CollisionCreateFixture(failDelete: failDelete)
+            defer { h.cleanup() }
+            await h.saves.waitUntilIdle()
+            h.library.updateMetadata(h.skill, tags: ["edited"], scope: .project, context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertEqual(h.library.error, CollisionCreateFixture.message("item"))
+            try h.assertPeer()
+            try h.assertLocal(tags: ["edited"], scope: .project)
+            try h.sync()
+            try h.assertPeer()
+            try h.assertLocal(tags: ["edited"], scope: .project)
+            h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID, skillSlug: "item",
+                platformRaw: PlatformTarget.claudeCode.rawValue))
+            try h.context.save()
+            XCTAssertEqual(SkillDeletionFlow.delete(skill: h.skill, library: h.library, platformVM: h.platform,
+                projects: [], context: h.context), !failDelete)
+            await h.saves.waitUntilIdle()
+            try h.assertPeer()
+            let durable = try h.f.manifest.read(fromRoot: h.f.app)
+            XCTAssertFalse(durable.deployIntents.contains {
+                $0.machineID == ProjectIntentHarness.localID && $0.skillSlug == "item"
+            })
+            XCTAssertEqual(h.saves.refused.isEmpty, !failDelete)
+            if failDelete {
+                try h.assertLocal(tags: ["edited"], scope: .project)
+            } else {
+                XCTAssertTrue(try h.context.fetch(FetchDescriptor<Skill>()).isEmpty)
+            }
+        }
+    }
+
     func testCreatesPreservePeerOverlaysAcrossQueuedAndRefusedRebuilds() async throws {
         for refusedFirst in [false, true] {
             for committedPeer in [false, true] {
@@ -30,19 +113,22 @@ extension ManifestSaveTests {
         saves.submit(.createSkill(local), context: context) { reports.append($0) }
         if !refusedFirst {
             try publishPeerOverlay(peer, fixture: f, committed: committedPeer)
-            try assertPeerCreateWindow(f, container: container, peer: peer)
+            try assertPeerCreateWindow(f, container: container, peer: peer, local: local)
         }
         held.release()
         await saves.waitUntilIdle()
-        XCTAssertEqual(manifest.failingWrites, 0, "The create must reach the failing manifest write")
+        if refusedFirst { XCTAssertEqual(manifest.failingWrites, 0, "The absent create reaches the failing write") }
         XCTAssertEqual(reports.count, 1)
-        XCTAssertEqual(reports.first.flatMap { $0 } != nil, refusedFirst)
-        XCTAssertEqual(saves.refused.count, refusedFirst ? 1 : 0)
+        XCTAssertNotNil(reports.first.flatMap { $0 })
+        if !refusedFirst {
+            XCTAssertEqual(reports.first.flatMap { $0 }?.localizedDescription, CollisionCreateFixture.message("item"))
+        }
+        XCTAssertEqual(saves.refused.count, 1)
         if refusedFirst { try publishPeerOverlay(peer, fixture: f, committed: committedPeer) }
-        try assertPeerCreateWindow(f, container: container, peer: peer)
+        try assertPeerCreateWindow(f, container: container, peer: peer, local: local)
         try syncPeerCreate(f, container: container, peer: peer)
         saves.refreshRefused(durable: try f.manifest.read(fromRoot: f.app))
-        XCTAssertTrue(saves.refused.isEmpty, "The first writer's slug acknowledges the create by presence")
+        XCTAssertEqual(saves.refused.count, 1, "Another Mac's creation date cannot acknowledge this create")
         XCTAssertEqual(reports.count, 1, "Rebuild, sync and acknowledgement must not report again")
         XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
     }
@@ -69,21 +155,23 @@ extension ManifestSaveTests {
         let local = try XCTUnwrap(f.manifest.snapshot(from: context).skills.first)
         var peer = try f.manifest.read(fromRoot: f.app)
         var overlay = local
+        overlay.createdAt = Date(timeIntervalSince1970: 1_600_000_000.321)
         overlay.tags = ["peer"]
         overlay.scope = .user
         overlay.origin = .imported(from: "cursor")
         peer.skills = [overlay]
+        peer.categories[0].skillSlugs = ["item"]
         peer.deployIntents = [DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
             platformRaw: "claude", projectKey: nil)]
         return PeerCreateFixture(fixture: f, context: context, peer: peer)
     }
 
     private func assertPeerCreateWindow(_ f: IncompleteIngestFixture, container: ModelContainer,
-                                        peer: ManifestSnapshot) throws {
+                                        peer: ManifestSnapshot, local: SkillOverlay) throws {
         try NativeTestWork.run(container: container) { worker in
             _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: f.app, context: worker)
             let window = try f.manifest.snapshot(from: worker)
-            XCTAssertEqual(window.skills, peer.skills, "A create cannot replace an existing peer overlay")
+            XCTAssertEqual(window.skills, [local], "A rebuild keeps this Mac's current values in its rows")
             XCTAssertEqual(window.deployIntents, peer.deployIntents)
         }
     }

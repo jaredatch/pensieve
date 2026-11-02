@@ -37,6 +37,57 @@ extension ManifestSaveModel {
     }
 
     @MainActor
+    func publish(_ item: Item, disk: ManifestSnapshot?, head: GitHeadStamp.State) async throws
+        -> Publication? {
+        var saved = try disk ?? item.fallback()
+        // A fallback publishes this context's whole window. Capture its queue membership before
+        // awaiting the write; another context or an edit submitted during the write is not healed.
+        let healedItems = disk == nil ? Set(items.filter {
+            $0.presentation.context === item.presentation.context
+        }.map(\.id)) : []
+        let context = item.presentation.context
+        let collisionDelete = try collisionDeletion(for: item)
+        if disk != nil, !item.wasHealed { try item.change.validate(in: saved) }
+        if disk != nil, !item.wasHealed, collisionDelete == nil, !item.change.apply(to: &saved) {
+            if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
+                throw ManifestSaveError.unsavedTarget
+            }
+            if !item.change.isDeletion {
+                log("Skipped queued manifest change: its target was removed by sync.")
+                return .skipped(saved)
+            }
+        }
+        item.intentMove?.apply(to: &saved, local: try? manifest.snapshot(from: context))
+        let snapshot = saved, manifest = manifest, root = root, files = files
+        let headChanged = try await BlockingWork.run { () -> Bool? in
+            let stamp = GitHeadStamp(fileService: files)
+            guard stamp.state(root: root) == head else { return nil }
+            try manifest.write(snapshot, toRoot: root)
+            return stamp.state(root: root) != head
+        }
+        guard let headChanged else { return nil }
+        let ingest = StoreIngestState.shared(for: item.presentation.context.container)
+        if headChanged { ingest.invalidate() }
+        ingest.finish(item.id)
+        for index in items.indices where healedItems.contains(items[index].id) {
+            items[index].wasHealed = true
+            ingest.finish(items[index].id)
+        }
+        if let collisionDelete { discardRefusedCreate(collisionDelete, context: context) }
+        refused = refused.filter { $0.acknowledge(durable: saved) }
+        return headChanged ? .headChanged : .saved(saved)
+    }
+
+    private func collisionDeletion(for item: Item) throws -> String? {
+        switch item.change {
+        case .deleteSkill(let slug) where hasCollision(slug, context: item.presentation.context): return slug
+        case .skillMetadata(let slug, _, _) where hasCollision(slug, context: item.presentation.context):
+            throw ManifestSaveError.createCollision(slug)
+        default: return nil
+        }
+    }
+
+    @MainActor
     func readCurrentManifest() async throws -> ManifestRead {
         let manifest = manifest, root = root, files = files
         return try await BlockingWork.run {
@@ -152,8 +203,13 @@ extension ManifestSaveModel {
         var verdict = HeadEditVerdict.ready(prepared)
         if includingHeadEdit, !item.wasHealed {
             do {
-                try item.change.validate(in: displayed)
-                item.change.apply(to: &displayed)
+                if case .createSkill = item.change {
+                    item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
+                    item.presentation.project(onto: &displayed)
+                } else {
+                    try item.change.validate(in: displayed)
+                    item.change.apply(to: &displayed)
+                }
             } catch {
                 // Restore identity before name-based acceptance; report and reconcile afterwards.
                 stageCategoryRefusal(item, durable: durable, error: error)
@@ -163,5 +219,28 @@ extension ManifestSaveModel {
         try projectPending(in: item.presentation.context, onto: &displayed)
         try item.accept(prepared, displayed)
         return verdict
+    }
+}
+
+enum ManifestSaveError: LocalizedError {
+    case rebuildFailed(String, manifestSaved: Bool)
+    case unsavedTarget
+    case createCollision(String)
+    var showsDirectly: Bool {
+        switch self {
+        case .rebuildFailed, .createCollision: true
+        case .unsavedTarget: false
+        }
+    }
+    var errorDescription: String? {
+        switch self {
+        case .rebuildFailed(let message, let manifestSaved):
+            (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
+                : "Rebuilding the local store failed: ") + message
+        case .unsavedTarget: "This change depends on an earlier change that could not be saved."
+        case .createCollision(let slug):
+            "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope: "
+                + "they aren't saved, and quitting Pensieve loses them."
+        }
     }
 }

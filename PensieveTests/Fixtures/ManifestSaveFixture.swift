@@ -141,3 +141,110 @@ final class RecordingSaveManifest: ManifestSnapshotting {
         afterWrite?()
     }
 }
+
+/// Two independent creates meet only at publication. All folders and Git remotes live in this
+/// fixture's temporary parent; the peer contributes metadata, never a manufactured skill folder.
+@MainActor
+final class CollisionCreateFixture {
+    let f: IncompleteIngestFixture
+    let context: ModelContext
+    let recording = RecordingSaveManifest()
+    let saves: ManifestSaveModel
+    let library: SkillLibraryViewModel
+    let skill: Skill
+    let local: SkillOverlay
+    var peer: ManifestSnapshot
+    let platform: PlatformViewModel
+    let support: String
+
+    static func message(_ slug: String) -> String {
+        "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope: "
+            + "they aren't saved, and quitting Pensieve loses them."
+    }
+
+    init(committed: Bool = false, unreadable: Bool = false, failDelete: Bool = false) throws {
+        let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
+        f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
+        support = base + "/support"
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        try NativeTestWork.run(container: container) { worker in
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: base + "/app", context: worker)
+        }
+        context = ModelContext(container)
+        for row in try context.fetch(FetchDescriptor<Skill>()) { context.delete(row) }
+        try context.save()
+        try f.files.deleteDirectory(at: f.app + "/skills/item")
+        let files = FaultyFileService(wrapped: f.files,
+            failDeletePath: failDelete ? f.app + "/skills/item" : nil)
+        saves = ManifestSaveModel(manifest: recording, root: f.app, lockPath: base + "/sync.lock")
+        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: f.app + "/skills", storeRoot: f.app),
+            fileWatchService: RecordingWatcher(), manifestRoot: f.app, manifestSaves: saves)
+        // The worker cannot run on the main actor until init returns, so the peer arrives after
+        // the local folder and row exist, but before the queue reads the manifest.
+        skill = try XCTUnwrap(library.createSkill(name: "Item", description: "Local job", body: "local body",
+            tags: ["local"], context: context))
+        local = try XCTUnwrap(f.manifest.snapshot(from: context).skills.first)
+        var remote = local
+        remote.createdAt = Date(timeIntervalSince1970: 1_600_000_000.321)
+        remote.tags = ["peer"]
+        remote.scope = .project
+        remote.origin = .imported(from: "cursor")
+        peer = try f.manifest.read(fromRoot: f.app)
+        peer.skills = [remote]
+        peer.categories[0].skillSlugs = ["item"]
+        peer.deployIntents = [DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
+            platformRaw: PlatformTarget.claudeCode.rawValue, projectKey: nil)]
+        try f.manifest.write(peer, toRoot: committed ? f.peer : f.app)
+        if committed {
+            let f = f
+            try NativeTestWork.run {
+                _ = try f.git.stageAllAndCommit(at: f.peer, message: "peer create")
+                try f.git.push(at: f.peer, credential: nil)
+                _ = try f.git.fastForwardOnly(at: f.app, credential: nil)
+            }
+        }
+        recording.failingSnapshots = unreadable ? .max : 0
+        try f.files.writeFile(at: support + "/machine-id", content: ProjectIntentHarness.localID)
+        let paths = DeployPaths(skillsDirectory: f.app + "/skills", userSkillsDirectories: [:],
+            cursorUserRulesDirectory: base + "/cursor")
+        platform = PlatformViewModel(fileService: f.files, linkService: LinkService(fileService: f.files, paths: paths),
+            cursorCompiler: CursorCompiler(fileService: f.files, skillStore: library.skillStore,
+                userRulesDirectory: base + "/cursor"),
+            agentDetection: DeletionTestDetection(installed: []),
+            deployStateStore: DeployStateStore(fileService: f.files, appSupportDir: support), skillsDirectory: f.app + "/skills")
+    }
+
+    func cleanup() { try? f.files.deleteDirectory(at: f.base) }
+
+    func assertPeer(file: StaticString = #filePath, line: UInt = #line) throws {
+        let durable = try f.manifest.read(fromRoot: f.app)
+        XCTAssertEqual(durable.skills.first { $0.slug == "item" }, peer.skills[0], file: file, line: line)
+        XCTAssertTrue(durable.deployIntents.contains(peer.deployIntents[0]), file: file, line: line)
+        XCTAssertEqual(durable.categories, peer.categories, file: file, line: line)
+    }
+
+    func assertLocal(slug: String = "item", tags: [String]? = nil, scope: SkillScope? = nil,
+                     file: StaticString = #filePath, line: UInt = #line) throws {
+        let current = try XCTUnwrap(f.manifest.snapshot(from: context).skills.first { $0.slug == slug }, file: file, line: line)
+        XCTAssertEqual(current.tags, tags ?? local.tags, file: file, line: line)
+        XCTAssertEqual(current.scope, scope ?? local.scope, file: file, line: line)
+        XCTAssertEqual(current.origin, local.origin, file: file, line: line)
+        XCTAssertEqual(current.createdAt, local.createdAt, file: file, line: line)
+    }
+
+    func sync() throws {
+        let f = f
+        try NativeTestWork.run(container: context.container) { worker in
+            guard case .synced = try f.engine(rebuild: StoreRebuildService()).sync(root: f.app,
+                message: "publish window", credential: nil, context: worker) else { return XCTFail("Sync must publish") }
+        }
+    }
+
+    func rebuild() throws {
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: f.app, context: context)
+    }
+
+    func rename(_ slug: String) -> Bool {
+        SkillRenameFlow.rename(skill: skill, to: slug, library: library, platformVM: platform, projects: [], context: context)
+    }
+}

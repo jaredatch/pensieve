@@ -123,15 +123,15 @@ final class SkillLibraryViewModel {
     }
     // MARK: - CRUD
     func regenerateManifest(_ change: ManifestChange, context: ModelContext,
-                            showsFailure: Bool = true, completion: ((Error?) -> Void)? = nil) {
-        manifestSaves?.submit(change, context: context) { [weak self] failure in
+                            showsFailure: Bool = true, intentMove: ManifestLocalIntentMove? = nil,
+                            completion: ((Error?) -> Void)? = nil) {
+        manifestSaves?.submit(change, context: context, intentMove: intentMove) { [weak self] failure in
             guard let self else { completion?(failure); return }
             if let failure {
                 guard showsFailure else { completion?(failure); return }
-                let message: String
-                if case ManifestSaveError.rebuildFailed = failure {
-                    message = failure.localizedDescription
-                } else { message = "Saved, but updating the sync manifest failed: \(failure.localizedDescription)" }
+                let message = (failure as? ManifestSaveError)?.showsDirectly == true
+                    ? failure.localizedDescription
+                    : "Saved, but updating the sync manifest failed: \(failure.localizedDescription)"
                 self.error = message
                 self.lastManifestError = message
             } else {

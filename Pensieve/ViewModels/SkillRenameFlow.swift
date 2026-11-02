@@ -30,7 +30,12 @@ enum SkillRenameFlow {
             }
             if succeeded {
                 if operation.oldSlug != operation.newSlug {
-                    library.regenerateManifest(.renameSkill(operation.oldSlug, operation.newSlug), context: context)
+                    if operation.refusedCreate {
+                        library.publishRenamedCreate(skill, from: operation.oldSlug,
+                            machineID: operation.localMachine, context: context)
+                    } else {
+                        library.regenerateManifest(.renameSkill(operation.oldSlug, operation.newSlug), context: context)
+                    }
                 }
                 library.notifier()
             }
@@ -50,6 +55,8 @@ enum SkillRenameFlow {
         let context: ModelContext
         let oldSlug: String
         let newSlug: String
+        let refusedCreate: Bool
+        var localMachine: String?
         var original = ""
         var oldName = ""
         var oldUpdatedAt = Date()
@@ -64,11 +71,16 @@ enum SkillRenameFlow {
             self.skill = skill; self.name = name; self.library = library; self.platform = platform
             self.projects = projects; self.context = context
             oldSlug = skill.directoryName
+            refusedCreate = library.manifestSaves?.hasRefusedCreate(skill.directoryName, context: context) == true
             let slug = SkillStore.slugify(name)
             newSlug = slug == oldSlug.lowercased() ? oldSlug : slug
         }
 
         func prepareDocument() throws -> String {
+            if refusedCreate {
+                localMachine = try MachineIdentity(fileService: library.fileService,
+                    appSupportDir: platform.deployStateStore.appSupportDir).identifier()
+            }
             if let problem = SkillLibraryViewModel.renameNameProblem(name) { throw RenameError(problem) }
             let rows = try context.fetch(FetchDescriptor<Skill>())
             if let taken = rows.first(where: { $0.id != skill.id && $0.directoryName.lowercased() == newSlug.lowercased() }) {
@@ -165,7 +177,8 @@ enum SkillRenameFlow {
             skill.updatedAt = Date()
             guard oldSlug != newSlug else { return }
             skill.directoryName = newSlug
-            for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>()) where intent.skillSlug == oldSlug {
+            for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>())
+                where intent.skillSlug == oldSlug && (!refusedCreate || intent.machineID == localMachine) {
                 context.insert(MachineDeployIntent(machineID: intent.machineID, skillSlug: newSlug,
                     platformRaw: intent.platformRaw, projectKey: intent.projectKey))
                 context.delete(intent)
@@ -177,7 +190,7 @@ enum SkillRenameFlow {
             let removed = Set(planned.map(\.artifactPath))
             for row in try context.fetch(FetchDescriptor<DeployRecord>())
                 where row.skillID == skill.id && removed.contains(row.targetPath) { context.delete(row) }
-            for category in try context.fetch(FetchDescriptor<Category>()) {
+            for category in try context.fetch(FetchDescriptor<Category>()) where !refusedCreate {
                 category.skillSlugs = category.skillSlugs.map { $0 == oldSlug ? newSlug : $0 }
             }
         }

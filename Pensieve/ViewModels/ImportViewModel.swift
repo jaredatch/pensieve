@@ -143,7 +143,8 @@ final class ImportViewModel {
     private func regenerateManifest(context: ModelContext) {
         guard let manifestService else { return }
         do {
-            try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
+            try manifestService.write(StoreIngestState.snapshotForPublication(
+                using: manifestService, context: context, root: manifestRoot), toRoot: manifestRoot)
         } catch {
             self.error = "Imported, but updating the sync manifest failed: \(error.localizedDescription)"
         }

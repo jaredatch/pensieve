@@ -17,6 +17,7 @@ final class StoreIngestState {
         let categoryWindow: UUID?
     }
     private var edits: [QueuedEdit] = []
+    private var preservedPeers: Set<String> = []
     private var refused: [(id: UUID, projection: RefusedManifestProjection)] = []
 
     static func shared(for container: ModelContainer) -> StoreIngestState {
@@ -93,22 +94,64 @@ final class StoreIngestState {
     }
 
     /// Plain edits cross contexts; SwiftData objects remain on their owning executor.
-    func projectingEdits(onto snapshot: ManifestSnapshot) -> (snapshot: ManifestSnapshot, retainedWindows: Set<UUID>) {
+    func projectingEdits(onto snapshot: ManifestSnapshot, keepingLocalCreates: Bool = false)
+        -> (snapshot: ManifestSnapshot, retainedWindows: Set<UUID>) {
         lock.lock()
         let changes = edits
         let retainedEdits = refused
         lock.unlock()
         var projected = snapshot
-        for edit in retainedEdits { edit.projection.project(onto: &projected) }
+        for edit in retainedEdits {
+            edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates)
+        }
         var retained: Set<UUID> = []
         for edit in changes {
             let change = edit.change
+            if keepingLocalCreates, case .createSkill = change {
+                RefusedManifestProjection(fields: [.change(change)], cachedLocal: nil)
+                    .project(onto: &projected, keepingLocalCreates: true)
+                continue
+            }
             do { try change.validate(in: projected) } catch { continue }
             let before = projected.categories
             change.apply(to: &projected)
             if let window = edit.categoryWindow, before != projected.categories { retained.insert(window) }
         }
         return (projected, retained)
+    }
+
+    /// A local rename/delete removes its row, but does not own the peer overlay under that slug.
+    func preservePeer(_ slug: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        preservedPeers.insert(slug)
+    }
+
+    /// The four whole-row writers share this boundary. A collision's last observed durable
+    /// overlay belongs to the peer even while the window's row contains this Mac's typed values.
+    static func snapshotForPublication(using manifest: ManifestSnapshotting, context: ModelContext,
+                                       root: String) throws -> ManifestSnapshot {
+        var snapshot = try manifest.snapshot(from: context)
+        let state = shared(for: context.container)
+        state.lock.lock()
+        let projections = state.refused.map(\.projection)
+        let preserved = state.preservedPeers
+        state.lock.unlock()
+        // A failed create may meet a peer for the first time during a rebuild or a whole-row
+        // write. Probe identity here too; HEAD can be current and the queue need not run again.
+        let creates = projections.flatMap(\.fields).compactMap { field -> SkillOverlay? in
+            if case .change(.createSkill(let original)) = field { return original }
+            return nil
+        }
+        let disk = preserved.isEmpty && creates.isEmpty ? nil : try manifest.read(fromRoot: root)
+        for projection in projections { projection.intentMove?.apply(to: &snapshot, local: projection.cachedLocal) }
+        for peer in disk?.skills ?? [] {
+            let collision = creates.contains { $0.slug == peer.slug && !ManifestService.sameCreation($0, peer) }
+            guard preserved.contains(peer.slug) || collision else { continue }
+            snapshot.skills.removeAll { $0.slug == peer.slug }
+            snapshot.skills.append(peer)
+        }
+        return snapshot
     }
 
     func invalidate() {
