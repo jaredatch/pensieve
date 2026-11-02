@@ -21,6 +21,11 @@ struct ManifestService: ManifestReadWriting {
         self.writeLockAttempted = writeLockAttempted
     }
 
+    /// Creation dates are identity only at the precision emitted in created_at.
+    static func sameCreation(_ lhs: SkillOverlay, _ rhs: SkillOverlay) -> Bool {
+        iso8601Write.string(from: lhs.createdAt) == iso8601Write.string(from: rhs.createdAt)
+    }
+
     // MARK: Write (idempotent, prunes stale)
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {

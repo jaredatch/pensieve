@@ -1,13 +1,14 @@
 import Foundation
 @testable import Pensieve
 
-/// Wraps a real `FileService`, optionally throwing for one `readFile` path and/or one `listDirectory`
-/// path — models transient I/O on a present file or an existing directory.
+/// Wraps a real `FileService`, optionally throwing for one read, directory listing or directory
+/// deletion path. Other operations delegate; faults model I/O failure without removing the entry.
 struct FaultyFileService: FileServiceProtocol {
     struct Boom: Error {}
     let wrapped: FileService
     var failReadPath: String?
     var failListPath: String?
+    var failDeletePath: String?
 
     func readFile(at path: String) throws -> String {
         if path == failReadPath { throw Boom() }
@@ -26,7 +27,10 @@ struct FaultyFileService: FileServiceProtocol {
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
-    func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
+    func deleteDirectory(at path: String) throws {
+        if path == failDeletePath { throw Boom() }
+        try wrapped.deleteDirectory(at: path)
+    }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
         try wrapped.createSymlink(at: linkPath, pointingTo: targetPath)
     }

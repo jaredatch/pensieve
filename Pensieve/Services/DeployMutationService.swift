@@ -73,7 +73,8 @@ struct DeployIntentDependencies {
             root: root,
             manifestService: manifestService,
             writeManifest: { context in
-                try manifestService.write(try manifestService.snapshot(from: context), toRoot: root)
+                try manifestService.write(try StoreIngestState.snapshotForPublication(
+                    using: manifestService, context: context, root: root), toRoot: root)
             },
             notifier: notifier,
             reconcile: reconcile,

@@ -20,7 +20,7 @@ final class ManifestSaveModel {
     let manifest: ManifestSnapshotting
     let files: FileServiceProtocol
     private let waitSeconds: TimeInterval
-    private let log: (String) -> Void
+    let log: (String) -> Void
     @ObservationIgnored var items: [Item] = []
     var showsDamageAlert = false
     var showsRepairConfirmation = false
@@ -48,6 +48,7 @@ final class ManifestSaveModel {
         var id: UUID { presentation.id }
         var wasHealed = false
         let change: ManifestChange
+        let intentMove: ManifestLocalIntentMove?
         let categoryEdit: CategorySaveEdit?
         let reconcile: (() -> BatchResult)?
         let presentation: ManifestRefusedEdit
@@ -72,12 +73,14 @@ final class ManifestSaveModel {
     }
 
     func submit(_ change: ManifestChange, context: ModelContext, categoryEdit: CategorySaveEdit? = nil,
-                reconcile: (() -> BatchResult)? = nil, report: @escaping (Error?) -> Void) {
+                reconcile: (() -> BatchResult)? = nil, intentMove: ManifestLocalIntentMove? = nil,
+                report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
         for edit in refused where edit.context === context { edit.observe(change) }
         let manifest = manifest, files = files
-        let item = Item(order: nextOrder, change: change, categoryEdit: categoryEdit, reconcile: reconcile,
-            presentation: ManifestRefusedEdit(change, context: context),
+        let item = Item(order: nextOrder, change: change, intentMove: intentMove, categoryEdit: categoryEdit,
+            reconcile: reconcile,
+            presentation: ManifestRefusedEdit(change, context: context, intentMove: intentMove),
             fallback: { try manifest.snapshot(from: context) },
             accept: { prepared, snapshot in
                 try StoreRebuildService(fileService: files, manifestService: manifest)
@@ -89,6 +92,22 @@ final class ManifestSaveModel {
         pendingCount = items.count
         guard worker == nil else { return }
         worker = Task { @MainActor in await self.drain() }
+    }
+
+    func hasRefusedCreate(_ slug: String, context: ModelContext) -> Bool {
+        refused.contains { $0.context === context && $0.createdSkill?.slug == slug }
+    }
+
+    func hasCollision(_ slug: String, context: ModelContext) -> Bool {
+        refused.contains { $0.context === context && $0.createdSkill?.slug == slug && $0.collision != nil }
+    }
+
+    func discardRefusedCreate(_ slug: String, context: ModelContext) {
+        let state = StoreIngestState.shared(for: context.container)
+        for edit in refused where edit.context === context && edit.createdSkill?.slug == slug {
+            if let peer = edit.collision { state.preservePeer(peer.slug) }
+        }
+        refused.removeAll { $0.context === context && $0.targets(slug) }
     }
 
     @MainActor
@@ -142,6 +161,11 @@ final class ManifestSaveModel {
                 stageCategoryRefusal(item, durable: disk, error: error)
             } else {
                 let acknowledged = retainUnsaved(item, durable: disk)
+                if case ManifestSaveError.createCollision = error, let disk {
+                    // Accept the peer's intents and categories even when HEAD is already ingested;
+                    // the retained create supplies only this window's overlay during acceptance.
+                    _ = await rebuild(item, durable: disk, published: false)
+                }
                 outcome = .finished(false)
                 if case ManifestSaveError.rebuildFailed = error { report = { item.report(error) } } else {
                     report = { item.report(item.wasHealed || acknowledged ? nil : error) }
@@ -170,9 +194,16 @@ final class ManifestSaveModel {
     private func retainUnsaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
         guard !item.wasHealed else { return false }
         if let durable {
-            // A rejected command is not durable merely because its projection is a no-op.
-            do { try item.change.validate(in: durable) } catch { return false }
+            // Creates use creation identity, not the no-op of projecting onto a held slug.
+            if case .createSkill = item.change {} else {
+                do { try item.change.validate(in: durable) } catch { return false }
+            }
             item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
+        }
+        if let create = refused.first(where: {
+            $0.context === item.presentation.context && $0.suppliesTarget(for: item.presentation)
+        }) {
+            item.presentation.hold(with: create)
         }
         if durable.map({ item.presentation.acknowledge(durable: $0) }) ?? true {
             item.presentation.retain()
@@ -183,48 +214,15 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    func publish(_ item: Item, disk: ManifestSnapshot?, head: GitHeadStamp.State) async throws
-        -> Publication? {
-        var saved = try disk ?? item.fallback()
-        // A fallback publishes this context's whole window. Capture its queue membership before
-        // awaiting the write; another context or an edit submitted during the write is not healed.
-        let healedItems = disk == nil ? Set(items.filter {
-            $0.presentation.context === item.presentation.context
-        }.map(\.id)) : []
-        if disk != nil, !item.wasHealed { try item.change.validate(in: saved) }
-        if disk != nil, !item.wasHealed, !item.change.apply(to: &saved) {
-            if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
-                throw ManifestSaveError.unsavedTarget
-            }
-            if !item.change.isDeletion {
-                log("Skipped queued manifest change: its target was removed by sync.")
-                return .skipped(saved)
-            }
-        }
-        let snapshot = saved, manifest = manifest, root = root, files = files
-        let headChanged = try await BlockingWork.run { () -> Bool? in
-            let stamp = GitHeadStamp(fileService: files)
-            guard stamp.state(root: root) == head else { return nil }
-            try manifest.write(snapshot, toRoot: root)
-            return stamp.state(root: root) != head
-        }
-        guard let headChanged else { return nil }
-        let ingest = StoreIngestState.shared(for: item.presentation.context.container)
-        if headChanged { ingest.invalidate() }
-        ingest.finish(item.id)
-        for index in items.indices where healedItems.contains(items[index].id) {
-            items[index].wasHealed = true
-            ingest.finish(items[index].id)
-        }
-        refused = refused.filter { $0.acknowledge(durable: saved) }
-        return headChanged ? .headChanged : .saved(saved)
-    }
-
-    @MainActor
     func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot) throws {
         for pending in items.dropFirst() where !pending.wasHealed
             && pending.categoryEdit?.wasRebuilt != true && pending.presentation.context === context
             && items.contains(where: { $0.id == pending.id }) {
+            if case .createSkill = pending.change {
+                pending.presentation.cache(local: try? manifest.snapshot(from: context))
+                pending.presentation.project(onto: &snapshot)
+                continue
+            }
             do { try pending.change.validate(in: snapshot) } catch {
                 guard pending.categoryEdit != nil else { throw error }
                 // Reject before accepting two same-named records, which would make name-based
@@ -382,19 +380,6 @@ extension ManifestSaveModel {
                 let result = reconcile()
                 if result.hasFailures { self.log("Restored category deployments need another reconcile.") }
             }
-        }
-    }
-}
-
-enum ManifestSaveError: LocalizedError {
-    case rebuildFailed(String, manifestSaved: Bool)
-    case unsavedTarget
-    var errorDescription: String? {
-        switch self {
-        case .rebuildFailed(let message, let manifestSaved):
-            (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
-                : "Rebuilding the local store failed: ") + message
-        case .unsavedTarget: "This change depends on an earlier change that could not be saved."
         }
     }
 }

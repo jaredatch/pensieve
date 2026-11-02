@@ -53,6 +53,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- When two Macs create a skill with the same folder name before syncing, Pensieve keeps your tags and scope in the window and asks you to rename the second skill. Renaming or deleting it leaves the other Mac's record alone.
+
 - Finder metadata in the synced library no longer triggers a false damage warning or blocks a repair from another Mac.
 - Sync can pull a repaired library file from another Mac when the damage is already committed and this Mac has no pending file changes. Waiting edits then save, and the repair offer closes.
 

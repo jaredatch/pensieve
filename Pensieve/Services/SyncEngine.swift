@@ -154,7 +154,8 @@ struct SyncEngine: SyncEngineProtocol {
 
         let admittedParent = headStamp.read(root: root)
         // 1. SwiftData → manifest files (the portable, mergeable source of truth).
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
+        try manifestService.write(StoreIngestState.snapshotForPublication(
+            using: manifestService, context: context, root: root), toRoot: root)
         // 2. Install the union-merge driver + ignore rules (idempotent) so the pull below auto-merges
         //    concurrent list edits instead of emitting conflict markers.
         try ensureSyncAttributes(root: root)
@@ -352,7 +353,8 @@ struct SyncEngine: SyncEngineProtocol {
         try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context, files: fileService)
         let stamp = GitHeadStamp(fileService: fileService)
         let admittedParent = stamp.read(root: root)
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
+        try manifestService.write(StoreIngestState.snapshotForPublication(
+            using: manifestService, context: context, root: root), toRoot: root)
         try ensureSyncAttributes(root: root)
         let localCommit = try? SyncLocalCommit(root: root, files: fileService,
                                                 capture: gitService.hasUncommittedChanges(at: root))
