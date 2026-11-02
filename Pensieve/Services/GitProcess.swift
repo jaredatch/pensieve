@@ -12,7 +12,8 @@ final class GitProcess {
     var probeHooks: GitProcessProbeHooks?
     #endif
 
-    init(executable: String, arguments: [String], workingDirectory: String?, environment: [String: String]) throws {
+    init(executable: String, arguments: [String], workingDirectory: String?, environment: [String: String],
+         inputPath: String? = nil) throws {
         let out = try Self.makePipe()
         defer { close(out.write) }
         let err: (read: Int32, write: Int32)
@@ -20,7 +21,7 @@ final class GitProcess {
         defer { close(err.write) }
         do {
             pid = try Self.spawn(executable, arguments: arguments, workingDirectory: workingDirectory,
-                                 environment: environment, stdout: out.write, stderr: err.write)
+                                 environment: environment, stdout: out.write, stderr: err.write, inputPath: inputPath)
         } catch {
             close(out.read)
             close(err.read)
@@ -54,7 +55,7 @@ final class GitProcess {
 
     private static func spawn(
         _ executable: String, arguments: [String], workingDirectory: String?,
-        environment: [String: String], stdout: Int32, stderr: Int32
+        environment: [String: String], stdout: Int32, stderr: Int32, inputPath: String? = nil
     ) throws -> pid_t {
         var actions: posix_spawn_file_actions_t?
         try requireZero(posix_spawn_file_actions_init(&actions))
@@ -72,7 +73,7 @@ final class GitProcess {
         try requireZero(posix_spawnattr_setsigdefault(&attributes, &defaultSignals))
         let flags = POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF
         try requireZero(posix_spawnattr_setflags(&attributes, Int16(flags)))
-        try requireZero(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0))
+        try requireZero(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, inputPath ?? "/dev/null", O_RDONLY, 0))
         try requireZero(posix_spawn_file_actions_adddup2(&actions, stdout, STDOUT_FILENO))
         try requireZero(posix_spawn_file_actions_adddup2(&actions, stderr, STDERR_FILENO))
         try requireZero(posix_spawn_file_actions_addclose(&actions, stdout))

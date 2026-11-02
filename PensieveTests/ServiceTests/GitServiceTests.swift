@@ -1280,7 +1280,7 @@ extension GitServiceTests {
 
     func testHistoryMissingRefClassificationUsesBothStreamsInOrder() throws {
         try NativeTestWork.run { [self] in
-            let service = GitService(askpassHelperPath: tempDir + "/askpass", upstreamHistoryNetworkRunner: { _, _ in
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", upstreamHistoryNetworkRunner: { _, _, _ in
                 .init(stdout: "fatal: couldn't find remote ", stderr: "ref refs/tags/missing", exit: 128)
             })
             let request = UpstreamHistoryGitRequest(remote: "https://example.com/store.git", ref: "missing",

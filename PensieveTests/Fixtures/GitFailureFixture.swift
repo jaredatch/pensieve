@@ -52,6 +52,7 @@ struct GitFailureFixture {
               ls-remote*) printf '%s\\trefs/heads/main\\n' '\(String(repeating: "a", count: 40))' ;;
               'rev-parse --is-shallow-repository') printf 'true\\n' ;;
               'rev-parse --path-format=absolute') printf '%s/.git/%s\\n' "$repository" "$4" ;;
+              'rev-list --objects'|'cat-file --batch'|'cat-file --batch-check'|ls-tree*) ;;
               rev-parse*|rev-list*) printf '%s\\n' '\(String(repeating: "a", count: 40))' ;;
               'cat-file -e') exit 1 ;;
               fetch*)

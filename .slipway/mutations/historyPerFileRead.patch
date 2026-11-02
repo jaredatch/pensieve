@@ -1,0 +1,18 @@
+--- a/Pensieve/Services/GitService+UpstreamHistoryContent.swift
++++ b/Pensieve/Services/GitService+UpstreamHistoryContent.swift
+@@ -34,8 +34,13 @@
+             totalBytes = nextTotal
+             listing.append(file)
+         }
+-        let contents = try historyBlobs(listing.map(\.blob).filter { $0.size <= textByteLimit },
+-                                        repositoryPath: repositoryPath)
++        var contents: [String: Data] = [:]
++        for blob in listing.map(\.blob) where blob.size <= textByteLimit {
++            let args = ["-C", repositoryPath, "cat-file", "blob", blob.object]
++            let output = try runData(args, in: nil, environment: Self.historyEnvironment)
++            guard output.exit == 0 else { throw dataCommandError(output, args: args) }
++            contents[blob.object] = output.stdout
++        }
+         let files = try listing.map { file in
+             UpstreamHistoryBaselineFile(
+                 path: file.path,

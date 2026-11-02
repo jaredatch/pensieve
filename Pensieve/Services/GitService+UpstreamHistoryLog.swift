@@ -23,7 +23,7 @@ extension GitService {
             + ["--no-renames", "--numstat", "-z", "--format=\(format)"]
             + commits
             + ["--", Self.literalPathspec(path)]
-        let output = try runData(args, in: nil)
+        let output = try runData(args, in: nil, environment: Self.historyEnvironment)
         guard output.exit == 0 else { throw dataCommandError(output, args: args) }
         return try parseHistoryLog(output.stdout, args: args)
     }

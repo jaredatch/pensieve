@@ -18,6 +18,7 @@ extension UpstreamHistoryServiceTests {
                 headCommit: sha,
                 rows: [],
                 installedPosition: .reachable(pathCommit: nil),
+                hasMoreRows: false,
                 hasMoreCommits: false,
                 installedBaseline: .files([baseline])
             )))
@@ -50,6 +51,7 @@ extension UpstreamHistoryServiceTests {
                 headCommit: String(repeating: "a", count: 40),
                 rows: [],
                 installedPosition: .notInRefHistory,
+                hasMoreRows: false,
                 hasMoreCommits: false,
                 installedBaseline: nil
             )))

@@ -173,10 +173,11 @@ private final class GitOutputEvents {
 extension GitService {
     @discardableResult
     func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
-             storeRules: Bool = false, file: StaticString = #fileID, line: UInt = #line) throws
+             storeRules: Bool = false, inputPath: String? = nil, environment: [String: String] = [:],
+             file: StaticString = #fileID, line: UInt = #line) throws
         -> GitOutput {
         let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules,
-                                 file: file, line: line)
+                                 inputPath: inputPath, environment: environment, file: file, line: line)
         return result.textOutput
     }
 

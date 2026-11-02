@@ -14,7 +14,7 @@ extension AppRuntimeFinalReviewTests {
             probe.set { .developerToolsMissing }
             let bypass = GitService(
                 askpassHelperPath: TestPaths.gitAskpassHelperPath,
-                upstreamHistoryNetworkRunner: { _, _ in
+                upstreamHistoryNetworkRunner: { _, _, _ in
                 .init(stdout: "", stderr: "xcrun: error: invalid active developer path", exit: 69)
             }
             )
