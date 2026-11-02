@@ -49,9 +49,20 @@ final class AppRuntimeStartupTests: XCTestCase {
         probe.arguments = ["-B", root.appendingPathComponent("script/cli_contract_test.py").path, "--binary",
             Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve").path,
             "CLILaunchTests.test_background_production_reopens_from_the_dock"]
+        let files = FileService()
+        let outputRoot = TestTemporaryDirectory.path + "ProductionReopen-" + UUID().uuidString
+        try files.createDirectory(at: outputRoot)
+        defer { try? files.deleteDirectory(at: outputRoot) }
+        let outputURL = URL(fileURLWithPath: outputRoot + "/probe.log")
+        try files.writeFile(at: outputURL.path, content: "")
+        let output = try FileHandle(forWritingTo: outputURL)
+        defer { try? output.close() }
+        probe.standardOutput = output
+        probe.standardError = output
         let result = try await BlockingWork.run { try CLIProcessProbe.run(probe) }
-        XCTAssertFalse(result.timedOut, "the production window probe exceeded its deadline")
-        XCTAssertEqual(result.status, 0, "the real production scene must open from its registered action")
+        let state = try probeState(result, outputURL: outputURL)
+        XCTAssertFalse(result.timedOut, "\(state) | the production window probe exceeded its deadline")
+        XCTAssertEqual(result.status, 0, "\(state) | the real production scene must open from its registered action")
         let paths = try AppRuntimePaths.temporary(named: "ReopenStartup")
         defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }
         let defaults = try isolatedDefaults()
@@ -81,4 +92,15 @@ final class AppRuntimeStartupTests: XCTestCase {
         XCTAssertEqual(opened, 2, "the menu bar shares that action")
         XCTAssertEqual(runtime.launchWorkInvocationCount, 1)
     }
+
+    private func probeState(_ result: CLIProcessProbe.Outcome, outputURL: URL) throws -> String {
+        let reader = try FileHandle(forReadingFrom: outputURL)
+        defer { try? reader.close() }
+        let end = try reader.seekToEnd()
+        try reader.seek(toOffset: end > 1400 ? end - 1400 : 0)
+        let tail = (String(data: try reader.readToEnd() ?? Data(), encoding: .utf8) ?? "non-UTF8 probe output")
+            .replacingOccurrences(of: "\n", with: " | ")
+        return "elapsed=\(result.elapsed) timedOut=\(result.timedOut) status=\(String(describing: result.status)) | \(tail)"
+    }
+
 }

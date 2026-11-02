@@ -219,9 +219,10 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         XCTAssertEqual(scrollView.contentView.bounds.origin, origin, "Missing anchors do not move the page")
         try click(jump, in: fixture.window)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Anchor must move the enclosing detail scroller") {
+                             failureMessage: "Anchor must move the enclosing detail scroller",
+                             diagnostics: { self.reportAnchorState(in: fixture.host) }, {
             scrollView.contentView.bounds.minY > 100
-        }
+        })
         XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 100, "Same-document file fragment must scroll")
         let first = try XCTUnwrap(elements(fixture.host).first { ($0.accessibilityValue() as? String) == "First target" })
         let frame = first.accessibilityFrame()
@@ -345,32 +346,15 @@ extension SkillPreviewLinkHostTests {
     private func findLink(_ title: String, in host: NSView) async throws -> NSAccessibilityProtocol {
         var found: NSAccessibilityProtocol?
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Rendered link \(title) must be accessible") {
+                             failureMessage: "Rendered link \(title) must be accessible",
+                             diagnostics: { self.reportAnchorState(in: host) }, {
             host.layoutSubtreeIfNeeded()
             found = self.elements(host).first {
                 $0.accessibilityRole() == .link && [$0.accessibilityTitle(), $0.accessibilityLabel()].contains(title)
             }
             return found != nil
-        }
+        })
         return try XCTUnwrap(found)
-    }
-
-    private func elements(_ root: NSView) -> [NSAccessibilityProtocol] {
-        var pending: [Any] = [root] + NSAccessibility.unignoredChildrenForOnlyChild(from: root)
-        var visited: Set<ObjectIdentifier> = [], result: [NSAccessibilityProtocol] = []
-        while let candidate = pending.popLast() {
-            guard let object = candidate as? NSObject,
-                  visited.insert(ObjectIdentifier(object)).inserted,
-                  let element = candidate as? NSAccessibilityProtocol else { continue }
-            result.append(element)
-            pending.append(contentsOf: element.accessibilityChildren() ?? [])
-            if let view = candidate as? NSView { pending.append(contentsOf: view.subviews) }
-        }
-        return result
-    }
-
-    private func views(_ root: NSView) -> [NSView] {
-        [root] + root.subviews.flatMap(views)
     }
 
     private func click(_ link: NSAccessibilityProtocol, in window: NSWindow, directlyIn view: NSView? = nil) throws {
