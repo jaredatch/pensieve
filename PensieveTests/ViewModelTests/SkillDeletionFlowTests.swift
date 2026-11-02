@@ -84,6 +84,31 @@ final class SkillDeletionFlowTests: XCTestCase {
         return result
     }
 
+    func testDeleteWaitsForItsQueuedCreateBeforeRemovingDeployments() async throws {
+        let f = try fixture(); try seedAllState(f)
+        let path = f.links.path(f.skill, .claudeCode, nil)
+        f.links.linkedPaths.insert(path)
+        let before = try f.manifest.snapshot(from: f.context)
+        let saves = try XCTUnwrap(f.library.manifestSaves)
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: saves.lockPath))
+        defer { held.release() }
+        saves.submit(.createSkill(try XCTUnwrap(before.skills.first)), context: f.context) { _ in }
+        XCTAssertTrue(saves.refused.isEmpty)
+        XCTAssertFalse(SkillDeletionFlow.delete(skill: f.skill, library: f.library, platformVM: f.platform,
+            projects: [f.project], context: f.context))
+        XCTAssertEqual(f.library.deletionNotice?.message,
+            "Pensieve is still saving this skill. Try deleting it again in a moment.")
+        XCTAssertTrue(f.links.unlinkCalls.isEmpty, "The refusal must precede deployment cleanup")
+        XCTAssertTrue(f.links.linkedPaths.contains(path))
+        XCTAssertEqual(try f.manifest.snapshot(from: f.context), before)
+        XCTAssertTrue(f.store.deleteCalls.isEmpty)
+        XCTAssertTrue(f.manifest.snapshots.isEmpty)
+        XCTAssertEqual(f.counter.value, 0)
+        XCTAssertEqual(saves.items.count, 1, "Do not queue retirement or deletion behind this create")
+        held.release()
+        await saves.waitUntilIdle()
+    }
+
     func testDeleteRetainsSkillWhenAnyRemovalFails() async throws {
         let f = try fixture(); try seedAllState(f)
         let path = f.links.path(f.skill, .claudeCode, nil)
