@@ -23,9 +23,12 @@ class CLILaunchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.compilation = tempfile.TemporaryDirectory(prefix='launch-')
+        cls.addClassCleanup(cls.compilation.cleanup)
+        # All three compiler states share 60 s of the Swift probe's 160 s budget.
+        cls.compile_deadline = time.monotonic() + 60
         cls.fixture = Path(cls.compilation.name) / 'Fixture'
-        subprocess.run(['xcrun', 'swiftc', str(Path(__file__).with_name('cli_launch_fixture.swift')),
-                        '-o', str(cls.fixture)], check=True, capture_output=True, timeout=60)
+        cls.compile_support('Swift launch fixture', ['xcrun', 'swiftc', str(Path(__file__).with_name('cli_launch_fixture.swift')),
+                        '-o', str(cls.fixture)])
         # The fixture app has no store. Give only its CLI a disposable passwd home so the real
         # launch guard and default endpoint can run without touching the user's App Support.
         source = Path(cls.compilation.name) / 'home.c'
@@ -43,8 +46,8 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
 } replacement = {fixture_home, getpwuid};
 ''')
         cls.home_query = Path(cls.compilation.name) / 'home.dylib'
-        subprocess.run(['xcrun', 'clang', '-dynamiclib', str(source), '-o', str(cls.home_query)],
-                       check=True, capture_output=True, timeout=60)
+        cls.compile_support('passwd home interposer',
+                            ['xcrun', 'clang', '-dynamiclib', str(source), '-o', str(cls.home_query)])
 
         configuration_source = Path(cls.compilation.name) / 'configuration.m'
         configuration_source.write_text(r'''
@@ -66,9 +69,23 @@ __attribute__((constructor)) static void install(void) {
 }
 ''')
         cls.configuration_probe = Path(cls.compilation.name) / 'configuration.dylib'
-        subprocess.run(['xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-framework', 'AppKit',
-                        str(configuration_source), '-o', str(cls.configuration_probe)],
-                       check=True, capture_output=True, timeout=60)
+        cls.compile_support('launch configuration interposer',
+                            ['xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-framework', 'AppKit',
+                             str(configuration_source), '-o', str(cls.configuration_probe)])
+
+    @classmethod
+    def compile_support(cls, state, command):
+        remaining = cls.compile_deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f'wait=compile {state}; state=not started; shared 60 s compile budget expired')
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(f'wait=compile {state}; state=compiler still running; '
+                               f'shared 60 s compile budget expired; stdout={error.stdout!r}; stderr={error.stderr!r}') from error
+        if result.returncode:
+            raise RuntimeError(f'wait=compile {state}; state=exit {result.returncode}; '
+                               f'stdout={result.stdout}; stderr={result.stderr}')
 
     @classmethod
     def tearDownClass(cls):
@@ -318,13 +335,46 @@ __attribute__((constructor)) static void install(void) {
     def test_background_production_reopens_from_the_dock(self):
         self.assert_production_windows(reopen=True)
 
+    def production_command(self, wait, command, deadline, state, *, env=None, query_bound=5):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            self.fail(f'wait={wait}; state={state}; deadline expired before query')
+        try:
+            return subprocess.run(command, env=env, capture_output=True, text=True,
+                                  timeout=min(query_bound, remaining))
+        except subprocess.TimeoutExpired as error:
+            self.fail(f'wait={wait}; state={state}; query exceeded {min(query_bound, remaining):.2f} s; '
+                      f'stdout={error.stdout!r}; stderr={error.stderr!r}')
+
+    def production_window_count(self, process, wait, deadline, last_count):
+        state = f'pid={process.pid} exit={process.poll()} lastWindowCount={last_count}'
+        result = self.production_command(wait, [str(self.fixture), '--windows', str(process.pid)],
+                                         deadline, state, query_bound=3)
+        if result.returncode:
+            self.fail(f'wait={wait}; state={state}; query exit={result.returncode}; '
+                      f'stdout={result.stdout}; stderr={result.stderr}')
+        try:
+            return int(result.stdout)
+        except ValueError:
+            self.fail(f'wait={wait}; state={state}; invalid window count={result.stdout!r}; stderr={result.stderr}')
+
+    def clear_production_defaults(self):
+        self.production_command('p58 defaults cleanup', ['/usr/bin/defaults', 'delete', 'p58'],
+                                time.monotonic() + 3, 'removing the owned production test domain', query_bound=3)
+
     def assert_production_windows(self, reopen):
+        # Shared across preparation and both launch modes: 60 s compiles + 75 s helper +
+        # at most two 5 s terminate/reaps + 3 s defaults cleanup = 148 s, leaving 12 s for Python/setup.
+        helper_deadline = time.monotonic() + 75
         app = self.root / 'Production.app'
         shutil.copytree(self.binary.parent.parent.parent, app, symlinks=True)
         info_path = app / 'Contents/Info.plist'
         info = plistlib.loads(info_path.read_bytes()); info['CFBundleIdentifier'] = 'p58'
         info_path.write_bytes(plistlib.dumps(info))
-        subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True, capture_output=True)
+        signed = self.production_command('production copy signed', ['/usr/bin/codesign', '--force', '--sign', '-', str(app)],
+                                         helper_deadline, 'copied app awaiting ad-hoc signature', query_bound=10)
+        if signed.returncode:
+            self.fail(f'wait=production copy signed; state=exit {signed.returncode}; stderr={signed.stderr}')
         # One component under TMPDIR keeps the real app's home-derived socket within Darwin's bound.
         # Each candidate is exclusively created and owned by this test; no fixed /tmp path is used.
         home = None
@@ -336,7 +386,7 @@ __attribute__((constructor)) static void install(void) {
                 continue
         self.assertIsNotNone(home, 'no isolated home slot is available')
         self.addCleanup(lambda: shutil.rmtree(home, ignore_errors=True))
-        self.addCleanup(lambda: subprocess.run(['/usr/bin/defaults', 'delete', 'p58'], capture_output=True))
+        self.addCleanup(self.clear_production_defaults)
         env = dict(self.environment, HOME=str(home), CFFIXED_USER_HOME=str(home), PENSIEVE_DOGFOOD='1')
         support = home / 'Library/Application Support/Pensieve'
         self.assertLess(len(str(support / 'p58.sock').encode()), 104, 'TMPDIR is too long for the production socket')
@@ -346,36 +396,70 @@ __attribute__((constructor)) static void install(void) {
                     process = subprocess.Popen([str(app / 'Contents/MacOS/Pensieve'), *arguments], env=env,
                                                stdout=log, stderr=log)
                     try:
-                        deadline = time.monotonic() + 8
+                        self.wait_for_production_commands(process, app, support, env, helper_deadline)
+                        wait = 'background stays window-free' if arguments else 'normal production window visible'
+                        deadline = min(helper_deadline, time.monotonic() + (2 if arguments else 15))
+                        if arguments and helper_deadline - time.monotonic() < 2:
+                            self.fail(f'wait={wait}; state=pid={process.pid} exit={process.poll()}; '
+                                      'helper budget cannot cover the full 2 s window-free observation')
+                        seen_window, count = False, None
                         while time.monotonic() < deadline:
-                            result = subprocess.run([str(app / 'Contents/Helpers/pensieve'), 'skill', 'list', '--json',
-                                '--app-support', str(support)], env=env, capture_output=True, text=True, timeout=5)
-                            if json.loads(result.stdout)['ok']:
-                                break
-                            time.sleep(.02)
-                        else:
-                            self.fail('isolated production app did not become ready: ' + result.stdout)
-                        deadline = time.monotonic() + 2
-                        seen_window = False
-                        while time.monotonic() < deadline:
-                            count = int(subprocess.check_output([str(self.fixture), '--windows', str(process.pid)], text=True))
+                            count = self.production_window_count(process, wait, helper_deadline, count)
                             seen_window = seen_window or count > 0
                             if seen_window:
                                 break
                             time.sleep(.02)
-                        self.assertEqual(seen_window, not arguments, 'production scene launch behavior')
+                        self.assertEqual(seen_window, not arguments,
+                                         f'production scene launch behavior; wait={wait}; pid={process.pid} '
+                                         f'exit={process.poll()} lastWindowCount={count}')
                         if reopen and arguments:
-                            subprocess.run([str(self.fixture), '--reopen', str(process.pid)], check=True,
-                                           capture_output=True, timeout=8)
-                            deadline = time.monotonic() + 5
+                            reply = self.production_command('Dock reopen reply',
+                                [str(self.fixture), '--reopen', str(process.pid)],
+                                min(helper_deadline, time.monotonic() + 8),
+                                f'pid={process.pid} exit={process.poll()} lastWindowCount={count}; Apple event reply bound=5 s',
+                                query_bound=8)
+                            if reply.returncode:
+                                self.fail(f'wait=Dock reopen reply (5 s Apple event); state=exit {reply.returncode}; '
+                                          f'stdout={reply.stdout}; stderr={reply.stderr}')
+                            deadline = min(helper_deadline, time.monotonic() + 15)
                             while time.monotonic() < deadline:
-                                if int(subprocess.check_output([str(self.fixture), '--windows', str(process.pid)], text=True)):
+                                count = self.production_window_count(process, 'Dock production window visible',
+                                                                     helper_deadline, count)
+                                if count:
                                     break
                                 time.sleep(.02)
                             else:
-                                self.fail('Dock reopen did not open the production scene after background startup')
+                                self.fail(f'wait=Dock production window visible (15 s); state=pid={process.pid} '
+                                          f'exit={process.poll()} lastWindowCount={count}')
                     finally:
-                        process.terminate(); process.wait(timeout=5)
+                        process.terminate()
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            try:
+                                process.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                self.fail(f'wait=production terminate/reap (3 s TERM + 2 s KILL); '
+                                          f'state=pid={process.pid} not reaped after SIGKILL')
+                            self.fail(f'wait=production terminate/reap (5 s); state=pid={process.pid} '
+                                      f'exit={process.poll()}; required SIGKILL')
+
+    def wait_for_production_commands(self, process, app, support, env, helper_deadline):
+        deadline = min(helper_deadline, time.monotonic() + 20)
+        state = 'no CLI response yet'
+        while time.monotonic() < deadline:
+            result = self.production_command('production commands ready (20 s)',
+                [str(app / 'Contents/Helpers/pensieve'), 'skill', 'list', '--json', '--app-support', str(support)],
+                deadline, f'pid={process.pid} exit={process.poll()} {state}', env=env)
+            state = f'CLI exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}'
+            try:
+                if json.loads(result.stdout)['ok']:
+                    return
+            except (ValueError, KeyError):
+                pass
+            time.sleep(.02)
+        self.fail(f'wait=production commands ready (20 s); state=pid={process.pid} exit={process.poll()} {state}')
 
     def test_dogfood_cli_reaches_the_fenced_apps_store(self):
         from dogfood_self_test import DogfoodTestCase, SCRIPT
