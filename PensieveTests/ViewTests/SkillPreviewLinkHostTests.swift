@@ -5,6 +5,8 @@ import XCTest
 
 @MainActor
 final class SkillPreviewLinkHostTests: XCTestCase {
+    var anchorReadiness: AnchorLayoutReadiness?
+
     func testContentPreviewLinkSelectsResolvedPickerFile() async throws {
         var selections: [String] = [], external: [URL] = []
         let fixture = hostTab(markdown: "[Reference](./references/x.md#part)",
@@ -205,6 +207,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
     }
 
     func testAnchorReaderScrollsEnclosingDetailPageToFirstDuplicate() async throws {
+        let readiness = AnchorLayoutReadiness()
+        anchorReadiness = readiness
         let paragraphs = (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
         let markdown = "[Jump](./SKILL.md#authoring-gate) [Missing](#missing)\n\n" + paragraphs
             + "\n\n## Authoring gate\n\nFirst target\n\n" + paragraphs + "\n\n## Authoring gate\n\nSecond target"
@@ -212,17 +216,16 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         defer { fixture.window.close() }
         let jump = try await findLink("Jump", in: fixture.host)
         let scrollView = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSScrollView }.first)
+        await waitForAnchorTargets(in: fixture.host, readiness: readiness)
         XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 1)
         let origin = scrollView.contentView.bounds.origin
         try click(try await findLink("Missing", in: fixture.host), in: fixture.window)
         fixture.host.layoutSubtreeIfNeeded()
         XCTAssertEqual(scrollView.contentView.bounds.origin, origin, "Missing anchors do not move the page")
-        try click(jump, in: fixture.window)
-        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Anchor must move the enclosing detail scroller",
-                             diagnostics: { self.reportAnchorState(in: fixture.host) }, {
-            scrollView.contentView.bounds.minY > 100
-        })
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        try withTransaction(transaction) { try click(jump, in: fixture.window) }
+        await waitForAnchorScroll(in: fixture.host, scroller: scrollView, origin: origin)
         XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 100, "Same-document file fragment must scroll")
         let first = try XCTUnwrap(elements(fixture.host).first { ($0.accessibilityValue() as? String) == "First target" })
         let frame = first.accessibilityFrame()
@@ -331,8 +334,14 @@ extension SkillPreviewLinkHostTests {
                                             onSelectFile(path)
                                             selection?.file = path
                                         })
-        let host = NSHostingView(rootView: AnyView(tab.frame(width: 640, height: geometry.height)
-            .environment(\.openURL, OpenURLAction { openURL($0); return .handled })))
+        var content = AnyView(tab.frame(width: 640, height: geometry.height)
+            .environment(\.openURL, OpenURLAction { openURL($0); return .handled }))
+        if let readiness = anchorReadiness {
+            content = AnyView(content.onPreferenceChange(SkillPreviewHeadingPreference.self) { targets in
+                MainActor.assumeIsolated { readiness.targets = targets }
+            })
+        }
+        let host = NSHostingView(rootView: content)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: geometry.height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

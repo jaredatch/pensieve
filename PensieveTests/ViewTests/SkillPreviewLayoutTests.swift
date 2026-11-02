@@ -245,6 +245,9 @@ extension SkillPreviewLayoutTests {
             return state
         }, {
             host._renderForTest(interval: 0)
+            // Render acceptance did not imply native marker views existed in the failing run.
+            host.layoutSubtreeIfNeeded()
+            host.displayIfNeeded()
             let elements = self.elements(in: host)
             found = [:]
             for value in values {
@@ -295,6 +298,8 @@ extension SkillPreviewLayoutTests {
             return state
         }, {
             host._renderForTest(interval: 0)
+            host.layoutSubtreeIfNeeded()
+            host.displayIfNeeded()
             renderReady = host._renderAsyncForTest(interval: 0)
             guard renderReady else { return false }
             do {
