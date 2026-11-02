@@ -94,7 +94,7 @@ extension GitService {
     func prefetchHistoryBlobs(tip: String, request: UpstreamHistoryGitRequest,
                               allowDeclined: Bool = false) throws -> Bool {
         let output = try runOrThrow([
-            "-C", request.repositoryPath, "rev-list", "--objects", "--missing=print", "--no-object-names",
+            "-C", request.repositoryPath, "rev-list", "--objects", "--full-history", "--missing=print", "--no-object-names",
             tip, "--", Self.literalPathspec(request.path)
         ], in: nil, environment: Self.historyEnvironment)
         let objects = try output.stdout.split(whereSeparator: \Character.isNewline).compactMap { line -> String? in

@@ -88,6 +88,68 @@ extension UpstreamHistoryServiceTests {
         }
     }
 
+    func testHistoryPrefetchIncludesRevertedVersionsFromMergedBranches() throws {
+        try NativeTestWork.run { [self] in
+            let repository = try makeRepository()
+            try write("skills/demo/SKILL.md", text: "version 0\n", in: repository)
+            let base = try commit(repository, message: "base", timestamp: 1_700_030_001)
+            XCTAssertEqual(try rawGit(["-C", repository, "checkout", "-b", "side"]).exit, 0)
+            try write("skills/demo/SKILL.md", text: "version 1\n", in: repository)
+            let transient = try commit(repository, message: "transient version", timestamp: 1_700_030_002)
+            try write("skills/demo/SKILL.md", text: "version 0\n", in: repository)
+            let reverted = try commit(repository, message: "revert version", timestamp: 1_700_030_003)
+            XCTAssertEqual(try rawGit(["-C", repository, "checkout", "main"]).exit, 0)
+            try write("other/large.bin", data: Data((0 ..< 262_144).map { _ in UInt8.random(in: .min ... .max) }),
+                      in: repository)
+            _ = try commit(repository, message: "unrelated main change", timestamp: 1_700_030_004)
+            let unrelated = try revision("HEAD:other/large.bin", in: repository)
+            let merge = try rawGit([
+                "-C", repository, "-c", "user.name=History Author", "-c", "user.email=history@example.com",
+                "merge", "--no-ff", "-m", "merge reverted side branch", "side"
+            ])
+            XCTAssertEqual(merge.exit, 0, merge.stderr)
+            let head = try revision("HEAD", in: repository)
+            let fixture = PartialHistoryFixture(repository: repository, commits: [base, transient, reverted, head],
+                                                unrelatedObjects: [unrelated], fileCount: 1)
+            let scratch = tempDir + "/merged-partial"
+            let git = GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass")
+            let result = try git.upstreamHistory(partialRequest(fixture, scratch: scratch, commitLimit: 200))
+            XCTAssertEqual(result.headCommit, head)
+            XCTAssertEqual(result.rows.map(\.sha), [reverted, transient, base])
+            XCTAssertEqual(result.rows.map(\.skillMarkdown), [
+                .text("version 0\n"), .text("version 1\n"), .text("version 0\n")
+            ])
+            XCTAssertEqual(result.rows.map(\.filesChanged), [1, 1, 1])
+            XCTAssertEqual(result.rows.map(\.linesAdded), [1, 1, 1])
+            XCTAssertEqual(result.rows.map(\.linesRemoved), [1, 1, 0])
+            guard case let .reachable(pathCommit) = result.installedPosition else {
+                return XCTFail("installed merge is reachable")
+            }
+            XCTAssertEqual(pathCommit, base)
+            try assertPartialBaseline(result.installedBaseline, fixture: fixture, version: 0)
+            try assertUnrelatedObjectsAbsent(fixture, scratch: scratch)
+        }
+    }
+
+    func testMissingBaselineBlobFailsInsteadOfSilentlyOmittingTheFile() throws {
+        try NativeTestWork.run { [self] in
+            let repository = try makeRepository()
+            try write("skills/demo/SKILL.md", text: "skill\n", in: repository)
+            try write("skills/demo/asset.txt", text: "asset\n", in: repository)
+            let installed = try commit(repository, message: "installed files")
+            let object = try revision("HEAD:skills/demo/asset.txt", in: repository)
+            let objectPath = repository + "/.git/objects/" + object.prefix(2) + "/" + object.dropFirst(2)
+            try fileService.deleteFile(at: objectPath)
+            XCTAssertNotEqual(try rawGit(["-C", repository, "cat-file", "-e", object],
+                                        environment: ["GIT_NO_LAZY_FETCH": "1"]).exit, 0)
+            let git = GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass")
+            XCTAssertThrowsError(try git.installedBaseline(
+                commit: installed, path: "skills/demo", repositoryPath: repository,
+                textByteLimit: 1_024, fileLimit: 10, byteLimit: 10_000
+            )) { XCTAssertTrue($0 is GitError) }
+        }
+    }
+
     func testOlderInstalledCommitIsFetchedPartiallyWithACompleteBaseline() throws {
         try NativeTestWork.run { [self] in
             let fixture = try partialHistoryFixture(rows: 6, files: 4)

@@ -28,7 +28,7 @@ extension GitService {
         var listing: [HistoryTreeFile] = []
         var totalBytes = 0
         for record in records {
-            guard let file = historyTreeFile(record, root: path) else { continue }
+            guard let file = try historyTreeFile(record, root: path) else { continue }
             let (nextTotal, overflow) = totalBytes.addingReportingOverflow(file.blob.size)
             guard !overflow, nextTotal <= byteLimit else { return .tooLarge }
             totalBytes = nextTotal
@@ -49,7 +49,7 @@ extension GitService {
         })
     }
 
-    private func historyTreeFile(_ record: Data.SubSequence, root: String) -> HistoryTreeFile? {
+    private func historyTreeFile(_ record: Data.SubSequence, root: String) throws -> HistoryTreeFile? {
         guard let tab = record.firstIndex(of: 9) else { return nil }
         let header = record[..<tab].split(separator: 32, omittingEmptySubsequences: true)
         guard header.count == 4, header[1] == Data("blob".utf8),
@@ -57,8 +57,10 @@ extension GitService {
               let relative = relativeTreePath(rawPath, root: root),
               let object = String(bytes: header[2], encoding: .utf8),
               Self.isHistoryObjectID(object),
-              let sizeText = String(bytes: header[3], encoding: .utf8),
-              let size = Int(sizeText), size >= 0 else { return nil }
+              let sizeText = String(bytes: header[3], encoding: .utf8) else { return nil }
+        guard let size = Int(sizeText), size >= 0 else {
+            throw commandError(args: ["ls-tree"], exitCode: 0, detail: "git returned an invalid upstream history blob size")
+        }
         return HistoryTreeFile(path: relative, blob: HistoryBlob(object: object, size: size),
                                isExecutable: header[0] == Data("100755".utf8))
     }
