@@ -227,9 +227,9 @@ extension SkillPreviewLayoutTests {
         return try XCTUnwrap(texts[value])
     }
 
-    /// Drain the live host's render work, including preference transactions and AppKit overlays. The async render
-    /// probe rejects pending transactions and work that still requires the main thread; equal AX readings cannot
-    /// establish that. It checks render readiness, never an expected indent, marker width or bullet position.
+    /// Keep text materialization separate from render acceptance. A full-suite expiry can report
+    /// renderReady=true while marker text is missing; preserve both observations on timeout.
+    /// Neither predicate reads an expected indent, marker width or bullet position.
     private func settledTexts(
         _ values: [String], in host: NSHostingView<AnyView>
     ) async throws -> [String: NSAccessibilityProtocol] {
@@ -245,9 +245,6 @@ extension SkillPreviewLayoutTests {
             return state
         }, {
             host._renderForTest(interval: 0)
-            // Render acceptance did not imply native marker views existed in the failing run.
-            host.layoutSubtreeIfNeeded()
-            host.displayIfNeeded()
             let elements = self.elements(in: host)
             found = [:]
             for value in values {
@@ -298,8 +295,6 @@ extension SkillPreviewLayoutTests {
             return state
         }, {
             host._renderForTest(interval: 0)
-            host.layoutSubtreeIfNeeded()
-            host.displayIfNeeded()
             renderReady = host._renderAsyncForTest(interval: 0)
             guard renderReady else { return false }
             do {

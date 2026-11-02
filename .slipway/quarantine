@@ -1,0 +1,17 @@
+# 2026-11-02, unit 204: failed ordinary full-suite base run 2 and head runs 1, 3, 5 (17.4-17.6 s).
+# renderedTexts expired with renderReady=true, occlusion=8194, missing sized AX marker "1.".
+# Native layout/display draining did not fix it and was withdrawn; no second readiness guess.
+# The 10-27, 10-29, 10-30, 10-31 and 11-02 flake records have no said= message. Still runs nightly.
+PensieveTests/SkillPreviewLayoutTests/testListTextUsesTwoEmIndentAtEveryLevel
+
+# 2026-11-02, unit 204: failed ordinary full-suite base run 2 and head runs 1, 3, 5 (17.4-17.6 s).
+# renderedTexts expired with renderReady=true, occlusion=8194, missing sized AX markers "999.", "1000.", "1001.".
+# Native layout/display draining did not fix it and was withdrawn; no second readiness guess.
+# The 10-27, 10-29, 10-30, 10-31 and 11-02 flake records have no said= message. Still runs nightly.
+PensieveTests/SkillPreviewLayoutTests/testWideNumberedMarkersStayInsideColumn
+
+# 2026-11-02, unit 204: failed ordinary full-suite base run 2 and head runs 1, 3, 5 (17.4-17.6 s).
+# bulletCenter expired with last capture "no gutter pixels"; head renderReady=true, occlusion=8194.
+# Native layout/display draining did not fix it and was withdrawn; no second readiness guess.
+# The 10-27, 10-29, 10-30, 10-31 and 11-02 flake records have no said= message. Still runs nightly.
+PensieveTests/SkillPreviewLayoutTests/testWrappedBulletSitsInsideFirstLine
