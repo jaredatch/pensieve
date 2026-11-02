@@ -59,6 +59,7 @@ final class UpstreamHistoryServiceTests: XCTestCase {
         let path = tempDir + "/repository"
         let result = try rawGit(["init", "--initial-branch=main", path])
         XCTAssertEqual(result.exit, 0, result.stderr)
+        XCTAssertEqual(try rawGit(["-C", path, "config", "uploadpack.allowFilter", "true"]).exit, 0)
         return path
     }
 

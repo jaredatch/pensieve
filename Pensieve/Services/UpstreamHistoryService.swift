@@ -123,6 +123,7 @@ struct UpstreamHistoryGitSnapshot {
     let headCommit: String
     let rows: [UpstreamHistoryGitRow]
     let installedPosition: UpstreamHistoryGitInstalledPosition
+    let hasMoreRows: Bool
     let hasMoreCommits: Bool
     let installedBaseline: UpstreamHistoryBaseline?
 }
@@ -202,8 +203,7 @@ struct UpstreamHistoryService: ScratchRootCleaning {
         let remote = try validatedRemoteAndCoordinates(origin: origin, windowCount: windowCount)
         let commitLimit = try multipliedWindow(requestedCommitWindow, by: windowCount)
         let visibleCount = try multipliedWindow(requestedRowWindow, by: windowCount)
-        let (rowLimit, rowLimitOverflow) = visibleCount.addingReportingOverflow(1)
-        guard !rowLimitOverflow else { throw UpstreamHistoryError.invalidWindow }
+        let rowLimit = visibleCount
         try prepareScratchRoot()
         let sessionRoot = scratchRoot + "/" + UUID().uuidString
         try fileService.createDirectory(at: sessionRoot)
@@ -245,7 +245,7 @@ struct UpstreamHistoryService: ScratchRootCleaning {
             headCommit: snapshot.headCommit,
             rows: Array(rows),
             installedPosition: position,
-            hasOlderHistory: snapshot.rows.count > visibleCount || snapshot.hasMoreCommits,
+            hasOlderHistory: snapshot.hasMoreRows || snapshot.hasMoreCommits,
             installedBaseline: baseline,
             localEdits: edits,
             windowCount: windowCount

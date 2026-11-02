@@ -8,7 +8,7 @@ extension GitService {
         depth: Int
     ) -> [String] {
         [
-            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "\(depth)",
+            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--filter=blob:none", "--depth", "\(depth)",
             "--", remote, remoteRef
         ]
     }
@@ -19,23 +19,24 @@ extension GitService {
         commit: String
     ) -> [String] {
         [
-            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "1",
+            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--filter=blob:none", "--depth", "1",
             "--", remote, commit
         ]
     }
 
     @_disfavoredOverload
     func upstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot {
-        try runOrThrow(["init", "--quiet", request.repositoryPath], in: nil)
+        try runOrThrow(["init", "--quiet", request.repositoryPath], in: nil, environment: Self.historyEnvironment)
         try fetchTrackedRef(request)
+        try prefetchHistoryBlobs(tip: "FETCH_HEAD", request: request)
         try runOrThrow(
             ["-C", request.repositoryPath, "update-ref", "refs/pensieve/upstream", "FETCH_HEAD"],
-            in: nil
+            in: nil, environment: Self.historyEnvironment
         )
 
         let headOutput = try runOrThrow([
             "-C", request.repositoryPath, "rev-parse", "refs/pensieve/upstream^{commit}"
-        ], in: nil)
+        ], in: nil, environment: Self.historyEnvironment)
         let head = headOutput.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         let commits = try historyCommitSHAs(
             at: request.repositoryPath,
@@ -44,7 +45,7 @@ extension GitService {
         let scanned = Array(commits.prefix(request.commitLimit))
         let isShallow = try isShallowRepository(at: request.repositoryPath)
         let hasMoreCommits = commits.count > request.commitLimit || isShallow
-        let rows = try historyRows(scanned, request: request)
+        let (rows, hasMoreRows) = try historyRows(scanned, request: request)
 
         let installed = try resolveInstalledPosition(
             installedCommit: request.installedCommit,
@@ -52,11 +53,12 @@ extension GitService {
             hasMoreCommits: hasMoreCommits,
             request: request
         )
-        let baseline = try baseline(for: installed, request: request)
+        let baseline = installed.baselineAvailable ? try baseline(for: installed.position, request: request) : nil
         return UpstreamHistoryGitSnapshot(
             headCommit: head,
             rows: rows,
-            installedPosition: installed,
+            installedPosition: installed.position,
+            hasMoreRows: hasMoreRows,
             hasMoreCommits: hasMoreCommits,
             installedBaseline: baseline
         )
@@ -65,12 +67,15 @@ extension GitService {
 
 extension GitService {
     func historyRows(_ commits: [String], request: UpstreamHistoryGitRequest) throws
-        -> [UpstreamHistoryGitRow] {
-        try historyLogRecords(
+        -> (rows: [UpstreamHistoryGitRow], hasMoreRows: Bool) {
+        let records = try historyLogRecords(
             commits: commits,
             path: request.path,
             repositoryPath: request.repositoryPath
-        ).prefix(request.rowLimit).map { record in
+        )
+        let visible = Array(records.prefix(request.rowLimit))
+        let texts = try historyRowTexts(visible.map(\.sha), request: request)
+        let rows = zip(visible, texts).map { record, text in
             UpstreamHistoryGitRow(
                 sha: record.sha,
                 author: record.author,
@@ -79,14 +84,37 @@ extension GitService {
                 filesChanged: record.filesChanged,
                 linesAdded: record.linesAdded,
                 linesRemoved: record.linesRemoved,
-                skillMarkdown: try skillMarkdown(
-                    sha: record.sha,
-                    path: request.path,
-                    repositoryPath: request.repositoryPath,
-                    textByteLimit: request.textByteLimit
-                )
+                skillMarkdown: text
             )
         }
+        return (rows, records.count > request.rowLimit)
+    }
+
+    @discardableResult
+    func prefetchHistoryBlobs(tip: String, request: UpstreamHistoryGitRequest,
+                              allowDeclined: Bool = false) throws -> Bool {
+        let output = try runOrThrow([
+            "-C", request.repositoryPath, "rev-list", "--objects", "--full-history", "--missing=print", "--no-object-names",
+            tip, "--", Self.literalPathspec(request.path)
+        ], in: nil, environment: Self.historyEnvironment)
+        let objects = try output.stdout.split(whereSeparator: \Character.isNewline).compactMap { line -> String? in
+            guard line.first == "?" else { return nil }
+            let object = String(line.dropFirst())
+            guard Self.isHistoryObjectID(object) else { throw malformedHistoryBatch() }
+            return object
+        }
+        guard !objects.isEmpty else { return true }
+        let input = try historyInput(objects, repositoryPath: request.repositoryPath)
+        let args = [
+            "-C", request.repositoryPath, "-c", "fetch.negotiationAlgorithm=noop", "fetch", "--no-tags",
+            "--no-write-fetch-head", "--recurse-submodules=no", "--filter=blob:none", "--stdin", "--", request.remote
+        ]
+        let fetched = try runUpstreamHistoryNetwork(args, credential: request.credential, inputPath: input)
+        guard fetched.exit == 0 else {
+            if allowDeclined { return false }
+            throw commandError(fetched, args: args, authenticationRemote: request.remote)
+        }
+        return true
     }
 
     func baseline(
@@ -166,24 +194,8 @@ extension GitService {
         let output = try runOrThrow([
             "-C", repositoryPath, "rev-list", "--max-count", "\(limit)",
             "refs/pensieve/upstream"
-        ], in: nil)
+        ], in: nil, environment: Self.historyEnvironment)
         return output.stdout.split(whereSeparator: \Character.isNewline).map(String.init)
-    }
-
-    func skillMarkdown(
-        sha: String,
-        path: String,
-        repositoryPath: String,
-        textByteLimit: Int
-    ) throws -> UpstreamHistoryText? {
-        let relative = path.isEmpty ? "SKILL.md" : path + "/SKILL.md"
-        let revision = sha + ":" + relative
-        guard try objectExists(revision, at: repositoryPath) else { return nil }
-        let size = try objectSize(revision, at: repositoryPath)
-        guard size <= textByteLimit else { return .tooLarge }
-        let data = try blob(revision, at: repositoryPath)
-        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { return nil }
-        return .text(text)
     }
 
     func resolveInstalledPosition(
@@ -191,51 +203,48 @@ extension GitService {
         scanned: [String],
         hasMoreCommits: Bool,
         request: UpstreamHistoryGitRequest
-    ) throws -> UpstreamHistoryGitInstalledPosition {
+    ) throws -> (position: UpstreamHistoryGitInstalledPosition, baselineAvailable: Bool) {
         if scanned.contains(installedCommit) {
-            return .reachable(pathCommit: try firstPathCommit(
+            return (.reachable(pathCommit: try firstPathCommit(
                 atOrBefore: installedCommit,
                 path: request.path,
                 repositoryPath: request.repositoryPath
-            ))
+            )), true)
         }
-        if !hasMoreCommits { return .notInRefHistory }
+        if !hasMoreCommits { return (.notInRefHistory, false) }
         let fetched = try fetchInstalledCommitIfAvailable(
             installedCommit,
-            remote: request.remote,
-            repositoryPath: request.repositoryPath,
-            credential: request.credential
+            request: request
         )
-        guard fetched else { return .olderThanScan }
+        guard fetched else { return (.olderThanScan, false) }
         if try isAncestor(
             installedCommit,
             of: "refs/pensieve/upstream",
             at: request.repositoryPath
         ) {
-            return .reachable(pathCommit: try firstPathCommit(
+            return (.reachable(pathCommit: try firstPathCommit(
                 atOrBefore: installedCommit,
                 path: request.path,
                 repositoryPath: request.repositoryPath
-            ))
+            )), true)
         }
-        return .olderThanScan
+        return (.olderThanScan, true)
     }
 
     func fetchInstalledCommitIfAvailable(
         _ commit: String,
-        remote: String,
-        repositoryPath: String,
-        credential: GitCredential?
+        request: UpstreamHistoryGitRequest
     ) throws -> Bool {
-        if try objectExists(commit + "^{commit}", at: repositoryPath) { return true }
+        if try objectExists(commit + "^{commit}", at: request.repositoryPath) { return true }
         let args = Self.upstreamHistoryCommitFetchArguments(
-            repositoryPath: repositoryPath,
-            remote: remote,
+            repositoryPath: request.repositoryPath,
+            remote: request.remote,
             commit: commit
         )
-        let output = try runUpstreamHistoryNetwork(args, credential: credential)
-        if output.exit == 0 { return true }
-        return false
+        let output = try runUpstreamHistoryNetwork(args, credential: request.credential)
+        guard output.exit == 0 else { return false }
+        // A declined object prefetch leaves the installed baseline unavailable, like a declined SHA fetch.
+        return try prefetchHistoryBlobs(tip: commit, request: request, allowDeclined: true)
     }
 
     func firstPathCommit(atOrBefore commit: String, path: String,
@@ -245,7 +254,7 @@ extension GitService {
             "-C", repositoryPath, "log", "--first-parent"
         ] + Self.upstreamHistoryFirstParentDiffArguments + [
             "--no-patch", "--format=%H", "-1", commit, "--", pathspec
-        ], in: nil)
+        ], in: nil, environment: Self.historyEnvironment)
         let value = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
     }
@@ -253,7 +262,7 @@ extension GitService {
     func isAncestor(_ ancestor: String, of descendant: String, at repositoryPath: String) throws -> Bool {
         let output = try run([
             "-C", repositoryPath, "merge-base", "--is-ancestor", ancestor, descendant
-        ], in: nil)
+        ], in: nil, environment: Self.historyEnvironment)
         if output.exit == 0 { return true }
         if output.exit == 1 { return false }
         throw commandError(output, args: ["merge-base"])
@@ -262,7 +271,7 @@ extension GitService {
     func isShallowRepository(at repositoryPath: String) throws -> Bool {
         let output = try runOrThrow([
             "-C", repositoryPath, "rev-parse", "--is-shallow-repository"
-        ], in: nil)
+        ], in: nil, environment: Self.historyEnvironment)
         return output.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 

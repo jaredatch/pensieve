@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/GitService+UpstreamHistory.swift
++++ b/Pensieve/Services/GitService+UpstreamHistory.swift
+@@ -19,7 +19,7 @@
+         commit: String
+     ) -> [String] {
+         [
+-            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--filter=blob:none", "--depth", "1",
++            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--no-filter", "--depth", "1",
+             "--", remote, commit
+         ]
+     }

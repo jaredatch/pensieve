@@ -191,7 +191,7 @@ extension UpstreamHistoryServiceTests {
                 headCommit: sha,
                 rows: [hostile],
                 installedPosition: .reachable(pathCommit: sha),
-                hasMoreCommits: false,
+                hasMoreRows: false, hasMoreCommits: false,
                 installedBaseline: .files([])
             )
             let git = RecordingUpstreamHistoryGit(result: .success(snapshot))
@@ -299,6 +299,7 @@ extension UpstreamHistoryServiceTests {
             headCommit: String(repeating: "c", count: 40),
             rows: [],
             installedPosition: .notInRefHistory,
+            hasMoreRows: false,
             hasMoreCommits: false,
             installedBaseline: nil
         )

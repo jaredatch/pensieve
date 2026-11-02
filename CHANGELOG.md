@@ -26,6 +26,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- History for a GitHub skill downloads only that skill's files, so large repositories load far faster.
+
 - A damaged synced library now keeps your edits waiting and offers an explicit repair. Choose Repair in the sidebar, then confirm replacing the damaged file with this Mac's library. A readable file pulled from another Mac also lets the waiting edits save.
 
 - HTTPS sync ignores git credential helpers and other askpass programs. If you relied on one, add an access token in Settings › Sync. You can replace a refused or expired token there, even while a conflict is open.
