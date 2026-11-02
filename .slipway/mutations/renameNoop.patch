@@ -1,0 +1,12 @@
+diff --git b/Pensieve/ViewModels/SkillRenameFlow.swift a/Pensieve/ViewModels/SkillRenameFlow.swift
+index a9141f8..e3b6c3e 100644
+--- b/Pensieve/ViewModels/SkillRenameFlow.swift
++++ a/Pensieve/ViewModels/SkillRenameFlow.swift
+@@ -9,7 +9,6 @@ enum SkillRenameFlow {
+         skill: Skill, to name: String, library: SkillLibraryViewModel, platformVM: PlatformViewModel,
+         projects: [Project], context: ModelContext, persist: (ModelContext) throws -> Void = { try $0.save() }
+     ) -> Bool {
+-        if name == skill.name && SkillStore.slugify(name) == skill.directoryName.lowercased() { return true }
+         guard !library.addsFenced, !library.isWriteFenced(skill) else {
+             library.error = library.addFenceReason ?? "This skill's file can't be read. Relaunch and try again."
+             return false
