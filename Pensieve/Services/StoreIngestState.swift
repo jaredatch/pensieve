@@ -135,11 +135,15 @@ final class StoreIngestState {
         let state = shared(for: context.container)
         state.lock.lock()
         let projections = state.refused.map(\.projection)
+        let queuedCreates = state.edits.compactMap { edit -> SkillOverlay? in
+            guard case .createSkill(let overlay) = edit.change else { return nil }
+            return overlay
+        }
         let preserved = state.preservedPeers
         state.lock.unlock()
-        // A failed create may meet a peer for the first time during a rebuild or a whole-row
+        // A queued or failed create may meet a peer for the first time during a rebuild or a whole-row
         // write. Probe identity here too; HEAD can be current and the queue need not run again.
-        let creates = projections.flatMap(\.fields).compactMap { field -> SkillOverlay? in
+        let creates = queuedCreates + projections.flatMap(\.fields).compactMap { field -> SkillOverlay? in
             if case .change(.createSkill(let original)) = field { return original }
             return nil
         }

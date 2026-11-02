@@ -86,6 +86,44 @@ extension ManifestSaveTests {
         }
     }
 
+    func testDeployWritePreservesThePeerWhileItsLocalCreateIsStillQueued() async throws {
+        let h = try CollisionCreateFixture(committed: true)
+        defer { h.cleanup() }
+        let f = h.f, local = h.local
+        // Sync has pulled the peer; another writer wins the lock before the queued create runs.
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.saves.lockPath))
+        defer { held.release() }
+        try NativeTestWork.run(container: h.context.container) { worker in
+            try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: f.app, context: worker)
+            XCTAssertEqual(try f.manifest.snapshot(from: worker).skills.first { $0.slug == "item" }, local,
+                "The worker's shared rows carry the queued create's local overlay")
+        }
+        held.release()
+        let other = Skill(name: "Other", directoryName: "other")
+        h.context.insert(other)
+        try f.files.writeFile(at: f.app + "/skills/other/SKILL.md",
+            content: "---\nname: Other\ndescription: job\n---\nbody\n")
+        try h.context.save()
+        let dependencies = DeployIntentDependencies.live(
+            identity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
+            stateService: InertMachineStateService(), root: f.app,
+            lockPath: h.saves.lockPath, notifier: {}, reconcile: { _ in BatchResult() })
+        let deploy = DeployMutationService(platformVM: h.platform, dependencies: dependencies)
+        try deploy.setRemote(true, machineID: ProjectIntentHarness.remoteID, projectKey: nil,
+            skill: other, platform: .claudeCode, context: h.context)
+        XCTAssertEqual(h.saves.items.count, 1)
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        try h.assertPeer()
+        XCTAssertTrue(try f.manifest.read(fromRoot: f.app).deployIntents.contains {
+            $0.machineID == ProjectIntentHarness.remoteID && $0.skillSlug == "other"
+        }, "Exercise a real deployment-intent publication")
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.library.error, CollisionCreateFixture.message("item"))
+        XCTAssertEqual(h.saves.refused.count, 1)
+        try h.assertPeer()
+        try h.assertLocal()
+    }
+
     func testCreatesPreservePeerOverlaysAcrossQueuedAndRefusedRebuilds() async throws {
         for refusedFirst in [false, true] {
             for committedPeer in [false, true] {
