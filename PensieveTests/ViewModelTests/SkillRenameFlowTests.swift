@@ -22,7 +22,7 @@ final class SkillRenameFlowTests: XCTestCase {
         let root: String
     }
 
-    private func fixture() throws -> Fixture {
+    private func fixture(notifier: SyncStateNotifying? = nil) throws -> Fixture {
         let files = FileService(), root = TestPaths.storeRoot
         try files.createDirectory(at: root)
         addTeardownBlock { try? files.deleteDirectory(at: TestPaths.root) }
@@ -44,7 +44,7 @@ final class SkillRenameFlowTests: XCTestCase {
         let manifest = RecordingDeletionManifest(files: files)
         let saves = ManifestSaveModel(manifest: manifest, root: root, lockPath: TestPaths.syncLockPath, files: files)
         let library = SkillLibraryViewModel(skillStore: store, fileService: files, fileWatchService: watcher,
-            manifestRoot: root, manifestSaves: saves)
+            manifestRoot: root, notifier: notifier ?? SyncStateNotifier.suppressed, manifestSaves: saves)
         library.startWatching(); _ = library.editorBody(for: skill)
         let state = DeployStateStore(fileService: files, appSupportDir: TestPaths.appSupportDir)
         let platform = PlatformViewModel(fileService: files, linkService: TestPaths.linkService(fileService: files),
@@ -244,6 +244,111 @@ final class SkillRenameFlowTests: XCTestCase {
 }
 
 extension SkillRenameFlowTests {
+    func testRenameWithTheUnchangedNameWritesNothing() async throws {
+        var notifications = 0, persists = 0
+        let f = try fixture(notifier: { notifications += 1 })
+        let persist: (ModelContext) throws -> Void = { persists += 1; try $0.save() }
+        let counts = { [notifications, persists] }
+        try await assertUnchangedRename(f, skill: f.skill, persist: persist, counts: counts)
+        do {
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: TestPaths.syncLockPath))
+            defer { lock.release() }
+            try await assertUnchangedRename(f, skill: f.skill, persist: persist, counts: counts)
+        }
+        let draft = original.replacingOccurrences(of: "The body.", with: "Unsaved body.")
+        f.library.noteEditorChanged(f.skill, body: draft)
+        XCTAssertTrue(f.library.hasUnsavedChanges(for: f.skill))
+        try await assertUnchangedRename(f, skill: f.skill, persist: persist, counts: counts)
+        f.library.discardDraft(f.skill)
+        f.library.error = "Keep this error"
+        try await assertUnchangedRename(f, skill: f.skill, persist: persist, counts: counts)
+        XCTAssertEqual(f.library.error, "Keep this error")
+        f.library.error = nil
+        let unsafe = "---\nname: X\ndescription: |\n  a\u{2028}  ---\u{2028}  name: hidden\u{2028}  ---\u{2028}  end\n"
+            + "license: MIT\n---\n\nBody\n"
+        try f.store.writeBody(directoryName: "alpha", body: unsafe)
+        try await assertUnchangedRename(f, skill: f.skill, persist: persist, counts: counts)
+        try f.store.writeBody(directoryName: "alpha", body: original)
+        f.library.refreshQuarantine(context: f.context, fetch: { _ in throw DeletionTestError() })
+        XCTAssertTrue(f.library.libraryUnavailable)
+        try await assertUnchangedRename(f, skill: f.skill, persist: persist, counts: counts)
+        f.library.refreshQuarantine(context: f.context)
+        XCTAssertFalse(f.library.libraryUnavailable)
+        try await assertUnchangedRenameBoundaries(f, persist: persist, counts: counts)
+    }
+
+    private func assertUnchangedRename(_ f: Fixture, skill: Skill,
+                                       persist: (ModelContext) throws -> Void, counts: () -> [Int],
+                                       file: StaticString = #filePath, line: UInt = #line) async throws {
+        let name = skill.name, slug = skill.directoryName, updatedAt = skill.updatedAt
+        let bytes = try f.store.readData(directoryName: slug)
+        let state = try f.state.read()
+        let intents = try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key).sorted()
+        let memberships = f.category.skillSlugs
+        let artifacts = try f.pairs.map { pair in
+            let artifact = path(f, slug: "alpha", pair: pair)
+            return pair.0.usesSymlinks ? Data(try f.files.symlinkTarget(at: artifact).utf8)
+                : try f.files.readData(at: artifact)
+        }
+        let draft = f.library.drafts[slug]?.body
+        let unsaved = f.library.hasUnsavedChanges(for: skill), error = f.library.error
+        let fingerprint = f.library.lastWrittenBody[slug], revision = f.library.appWriteRevision
+        let beforeCounts = counts()
+        XCTAssertTrue(SkillRenameFlow.rename(skill: skill, to: name, library: f.library,
+            platformVM: f.platform, projects: f.projects, context: f.context, persist: persist), file: file, line: line)
+        XCTAssertEqual(try f.store.readData(directoryName: slug), bytes, file: file, line: line)
+        XCTAssertEqual(skill.name, name, file: file, line: line)
+        XCTAssertEqual(skill.directoryName, slug, file: file, line: line)
+        XCTAssertEqual(skill.updatedAt, updatedAt, file: file, line: line)
+        XCTAssertEqual(f.library.drafts[slug]?.body, draft, file: file, line: line)
+        XCTAssertEqual(f.library.hasUnsavedChanges(for: skill), unsaved, file: file, line: line)
+        XCTAssertEqual(f.library.error, error, file: file, line: line)
+        XCTAssertEqual(try f.state.read(), state, file: file, line: line)
+        XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key).sorted(), intents,
+            file: file, line: line)
+        XCTAssertEqual(f.category.skillSlugs, memberships, file: file, line: line)
+        for (index, pair) in f.pairs.enumerated() {
+            let artifact = path(f, slug: "alpha", pair: pair)
+            let after = pair.0.usesSymlinks ? Data(try f.files.symlinkTarget(at: artifact).utf8)
+                : try f.files.readData(at: artifact)
+            XCTAssertEqual(after, artifacts[index], file: file, line: line)
+        }
+        XCTAssertEqual(try f.files.readData(at: f.store.baseDir + "/alpha/scripts/run.sh"), script, file: file, line: line)
+        XCTAssertTrue(try XCTUnwrap(f.library.manifestSaves).items.isEmpty, file: file, line: line)
+        XCTAssertEqual(f.library.lastWrittenBody[slug], fingerprint, file: file, line: line)
+        XCTAssertEqual(counts(), beforeCounts, file: file, line: line)
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        XCTAssertEqual(f.library.appWriteRevision, revision, file: file, line: line)
+    }
+
+    private func assertUnchangedRenameBoundaries(_ f: Fixture, persist: (ModelContext) throws -> Void,
+                                                 counts: () -> [Int]) async throws {
+        _ = try f.store.createSkill(name: "temporary", description: "Alpha's job", body: "The body.")
+        try f.store.renameSkill(directoryName: "temporary", to: "MySkill")
+        try f.store.writeBody(directoryName: "MySkill", body: original.replacingOccurrences(of: "alpha", with: "MySkill"))
+        let capitalized = Skill(name: "MySkill", skillDescription: "Alpha's job", directoryName: "MySkill")
+        f.context.insert(capitalized); try f.context.save()
+        try await assertUnchangedRename(f, skill: capitalized, persist: persist, counts: counts)
+        let folders = try f.files.listDirectory(at: f.store.baseDir)
+        XCTAssertTrue(folders.contains("MySkill")); XCTAssertFalse(folders.contains("myskill"))
+
+        _ = try f.store.createSkill(name: "my skill", description: "Alpha's job", body: "The body.")
+        try f.store.renameSkill(directoryName: "my-skill", to: "my_skill")
+        let legacy = Skill(name: "my skill", skillDescription: "Alpha's job", directoryName: "my_skill")
+        f.context.insert(legacy); try f.context.save()
+        XCTAssertTrue(SkillRenameFlow.rename(skill: legacy, to: "my skill", library: f.library,
+            platformVM: f.platform, projects: f.projects, context: f.context, persist: persist), f.library.error ?? "")
+        XCTAssertEqual(legacy.name, "my skill"); XCTAssertEqual(legacy.directoryName, "my-skill")
+        XCTAssertTrue(f.files.directoryExists(at: f.store.baseDir + "/my-skill"))
+        XCTAssertFalse(f.files.directoryExists(at: f.store.baseDir + "/my_skill"))
+        await f.library.manifestSaves?.waitUntilIdle()
+
+        let beforeCounts = counts()
+        XCTAssertTrue(rename(f, to: "Alpha!", persist: persist), f.library.error ?? "")
+        XCTAssertEqual(SkillParser.parse(try f.store.readBody(directoryName: "alpha"), retainingBOM: true).name, "Alpha!")
+        XCTAssertEqual(counts(), beforeCounts.map { $0 + 1 })
+    }
+
     private func assertCaseOnlyRenameKeepsOwnFolder(_ f: Fixture) throws {
         _ = try f.store.createSkill(name: "temporary", description: "Alpha's job", body: "The body.")
         try f.store.renameSkill(directoryName: "temporary", to: "MySkill")
