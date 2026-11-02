@@ -237,7 +237,13 @@ extension SkillPreviewLayoutTests {
         var renderReady = false
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Rendered text \(values) must finish hosted layout",
-                             diagnostics: { "renderReady=\(renderReady) | \(self.hostedLayoutDescription(host))" }, {
+                             diagnostics: {
+            let state = "renderReady=\(renderReady) occlusion=\(host.window?.occlusionState.rawValue ?? 0)"
+                + " missing=\(values.filter { found[$0] == nil }) wait=renderedTexts"
+                + " | \(self.hostedLayoutDescription(host))"
+            XCTFail(state)
+            return state
+        }, {
             host._renderForTest(interval: 0)
             let elements = self.elements(in: host)
             found = [:]
@@ -278,11 +284,19 @@ extension SkillPreviewLayoutTests {
     ) async throws -> (center: CGFloat, firstLine: CGRect) {
         var capture: (center: CGFloat, firstLine: CGRect)?
         var lastError: Error?
+        var renderReady = false
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "The real bullet must produce visible gutter pixels",
-                             diagnostics: { "\(String(describing: lastError)) | \(self.hostedLayoutDescription(host))" }, {
+                             diagnostics: {
+            let state = "renderReady=\(renderReady) occlusion=\(window.occlusionState.rawValue) missing=[]"
+                + " lastCapture=\(lastError.map { String(describing: $0) } ?? "not attempted") wait=bulletCenter"
+                + " | \(self.hostedLayoutDescription(host))"
+            XCTFail(state)
+            return state
+        }, {
             host._renderForTest(interval: 0)
-            guard host._renderAsyncForTest(interval: 0) else { return false }
+            renderReady = host._renderAsyncForTest(interval: 0)
+            guard renderReady else { return false }
             do {
                 capture = try self.bulletCenterOnce(in: host, window: window, item: item)
                 return true
