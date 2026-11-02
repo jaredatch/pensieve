@@ -1,0 +1,4 @@
+paths = Pensieve/ViewModels/SkillRenameFlow.swift PensieveTests/ViewModelTests/SkillRenameFlowTests.swift docs/SPEC.md .slipway/mutations/renameNoop.patch
+risk = Pensieve/ViewModels/SkillRenameFlow.swift
+check.noop = tests PensieveTests/SkillRenameFlowTests/testRenameWithTheUnchangedNameWritesNothing
+mutation.noop = .slipway/mutations/renameNoop.patch
