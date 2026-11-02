@@ -13,11 +13,7 @@ enum SkillDeletionFlow {
         presentation: SkillLibraryViewModel.DeletionPresentation = .init()
     ) -> Bool {
         defer { if presentation.presentsInWindow { library.deletionNotice = presentation.notice } }
-        guard !library.libraryUnavailable else {
-            presentation.notice = .failed(
-                "Pensieve couldn't read the skill library, so nothing was changed. Relaunch and try again.")
-            return false
-        }
+        guard canDelete(skill, library: library, presentation: presentation) else { return false }
 
         let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence: {
             try platformVM.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
@@ -65,6 +61,23 @@ enum SkillDeletionFlow {
         deletionOutcome = outcome
         let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, presentation: presentation)
+    }
+
+    private static func canDelete(_ skill: Skill, library: SkillLibraryViewModel,
+                                  presentation: SkillLibraryViewModel.DeletionPresentation) -> Bool {
+        guard !library.libraryUnavailable else {
+            presentation.notice = .failed(
+                "Pensieve couldn't read the skill library, so nothing was changed. Relaunch and try again.")
+            return false
+        }
+        guard library.manifestSaves?.items.contains(where: { item in
+            guard case .createSkill(let overlay) = item.change else { return false }
+            return overlay.slug == skill.directoryName
+        }) != true else {
+            presentation.notice = .failed("Pensieve is still saving this skill. Try deleting it again in a moment.")
+            return false
+        }
+        return true
     }
 
     private static func prepareRetirement(_ skill: Skill, library: SkillLibraryViewModel,
