@@ -5,7 +5,7 @@
      ) -> [String] {
          [
 -            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--filter=blob:none", "--depth", "1",
-+            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "1",
++            "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--no-filter", "--depth", "1",
              "--", remote, commit
          ]
      }
