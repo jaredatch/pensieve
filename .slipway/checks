@@ -1,2 +1,0 @@
-paths = PensieveTests/ViewTests/SkillPreviewLayoutTests.swift PensieveTests/ViewTests/SkillPreviewLinkHostTests.swift PensieveTests/AppTests/AppRuntimeStartupTests.swift script/cli_launch_tests.py script/cli_launch_fixture.swift .slipway/quarantine
-behavior = none
