@@ -226,14 +226,16 @@ extension UpstreamHistoryServiceTests {
 
     private func decodedHistoricalContent(_ bytes: Data) throws -> UpstreamHistoryFileContent {
         let repository = try makeRepository()
-        let url = URL(fileURLWithPath: tempDir + "/decoded-history.txt")
-        try bytes.write(to: url)
-        let result = try rawGit(["-C", repository, "hash-object", "--no-filters", "-w", "--", url.path])
-        XCTAssertEqual(result.exit, 0, result.stderr)
-        return try GitService(fileService: fileService,
-            askpassHelperPath: TestPaths.gitAskpassHelperPath).historicalContent(
-            object: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
-            size: bytes.count, repositoryPath: repository, textByteLimit: UpstreamHistoryService.textByteLimit
-        )
+        defer { try? fileService.deleteDirectory(at: repository) }
+        try write("SKILL.md", data: bytes, in: repository)
+        let commit = try commit(repository, message: "decoded history")
+        let baseline = try GitService(fileService: fileService,
+            askpassHelperPath: TestPaths.gitAskpassHelperPath).installedBaseline(
+                commit: commit, path: "", repositoryPath: repository,
+                textByteLimit: UpstreamHistoryService.textByteLimit,
+                fileLimit: UpstreamHistoryService.baselineFileLimit,
+                byteLimit: UpstreamHistoryService.baselineByteLimit
+            )
+        return try XCTUnwrap(baseline?.files?.first?.content)
     }
 }

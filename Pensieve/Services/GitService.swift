@@ -203,7 +203,8 @@ struct GitService: GitServiceProtocol {
     var storeState: StoreOperationState?
     private var commandLocale: String?
     let askpassHelperPath: String
-    typealias UpstreamHistoryNetworkRunner = ([String], GitCredential?) throws -> GitOutput
+    static let historyEnvironment = ["GIT_NO_LAZY_FETCH": "1"]
+    typealias UpstreamHistoryNetworkRunner = ([String], GitCredential?, String?) throws -> GitOutput
     private let upstreamHistoryNetworkRunner: UpstreamHistoryNetworkRunner?
 
     /// The caller can place the secret-free helper beside its own application state.
@@ -371,32 +372,36 @@ struct GitService: GitServiceProtocol {
 
     func runUpstreamHistoryNetwork(
         _ args: [String],
-        credential: GitCredential?
+        credential: GitCredential?,
+        inputPath: String? = nil
     ) throws -> GitOutput {
         if let upstreamHistoryNetworkRunner {
-            return try upstreamHistoryNetworkRunner(args, credential)
+            return try upstreamHistoryNetworkRunner(args, credential, inputPath)
         }
-        return try run(args, in: nil, credential: credential)
+        return try run(args, in: nil, credential: credential, inputPath: inputPath, environment: Self.historyEnvironment)
     }
 
     @discardableResult
     func runData(
         _ args: [String], in workingDir: String?, credential: GitCredential? = nil, storeRules: Bool = false,
+        inputPath: String? = nil, environment: [String: String] = [:],
         file: StaticString = #fileID, line: UInt = #line
     ) throws
         -> GitDataOutput {
         try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performRunData(args, in: workingDir, credential: credential, storeRules: storeRules, file: file, line: line)
+            try performRunData(args, in: workingDir, credential: credential, storeRules: storeRules,
+                               file: file, line: line, inputPath: inputPath, environment: environment)
         }
     }
 
     private func performRunData(
         _ args: [String], in workingDir: String?, credential: GitCredential?, storeRules: Bool,
-        file: StaticString, line: UInt
+        file: StaticString, line: UInt, inputPath: String? = nil, environment additions: [String: String] = [:]
     ) throws -> GitDataOutput {
         GitThreadGuard.check(file: file, line: line)
         try GitCancellation.check()
         var environment = try childEnvironment(credential: credential)
+        environment.merge(additions) { _, value in value }
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
         // Abort recovery recognizes one diagnostic; keep its wording deterministic.
         if let commandLocale { environment["LC_ALL"] = commandLocale }
@@ -407,7 +412,7 @@ struct GitService: GitServiceProtocol {
         // configures elsewhere in git or curl can still apply, even with a Pensieve token.
         let arguments = ["-c", "credential.helper=", "-c", "credential.sanitizePrompt=true"] + configuredArguments
         let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
-                                   environment: environment)
+                                   environment: environment, inputPath: inputPath)
         #if GIT_PROCESS_PROBE
         child.probeHooks = probeHooks
         probeHooks?.started(child.pid)
@@ -434,9 +439,10 @@ struct GitService: GitServiceProtocol {
     /// Run and throw `.commandFailed` on a non-zero exit. For fixture-style ops with no auth surface.
     @discardableResult
     func performRunOrThrow(_ args: [String], in workingDir: String?, credential: GitCredential?,
-                           storeRules: Bool) throws
+                           storeRules: Bool, inputPath: String? = nil, environment: [String: String] = [:]) throws
         -> GitOutput {
-        let r = try run(args, in: workingDir, credential: credential, storeRules: storeRules)
+        let r = try run(args, in: workingDir, credential: credential, storeRules: storeRules,
+                        inputPath: inputPath, environment: environment)
         guard r.exit == 0 else {
             throw commandError(r, args: args)
         }
@@ -882,11 +888,12 @@ extension GitService {
 
     @discardableResult
     func runOrThrow(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
-                    storeRules: Bool = false,
+                    storeRules: Bool = false, inputPath: String? = nil, environment: [String: String] = [:],
                     file: StaticString = #fileID, line: UInt = #line) throws
         -> GitOutput {
         try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performRunOrThrow(args, in: workingDir, credential: credential, storeRules: storeRules)
+            try performRunOrThrow(args, in: workingDir, credential: credential, storeRules: storeRules,
+                                  inputPath: inputPath, environment: environment)
         }
     }
 

@@ -8,6 +8,7 @@ extension UpstreamHistoryServiceTests {
                 headCommit: String(repeating: "a", count: 40),
                 rows: [],
                 installedPosition: .notInRefHistory,
+                hasMoreRows: false,
                 hasMoreCommits: false,
                 installedBaseline: nil
             )))
@@ -23,7 +24,7 @@ extension UpstreamHistoryServiceTests {
 
             let request = try XCTUnwrap(git.requests.first)
             XCTAssertEqual(request.commitLimit, 200)
-            XCTAssertEqual(request.rowLimit, 21)
+            XCTAssertEqual(request.rowLimit, 20)
             XCTAssertEqual(request.textByteLimit, 256 * 1_024)
             XCTAssertEqual(request.baselineFileLimit, 512)
             XCTAssertEqual(request.baselineByteLimit, 8 * 1_024 * 1_024)
@@ -116,9 +117,10 @@ extension UpstreamHistoryServiceTests {
             let git = GitService(
                 fileService: fileService,
                 askpassHelperPath: TestPaths.gitAskpassHelperPath,
-                upstreamHistoryNetworkRunner: { args, credential in
+                upstreamHistoryNetworkRunner: { args, credential, inputPath in
                     invocations.append((args, credential))
-                    return try executor.run(args, in: nil, credential: credential)
+                    return try executor.run(args, in: nil, credential: credential, inputPath: inputPath,
+                                            environment: GitService.historyEnvironment)
                 }
             )
 
@@ -136,7 +138,7 @@ extension UpstreamHistoryServiceTests {
                 credential: .sshAgent
             ))
 
-            XCTAssertEqual(invocations.count, 2)
+            XCTAssertEqual(invocations.count, 4)
             for (args, credential) in invocations {
                 let terminator = try XCTUnwrap(args.lastIndex(of: "--"))
                 XCTAssertEqual(args[args.index(after: terminator)], remote)
@@ -151,20 +153,19 @@ extension UpstreamHistoryServiceTests {
             let installed = try revision("HEAD~3", in: repository)
             let remote = URL(fileURLWithPath: repository).absoluteString
             let executor = GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath)
-            var networkCall = 0
             let git = GitService(
                 fileService: fileService,
                 askpassHelperPath: TestPaths.gitAskpassHelperPath,
-                upstreamHistoryNetworkRunner: { args, credential in
-                    networkCall += 1
-                    if networkCall == 2 {
+                upstreamHistoryNetworkRunner: { args, credential, inputPath in
+                    if args.last == installed {
                         return GitService.GitOutput(
                             stdout: "",
                             stderr: "fatal: server declined the object in unfamiliar words",
                             exit: 128
                         )
                     }
-                    return try executor.run(args, in: nil, credential: credential)
+                    return try executor.run(args, in: nil, credential: credential, inputPath: inputPath,
+                                            environment: GitService.historyEnvironment)
                 }
             )
 

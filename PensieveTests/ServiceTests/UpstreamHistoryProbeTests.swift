@@ -83,7 +83,7 @@ extension UpstreamHistoryServiceTests {
             var capturedArgs: [String] = []
             var capturedCredential: GitCredential?
             let git = GitService(fileService: fileService,
-                                 askpassHelperPath: TestPaths.gitAskpassHelperPath) { args, suppliedCredential in
+                                 askpassHelperPath: TestPaths.gitAskpassHelperPath) { args, suppliedCredential, _ in
                 capturedArgs = args
                 capturedCredential = suppliedCredential
                 return GitService.GitOutput(
@@ -108,6 +108,7 @@ extension UpstreamHistoryServiceTests {
             headCommit: String(repeating: "a", count: 40),
             rows: [],
             installedPosition: .notInRefHistory,
+            hasMoreRows: false,
             hasMoreCommits: false,
             installedBaseline: nil
         )

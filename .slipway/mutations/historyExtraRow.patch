@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/UpstreamHistoryService.swift
++++ b/Pensieve/Services/UpstreamHistoryService.swift
+@@ -203,7 +203,7 @@
+         let remote = try validatedRemoteAndCoordinates(origin: origin, windowCount: windowCount)
+         let commitLimit = try multipliedWindow(requestedCommitWindow, by: windowCount)
+         let visibleCount = try multipliedWindow(requestedRowWindow, by: windowCount)
+-        let rowLimit = visibleCount
++        let rowLimit = visibleCount + 1
+         try prepareScratchRoot()
+         let sessionRoot = scratchRoot + "/" + UUID().uuidString
+         try fileService.createDirectory(at: sessionRoot)
