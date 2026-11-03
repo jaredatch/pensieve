@@ -128,15 +128,31 @@ enum ManifestChange {
     }
 }
 
-/// A refused create's rename moves only this Mac's deployment intent. The folder and row
-/// have already moved, so retain this plain edit alongside the create if publication fails.
+/// A refused create's rename scopes peer-owned names to this Mac's intents. Carried names
+/// also move memberships and other machines' intents, using the window's current assignments.
 struct ManifestLocalIntentMove: Codable {
     let oldSlugs: Set<String>
     let newSlug: String
     let machineID: String
+    let carriedSlugs: Set<String>
+
+    init(oldSlugs: Set<String>, newSlug: String, machineID: String, carriedSlugs: Set<String> = []) {
+        self.oldSlugs = oldSlugs
+        self.newSlug = newSlug
+        self.machineID = machineID
+        self.carriedSlugs = carriedSlugs.intersection(oldSlugs)
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(oldSlugs: try values.decode(Set<String>.self, forKey: .oldSlugs),
+            newSlug: try values.decode(String.self, forKey: .newSlug),
+            machineID: try values.decode(String.self, forKey: .machineID),
+            carriedSlugs: try values.decodeIfPresent(Set<String>.self, forKey: .carriedSlugs) ?? [])
+    }
 
     enum CodingKeys: String, CodingKey {
-        case oldSlugs = "old_slugs", newSlug = "new_slug", machineID = "machine_id"
+        case oldSlugs = "old_slugs", newSlug = "new_slug", machineID = "machine_id", carriedSlugs = "carried_slugs"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -144,6 +160,7 @@ struct ManifestLocalIntentMove: Codable {
         try values.encode(oldSlugs.sorted(), forKey: .oldSlugs)
         try values.encode(newSlug, forKey: .newSlug)
         try values.encode(machineID, forKey: .machineID)
+        try values.encode(carriedSlugs.sorted(), forKey: .carriedSlugs)
     }
 
     func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
@@ -153,6 +170,35 @@ struct ManifestLocalIntentMove: Codable {
             snapshot.deployIntents[index].skillSlug = newSlug
         }
         for intent in local?.deployIntents ?? [] where intent.skillSlug == newSlug && intent.machineID == machineID {
+            if !snapshot.deployIntents.contains(intent) { snapshot.deployIntents.append(intent) }
+        }
+        if !carriedSlugs.isEmpty { applyCarried(to: &snapshot, local: local) }
+    }
+
+    private func applyCarried(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
+        guard let local else {
+            for index in snapshot.categories.indices {
+                snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map {
+                    carriedSlugs.contains($0) ? newSlug : $0
+                }
+            }
+            for index in snapshot.deployIntents.indices where carriedSlugs.contains(snapshot.deployIntents[index].skillSlug) {
+                snapshot.deployIntents[index].skillSlug = newSlug
+            }
+            return
+        }
+        // Old durable memberships can outlive an unassignment of the new name. Only the
+        // window knows whether the renamed skill still belongs in each category.
+        for index in snapshot.categories.indices {
+            snapshot.categories[index].skillSlugs.removeAll { carriedSlugs.contains($0) }
+            if local.categories.contains(where: {
+                $0.name == snapshot.categories[index].name && $0.skillSlugs.contains(newSlug)
+            }), !snapshot.categories[index].skillSlugs.contains(newSlug) {
+                snapshot.categories[index].skillSlugs.append(newSlug)
+            }
+        }
+        snapshot.deployIntents.removeAll { carriedSlugs.contains($0.skillSlug) }
+        for intent in local.deployIntents where intent.skillSlug == newSlug {
             if !snapshot.deployIntents.contains(intent) { snapshot.deployIntents.append(intent) }
         }
     }

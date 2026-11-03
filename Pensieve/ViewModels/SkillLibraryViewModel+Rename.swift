@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 extension SkillLibraryViewModel {
-    /// A refused create owns its local folder and values, while the old overlay belongs to a peer.
+    /// Publish the current values as a create, retaining each previous name's move scope.
     func publishRenamedCreate(_ skill: Skill, from oldSlug: String, machineID: String?, context: ModelContext) {
         let origin: SkillOrigin
         if skill.installedOriginData != nil { origin = .installed(skill.installedOrigin ?? .empty) } else {
@@ -12,9 +12,11 @@ extension SkillLibraryViewModel {
             scope: skill.scope, tags: skill.tags, cursor: skill.cursorConfig, agents: [], origin: origin)
         let previous = manifestSaves?.refused.first { $0.context === context && $0.createdSkill?.slug == oldSlug }
         let oldSlugs = (previous?.intentMove?.oldSlugs ?? []).union([oldSlug])
+        let carriedSlugs = (previous?.intentMove?.carriedSlugs ?? [])
+            .union(previous?.isCollisionHeld == true ? [] : [oldSlug])
         manifestSaves?.discardRefusedCreate(oldSlug, context: context)
         regenerateManifest(.createSkill(current), context: context, intentMove: machineID.map {
-            ManifestLocalIntentMove(oldSlugs: oldSlugs, newSlug: skill.directoryName, machineID: $0)
+            ManifestLocalIntentMove(oldSlugs: oldSlugs, newSlug: skill.directoryName, machineID: $0, carriedSlugs: carriedSlugs)
         })
     }
 

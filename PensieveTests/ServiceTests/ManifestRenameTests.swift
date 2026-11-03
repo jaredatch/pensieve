@@ -249,3 +249,96 @@ final class ManifestRenameTests: XCTestCase {
         XCTAssertEqual(try fresh.fetch(FetchDescriptor<Pensieve.Category>()).first?.skillSlugs, ["beta-two"])
     }
 }
+
+extension ManifestRenameTests {
+    func testRenamingAWriteRefusedCreateCarriesItsCategoriesAndEveryMacsIntentsToTheNewName() async throws {
+        let h = try CollisionCreateFixture(noPeer: true)
+        defer { h.cleanup() }
+        let category = try await prepareWriteRefused(h)
+        XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error)
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        try assertCarried(h, category: category)
+        let disk = try h.f.manifest.read(fromRoot: h.f.app)
+        assertCarried(disk, local: h.local, category: category)
+        try h.sync()
+        let published = h.f.base + "/write-refused-clone", f = h.f
+        try NativeTestWork.run { try f.git.clone(remote: f.remote, into: published, credential: nil) }
+        assertCarried(try h.f.manifest.read(fromRoot: published), local: h.local, category: category)
+        let clone = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: published, context: clone)
+        let rows = try clone.fetch(FetchDescriptor<Skill>())
+        XCTAssertEqual(rows.map(\.directoryName), ["item-2"])
+        XCTAssertEqual(rows.first?.tags, h.local.tags)
+        XCTAssertEqual(rows.first?.scope, h.local.scope)
+        XCTAssertEqual(rows.first?.importedFrom, nil)
+        XCTAssertEqual(rows.first?.createdAt.timeIntervalSince1970 ?? 0, h.local.createdAt.timeIntervalSince1970, accuracy: 0.001)
+        let cloneCategories = try clone.fetch(FetchDescriptor<Pensieve.Category>())
+        XCTAssertEqual(cloneCategories.first { $0.name == category }?.skillSlugs, ["item-2"])
+    }
+
+    func testAfterARelaunchARenamedWriteRefusedCreateKeepsItsCategoriesAndIntents() async throws {
+        let h = try CollisionCreateFixture(persistent: true, noPeer: true)
+        defer { h.cleanup() }
+        let categoryA = try await prepareWriteRefused(h)
+        let categories = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+        let categoryB = try XCTUnwrap(categories.first { $0.name != categoryA }).name
+        h.recording.failingWrites = 1
+        XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertNotNil(h.library.error)
+        XCTAssertTrue(h.saves.hasRefusedCreate("item-2", context: h.context))
+        XCTAssertFalse(h.saves.hasCollision("item-2", context: h.context))
+        try assertMove(h, carried: ["item"])
+        try await assign(h, category: categoryA, assigned: false)
+        try await assign(h, category: categoryB, assigned: true)
+        let pending = try h.f.manifest.read(fromRoot: h.f.app)
+        XCTAssertEqual(pending.categories.first { $0.name == categoryA }?.skillSlugs, ["item"])
+        XCTAssertEqual(pending.categories.first { $0.name == categoryB }?.skillSlugs, ["item-2"])
+        try await h.relaunchThroughRuntime()
+        try assertCarried(h, category: categoryB)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == categoryA }?.skillSlugs, [])
+        XCTAssertTrue(h.saves.hasRefusedCreate("item-2", context: h.context))
+        XCTAssertFalse(h.saves.hasCollision("item-2", context: h.context))
+        XCTAssertNil(h.library.error)
+        try h.sync()
+        let disk = try h.f.manifest.read(fromRoot: h.f.app)
+        assertCarried(disk, local: h.local, category: categoryB)
+        XCTAssertEqual(disk.categories.first { $0.name == categoryA }?.skillSlugs, [])
+        try await h.relaunchThroughRuntime()
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        XCTAssertEqual(try h.heldSlugs(), [])
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == categoryA }?.skillSlugs, [])
+    }
+
+    func testRenamingACollisionRefusedSkillTwiceCarriesItsOwnCategoriesAndLeavesTheOtherMacsAlone() async throws {
+        let h = try CollisionCreateFixture(persistent: true)
+        defer { h.cleanup() }
+        await h.saves.waitUntilIdle()
+        try h.addOwnIntent()
+        h.recording.failingWrites = 1
+        XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertNotNil(h.library.error)
+        XCTAssertTrue(h.saves.hasRefusedCreate("item-2", context: h.context))
+        XCTAssertFalse(h.saves.hasCollision("item-2", context: h.context))
+        try assertMove(h, carried: [])
+        try h.assertPeer()
+        let category = try XCTUnwrap(h.peer.categories.first).name
+        try await assign(h, category: category, assigned: true)
+        XCTAssertEqual(try h.f.manifest.read(fromRoot: h.f.app).categories.first { $0.name == category }?.skillSlugs,
+            ["item", "item-2"])
+        XCTAssertTrue(h.rename("item-3"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error)
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        try assertMixedChain(h, category: category)
+        XCTAssertEqual(try h.heldSlugs(), [])
+        XCTAssertEqual(try h.preserved(), ["item"])
+        try await h.relaunchThroughRuntime()
+        try h.sync()
+        try assertMixedChain(h, category: category)
+    }
+
+}

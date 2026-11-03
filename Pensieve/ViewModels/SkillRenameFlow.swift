@@ -56,6 +56,7 @@ enum SkillRenameFlow {
         let oldSlug: String
         let newSlug: String
         let refusedCreate: Bool
+        let collision: Bool
         var localMachine: String?
         var original = ""
         var oldName = ""
@@ -72,6 +73,7 @@ enum SkillRenameFlow {
             self.projects = projects; self.context = context
             oldSlug = skill.directoryName
             refusedCreate = library.manifestSaves?.hasRefusedCreate(skill.directoryName, context: context) == true
+            collision = library.manifestSaves?.hasCollision(skill.directoryName, context: context) == true
             let slug = SkillStore.slugify(name)
             newSlug = slug == oldSlug.lowercased() ? oldSlug : slug
         }
@@ -178,7 +180,7 @@ enum SkillRenameFlow {
             guard oldSlug != newSlug else { return }
             skill.directoryName = newSlug
             for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>())
-                where intent.skillSlug == oldSlug && (!refusedCreate || intent.machineID == localMachine) {
+                where intent.skillSlug == oldSlug && (!collision || intent.machineID == localMachine) {
                 context.insert(MachineDeployIntent(machineID: intent.machineID, skillSlug: newSlug,
                     platformRaw: intent.platformRaw, projectKey: intent.projectKey))
                 context.delete(intent)
@@ -190,7 +192,7 @@ enum SkillRenameFlow {
             let removed = Set(planned.map(\.artifactPath))
             for row in try context.fetch(FetchDescriptor<DeployRecord>())
                 where row.skillID == skill.id && removed.contains(row.targetPath) { context.delete(row) }
-            for category in try context.fetch(FetchDescriptor<Category>()) where !refusedCreate {
+            for category in try context.fetch(FetchDescriptor<Category>()) where !collision {
                 category.skillSlugs = category.skillSlugs.map { $0 == oldSlug ? newSlug : $0 }
             }
         }
