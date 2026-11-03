@@ -94,6 +94,54 @@ final class ManifestRenameTests: XCTestCase {
         }
     }
 
+    func testAfterARelaunchRenamingACollisionRefusedSkillKeepsItsValuesAndLeavesTheOtherMacsRecord() async throws {
+        let h = try CollisionCreateFixture(persistent: true)
+        defer { h.cleanup() }
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.library.error, "Another Mac already has a skill named “item”. "
+            + "Rename this skill to keep its tags and scope; they aren't saved until you do.")
+        XCTAssertEqual(try h.heldSlugs(), ["item"])
+        XCTAssertEqual(try h.held().first?["created_at"] as? String, CollisionCreateFixture.writtenDate(h.local.createdAt))
+        try await h.relaunchThroughRuntime()
+        try h.assertLocal()
+        try h.assertPeer()
+        XCTAssertEqual(h.saves.refused.count, 1)
+        XCTAssertTrue(h.saves.hasCollision("item", context: h.context))
+        XCTAssertNil(h.library.error)
+        XCTAssertFalse(StoreIngestState.shared(for: h.context.container).requiresRebuild(
+            at: GitHeadStamp(fileService: h.f.files).state(root: h.f.app)))
+        try h.sync()
+        try h.assertPeer()
+        try h.rebuild()
+        try h.sync()
+        try h.assertPeer()
+        try h.addOwnIntent()
+        XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error)
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        XCTAssertEqual(try h.heldSlugs(), [])
+        XCTAssertEqual(try h.preserved(), ["item"])
+        XCTAssertFalse(h.f.files.directoryExists(at: h.f.app + "/skills/item"))
+        XCTAssertTrue(h.f.files.directoryExists(at: h.f.app + "/skills/item-2"))
+        try h.assertLocal(slug: "item-2")
+        try h.assertPeer()
+        XCTAssertEqual(try h.ownIntents(), ["item-2"])
+        let disk = try h.f.manifest.read(fromRoot: h.f.app)
+        let own = try XCTUnwrap(disk.skills.first { $0.slug == "item-2" })
+        XCTAssertEqual(own.tags, h.local.tags)
+        XCTAssertEqual(own.scope, h.local.scope)
+        XCTAssertEqual(own.origin, h.local.origin)
+        XCTAssertEqual(own.createdAt.timeIntervalSince1970, h.local.createdAt.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(disk.deployIntents.filter { $0.machineID == ProjectIntentHarness.localID }.map(\.skillSlug), ["item-2"])
+        try await h.relaunchThroughRuntime()
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        try h.sync()
+        try h.assertPeer()
+        try h.assertLocal(slug: "item-2")
+        XCTAssertEqual(try h.preserved(), ["item"])
+    }
+
     private func snapshot() -> ManifestSnapshot {
         var origin = InstalledOrigin.empty
         origin.repo = "owner/repo"; origin.path = "skills/alpha"; origin.ref = "main"

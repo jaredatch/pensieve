@@ -816,6 +816,7 @@
 		A760EF96AB632770F2FCC8E3 /* ImportScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3FDC1E61D6E53F8D92E8CB /* ImportScannerTests.swift */; };
 		A7941B13062BA013A7DA3893 /* CLIProjectFileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319E039CD98A4E1429B1286B /* CLIProjectFileService.swift */; };
 		A794272549B835ABC7F590F6 /* AppRuntimeStatusOrderTests+Completion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D52BB22884198779082E61C /* AppRuntimeStatusOrderTests+Completion.swift */; };
+		A85E22C742961524B429E2CE /* ManifestSaveTests+Records.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1748E56E927B2EC9CE9919BF /* ManifestSaveTests+Records.swift */; };
 		A88B248E1C87615659721EDA /* FileService+ImportCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED7DCA88C0FB32F4120FC0D7 /* FileService+ImportCopy.swift */; };
 		A8B448270F527019DA7A7420 /* GitServiceHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC56723324AFD141FEA1BFA6 /* GitServiceHistory.swift */; };
 		A8DD51FD0BCCF6F68002416D /* SyncBytePreservationTests+Crashes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A93E4138BC4E1346BACF258 /* SyncBytePreservationTests+Crashes.swift */; };
@@ -909,6 +910,7 @@
 		BA44B662ED21F9E8E768E4D4 /* MachineDetailModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9602E547E6ED723C54346879 /* MachineDetailModelTests.swift */; };
 		BA452E7F42A4162B48D522DC /* CategorySaveUndoTests+Interleaving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EDD37C3A2D4FF1BA4CB1D05 /* CategorySaveUndoTests+Interleaving.swift */; };
 		BA503B3CACA118715D6A4DE5 /* AppRuntimeStatusOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B40D3C2D013AED2EC01834 /* AppRuntimeStatusOrderTests.swift */; };
+		BADCFC9745D52AEBE63C6CE6 /* RefusedCreateRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6921C1086CDEEE5EB2EAAF2 /* RefusedCreateRecords.swift */; };
 		BB0AC416658C121E42FD6013 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7982E62AE929F29F9978CAF0 /* SyncEngine.swift */; };
 		BB0C64C1BC9C1C60BAB496F0 /* DaemonEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C9EB304DE9F12B133D6393 /* DaemonEndToEndTests.swift */; };
 		BB0F08F25EC29522EC4488CA /* DaemonCLI+Deployed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2DDE8B4F2A8D3EDE5AF947 /* DaemonCLI+Deployed.swift */; };
@@ -969,6 +971,7 @@
 		C5B74D20DA1D002BC0690889 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564305166B0040EFCA588BA3 /* GitService.swift */; };
 		C5DA166DAB5FDE369F344241 /* DeployMutationService+RemoteMutations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E31B17F63FCD82E32605BCF /* DeployMutationService+RemoteMutations.swift */; };
 		C5FAB4CA0056EE08B0CBAA8E /* FileService+ImportCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED7DCA88C0FB32F4120FC0D7 /* FileService+ImportCopy.swift */; };
+		C616BA96E342C316918C23AC /* ManifestSaveModel+Records.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F67E2877669A50C0CAEFA2E /* ManifestSaveModel+Records.swift */; };
 		C629956A95033B2A4A55CB0D /* UpdateCheckServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 707C7924C9CB6A96629FF8DF /* UpdateCheckServiceTests.swift */; };
 		C66618C1498973C0386111D5 /* CursorOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5967E800DA27E6F1E6BF6CAF /* CursorOwnershipTests.swift */; };
 		C66A2D6E79F57B2110BD4F3E /* UpdatesViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF294B905C12F6EFEF53678B /* UpdatesViewModelTests.swift */; };
@@ -1435,6 +1438,7 @@
 		16D33D8EC4963109AA088971 /* CLIFileReads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIFileReads.swift; sourceTree = "<group>"; };
 		16E690AD0D896E2742EC44CC /* SyncModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModelTests.swift; sourceTree = "<group>"; };
 		1742F006905BEB596A4298E3 /* SkillPreviewLinkPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillPreviewLinkPolicyTests.swift; sourceTree = "<group>"; };
+		1748E56E927B2EC9CE9919BF /* ManifestSaveTests+Records.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestSaveTests+Records.swift"; sourceTree = "<group>"; };
 		176538C79FCDF929D3AC1763 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
 		177E1549C93EF13AD034EB04 /* FileWatchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileWatchService.swift; sourceTree = "<group>"; };
 		179F02E167D1C1E0601FA574 /* SkillInstallViewModelTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallViewModelTypes.swift; sourceTree = "<group>"; };
@@ -1690,6 +1694,7 @@
 		4E5D618B7956A6FE43E6A93E /* SkillInstallCrashWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallCrashWindowTests.swift; sourceTree = "<group>"; };
 		4E89EB9C2A710E7611D527A4 /* PlatformViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformViewModelTests.swift; sourceTree = "<group>"; };
 		4F3B84294A43A67E8BC057EF /* CategoryDetailModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryDetailModel.swift; sourceTree = "<group>"; };
+		4F67E2877669A50C0CAEFA2E /* ManifestSaveModel+Records.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestSaveModel+Records.swift"; sourceTree = "<group>"; };
 		50FA30003977B96B0A30A60C /* SkillFenceAndSaveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillFenceAndSaveTests.swift; sourceTree = "<group>"; };
 		516172A8DD98F5BF4581103A /* DeployCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployCommand.swift; sourceTree = "<group>"; };
 		5190F0DD4C3BB93BBC33E64D /* GitService+FastForward.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GitService+FastForward.swift"; sourceTree = "<group>"; };
@@ -2190,6 +2195,7 @@
 		C6458425F1979F3FF7AD0596 /* FileService+Publication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FileService+Publication.swift"; sourceTree = "<group>"; };
 		C6466486E8CCB88077D6B11A /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
 		C6798CCD9744E35660346064 /* ManifestDeployIntentConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDeployIntentConcurrencyTests.swift; sourceTree = "<group>"; };
+		C6921C1086CDEEE5EB2EAAF2 /* RefusedCreateRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefusedCreateRecords.swift; sourceTree = "<group>"; };
 		C70099DB3845C065C1E5F771 /* SkillRenameFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillRenameFlow.swift; sourceTree = "<group>"; };
 		C7090E43C1693A2FA1907B7E /* AppRuntimeTests+RepairLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRuntimeTests+RepairLifecycle.swift"; sourceTree = "<group>"; };
 		C737EFF3958C41171365BE86 /* CategorySaveUndoTests+ExternalChanges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CategorySaveUndoTests+ExternalChanges.swift"; sourceTree = "<group>"; };
@@ -2947,6 +2953,7 @@
 				9CEEBB641A09831B2E6BAC4E /* ProjectRemovalWithdrawal.swift */,
 				0BF9A6E35F0667B07734EDA0 /* RebuildResult.swift */,
 				D27ECC698439DD6D83522492 /* ReconcilerStateFetcher.swift */,
+				C6921C1086CDEEE5EB2EAAF2 /* RefusedCreateRecords.swift */,
 				0AFBC4D16E14809FD65E3013 /* RemoteURLPolicy.swift */,
 				63D9CDA3F387218B9E0ED517 /* ScratchRootCleaning.swift */,
 				1DB1976EF3DA468ACB3BF290 /* SkillDocumentEditing.swift */,
@@ -3218,6 +3225,7 @@
 				B5F07AC63B31A8539E8A29D6 /* ManifestRefusedEdit.swift */,
 				ED0263B09A4E955E42F5AEF4 /* ManifestSaveModel.swift */,
 				78AB910C96179FE7626CD123 /* ManifestSaveModel+Ingest.swift */,
+				4F67E2877669A50C0CAEFA2E /* ManifestSaveModel+Records.swift */,
 				43E83E2EC1E619094847A393 /* ManifestSaveModel+Repair.swift */,
 				26ED8D9EDA8729984655172B /* PlatformViewModel.swift */,
 				0FB233215D58F91345AB3945 /* PlatformViewModel+Removal.swift */,
@@ -3689,6 +3697,7 @@
 				8A282871E560F5FCE2D9BA6F /* ManifestSaveTests+HeadMovement.swift */,
 				FCD4D4701590F1BD9128001B /* ManifestSaveTests+Identity.swift */,
 				0F97F5C09A7A1977FAD180E1 /* ManifestSaveTests+Rebuild.swift */,
+				1748E56E927B2EC9CE9919BF /* ManifestSaveTests+Records.swift */,
 				9D67D84D08D9D8D00ABFDEB7 /* ManifestSaveTests+Refresh.swift */,
 				94AA0773DE451B458240539A /* ManifestSaveTests+RefusedRefresh.swift */,
 				154896B9DDBE18DE15F8B4CA /* ManifestSaveTests+Repair.swift */,
@@ -4479,6 +4488,7 @@
 				7AAD59E0CA57309EA69E6481 /* ManifestSaveTests+HeadMovement.swift in Sources */,
 				A9B0F886ECE4682F1B0E6F2F /* ManifestSaveTests+Identity.swift in Sources */,
 				6B4322CBAF82224213651CCD /* ManifestSaveTests+Rebuild.swift in Sources */,
+				A85E22C742961524B429E2CE /* ManifestSaveTests+Records.swift in Sources */,
 				FBF2FB0607F8A22698C063BD /* ManifestSaveTests+Refresh.swift in Sources */,
 				7491164C2BB8E691E092E145 /* ManifestSaveTests+RefusedRefresh.swift in Sources */,
 				4D88E9CC9EDBE73B06669645 /* ManifestSaveTests+Repair.swift in Sources */,
@@ -5041,6 +5051,7 @@
 				6689B35FF451A058CD43B082 /* ManifestRefusedEdit.swift in Sources */,
 				0313920BB90CA42F1BAC545C /* ManifestRepairAlerts.swift in Sources */,
 				3FBDF06E78D4ADD1285EF13C /* ManifestSaveModel+Ingest.swift in Sources */,
+				C616BA96E342C316918C23AC /* ManifestSaveModel+Records.swift in Sources */,
 				955731F66584E9E80B76B307 /* ManifestSaveModel+Repair.swift in Sources */,
 				C7E5B3378A7EE060C9782BF4 /* ManifestSaveModel.swift in Sources */,
 				8F7A571FE8265BB1FEAE2CFD /* ManifestService+DeployIntents.swift in Sources */,
@@ -5085,6 +5096,7 @@
 				D8212AD6491F83FBA3C2D2DE /* PublishedStringSanitizer.swift in Sources */,
 				607AAA450E1EAB444E7F5120 /* RebuildResult.swift in Sources */,
 				94B5C43DCB7F12E3DDE5A486 /* ReconcilerStateFetcher.swift in Sources */,
+				BADCFC9745D52AEBE63C6CE6 /* RefusedCreateRecords.swift in Sources */,
 				FFB3EFF64E9C1C2DDAB50A3F /* RelatedSkills.swift in Sources */,
 				9189BEF623D6BED577611193 /* RelativeTime.swift in Sources */,
 				7E94E42ECBDB5A06D27EB37B /* RemoteProjectDetailView.swift in Sources */,

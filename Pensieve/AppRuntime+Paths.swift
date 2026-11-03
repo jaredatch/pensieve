@@ -223,7 +223,7 @@ struct AppRuntimePaths {
     ) -> SkillLibraryViewModel {
         let fileService = FileService()
         let saves = ManifestSaveModel(manifest: ManifestService(fileService: fileService),
-            root: storeRoot, lockPath: syncLockPath)
+            root: storeRoot, lockPath: syncLockPath, refusedCreatesPath: runtimePaths.refusedCreatesPath)
         saves.didSave = notifier
         return SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot),

@@ -17,6 +17,10 @@ final class ManifestSaveModel {
     @ObservationIgnored var didSave: SyncStateNotifying = SyncStateNotifier.suppressed
     let lockPath: String
     let root: String
+    let refusedCreatesPath: String?
+    @ObservationIgnored var recordsRequireNewerVersion = false
+    @ObservationIgnored var recordedCreateSlugs: Set<String> = []
+    @ObservationIgnored var preservedPeerSlugs: Set<String> = []
     let manifest: ManifestSnapshotting
     let files: FileServiceProtocol
     private let waitSeconds: TimeInterval
@@ -58,8 +62,9 @@ final class ManifestSaveModel {
     }
 
     init(manifest: ManifestSnapshotting, root: String, lockPath: String,
-         waitSeconds: TimeInterval = 5, files: FileServiceProtocol = FileService(),
+         refusedCreatesPath: String? = nil, waitSeconds: TimeInterval = 5, files: FileServiceProtocol = FileService(),
          log: @escaping (String) -> Void = ManifestSaveModel.logMessage) {
+        self.refusedCreatesPath = refusedCreatesPath
         self.files = files
         self.manifest = manifest
         self.root = root
@@ -88,26 +93,11 @@ final class ManifestSaveModel {
             }, report: report)
         nextOrder += 1
         items.append(item)
+        persistRefusedCreates()
         StoreIngestState.shared(for: context.container).enqueue(change, id: item.id, categoryWindow: categoryEdit?.windowID)
         pendingCount = items.count
         guard worker == nil else { return }
         worker = Task { @MainActor in await self.drain() }
-    }
-
-    func hasRefusedCreate(_ slug: String, context: ModelContext) -> Bool {
-        refused.contains { $0.context === context && $0.createdSkill?.slug == slug }
-    }
-
-    func hasCollision(_ slug: String, context: ModelContext) -> Bool {
-        refused.contains { $0.context === context && $0.createdSkill?.slug == slug && $0.collision != nil }
-    }
-
-    func discardRefusedCreate(_ slug: String, context: ModelContext) {
-        let state = StoreIngestState.shared(for: context.container)
-        for edit in refused where edit.context === context && edit.createdSkill?.slug == slug {
-            if let peer = edit.collision { state.preservePeer(peer.slug) }
-        }
-        refused.removeAll { $0.context === context && $0.targets(slug) }
     }
 
     @MainActor
@@ -193,6 +183,7 @@ final class ManifestSaveModel {
     @MainActor
     private func retainUnsaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
         guard !item.wasHealed else { return false }
+        defer { persistRefusedCreates() }
         if let durable {
             // Creates use creation identity, not the no-op of projecting onto a held slug.
             if case .createSkill = item.change {} else {
@@ -253,6 +244,7 @@ final class ManifestSaveModel {
         }
         guard let durable else { return }
         refused = refused.filter { $0.acknowledge(durable: durable) }
+        persistRefusedCreates()
     }
 
     @MainActor

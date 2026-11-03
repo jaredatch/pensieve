@@ -27,6 +27,11 @@ final class ManifestRefusedEdit {
     let context: ModelContext
     private let original: ManifestChange
     private(set) var collision: SkillOverlay?
+    private var collisionProbePending = false
+    var isCollisionHeld: Bool { collision != nil || collisionProbePending }
+
+    /// A failed launch probe cannot safely admit a rename or delete of the unknown peer's record.
+    func holdUntilReadableProbe() { collisionProbePending = true }
     private var heldBy: SkillOverlay?
     let intentMove: ManifestLocalIntentMove?
 
@@ -86,6 +91,7 @@ final class ManifestRefusedEdit {
     /// Publication can acknowledge cached fields without another main-context read.
     func acknowledge(durable: ManifestSnapshot) -> Bool {
         if let identity = createdSkill ?? heldBy {
+            collisionProbePending = false
             let disk = durable.skills.first { $0.slug == identity.slug }
             collision = disk.flatMap { ManifestService.sameCreation(identity, $0) ? nil : $0 }
             if createdSkill != nil {

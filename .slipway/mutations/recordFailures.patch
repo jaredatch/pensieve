@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/RefusedCreateRecords.swift
++++ b/Pensieve/Services/RefusedCreateRecords.swift
+@@ -36,7 +36,7 @@
+         let decoder = JSONDecoder()
+         guard let probe = try? decoder.decode(SchemaProbe.self, from: data) else { throw ReadError.unreadable }
+         // Probe before decoding the shape, including versions too large to fit in an Int.
+-        guard probe.version <= Double(Self.currentSchemaVersion) else { throw ReadError.unsupportedSchema }
++        guard probe.version <= Double(Self.currentSchemaVersion) else { return Record() }
+         guard let record = try? decoder.decode(Record.self, from: data), record.schemaVersion == Self.currentSchemaVersion,
+               record.held.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) && ManifestService.parseDate($0.createdAt) != nil }),
+               record.preserved.allSatisfy(SkillStore.isPathSafeSlug) else { throw ReadError.unreadable }
