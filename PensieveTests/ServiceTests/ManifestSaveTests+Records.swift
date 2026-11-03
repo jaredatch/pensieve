@@ -3,6 +3,47 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func testRefusedRenameRecordsRemainReadableAcrossTheAddedCarriedSlugsField() throws {
+        let files = FileService()
+        let root = TestTemporaryDirectory.path + "RenameRecordCompatibility-" + UUID().uuidString
+        defer { try? files.deleteDirectory(at: root) }
+        let path = root + "/refused-creates.json"
+        let records = RefusedCreateRecords(path: path, files: files)
+        let move = ManifestLocalIntentMove(oldSlugs: ["peer", "item"], newSlug: "item-2",
+            machineID: ProjectIntentHarness.localID, carriedSlugs: ["item"])
+        let createdAt = "2026-01-01T00:00:00.123Z"
+        try records.write(.init(held: [
+            .init(slug: "item-2", createdAt: createdAt, intentMove: move),
+            .init(slug: "unrelated", createdAt: createdAt, intentMove: nil)
+        ], preserved: ["peer", "unrelated-peer"]))
+        let bytes = try files.readData(at: path)
+        // This is the previous build's required-key shape. Decode the entire file, including
+        // unrelated protection, so an incompatible move cannot hide a whole-record failure.
+        let legacy = try JSONDecoder().decode(LegacyRefusedRecord.self, from: bytes)
+        XCTAssertEqual(legacy.schemaVersion, 1)
+        XCTAssertEqual(legacy.held.map(\.slug), ["item-2", "unrelated"])
+        XCTAssertEqual(legacy.held.map(\.createdAt), [createdAt, createdAt])
+        XCTAssertEqual(legacy.preserved, ["peer", "unrelated-peer"])
+        let legacyMove = try XCTUnwrap(legacy.held.first?.intentMove)
+        XCTAssertEqual(legacyMove.oldSlugs, ["item", "peer"])
+        XCTAssertEqual(legacyMove.newSlug, "item-2")
+        XCTAssertEqual(legacyMove.machineID, ProjectIntentHarness.localID)
+        XCTAssertEqual(try records.read().held.first?.intentMove?.carriedSlugs, ["item"])
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        var held = try XCTUnwrap(json["held"] as? [[String: Any]])
+        var oldMove = try XCTUnwrap(held[0]["intent_move"] as? [String: Any])
+        oldMove.removeValue(forKey: "carried_slugs")
+        held[0]["intent_move"] = oldMove
+        json["held"] = held
+        let legacyBytes = try JSONSerialization.data(withJSONObject: json)
+        try files.writeFile(at: path, content: try XCTUnwrap(String(data: legacyBytes, encoding: .utf8)))
+        let restored = try records.read()
+        XCTAssertEqual(restored.held.map(\.slug), ["item-2", "unrelated"])
+        XCTAssertEqual(restored.preserved, ["peer", "unrelated-peer"])
+        XCTAssertEqual(restored.held.first?.intentMove?.carriedSlugs, [])
+        XCTAssertEqual(restored.held.first?.intentMove?.machineID, ProjectIntentHarness.localID)
+    }
+
     func testAfterARelaunchDeletingACollisionRefusedSkillLeavesTheOtherMacsRecord() async throws {
         for failDelete in [false, true] {
             let h = try CollisionCreateFixture(failDelete: failDelete, persistent: true)
@@ -313,4 +354,25 @@ extension ManifestSaveTests {
         h.library.regenerateManifest(.createSkill(h.local), context: h.context)
         await h.saves.waitUntilIdle()
     }
+}
+
+private struct LegacyRefusedRecord: Decodable {
+    let schemaVersion: Int
+    let held: [LegacyRefusedHeld]
+    let preserved: [String]
+    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", held, preserved }
+}
+
+private struct LegacyRefusedHeld: Decodable {
+    let slug: String
+    let createdAt: String
+    let intentMove: LegacyRefusedMove?
+    enum CodingKeys: String, CodingKey { case slug, createdAt = "created_at", intentMove = "intent_move" }
+}
+
+private struct LegacyRefusedMove: Decodable {
+    let oldSlugs: [String]
+    let newSlug: String
+    let machineID: String
+    enum CodingKeys: String, CodingKey { case oldSlugs = "old_slugs", newSlug = "new_slug", machineID = "machine_id" }
 }
