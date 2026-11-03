@@ -236,13 +236,7 @@ final class CollisionCreateFixture {
     }
 
     func cleanup() {
-        runtime?.commandServer?.stop()
-        library?.stopWatching()
-        runtime = nil
-        skill = nil
-        library = nil
-        saves = nil
-        context = nil
+        quit()
         try? f.files.deleteDirectory(at: f.base)
     }
 
@@ -344,8 +338,11 @@ final class CollisionCreateFixture {
         XCTAssertEqual(current.tags, tags ?? local.tags, file: file, line: line)
         XCTAssertEqual(current.scope, scope ?? local.scope, file: file, line: line)
         XCTAssertEqual(current.origin, local.origin, file: file, line: line)
-        XCTAssertEqual(current.createdAt.timeIntervalSince1970, local.createdAt.timeIntervalSince1970,
-            accuracy: 0.001, file: file, line: line)
+        if persistent {
+            XCTAssertEqual(Self.writtenDate(current.createdAt), Self.writtenDate(local.createdAt), file: file, line: line)
+        } else {
+            XCTAssertEqual(current.createdAt, local.createdAt, file: file, line: line)
+        }
     }
 
     func sync() throws {
