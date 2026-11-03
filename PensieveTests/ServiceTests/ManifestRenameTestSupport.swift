@@ -76,4 +76,13 @@ extension ManifestRenameTests {
         }
     }
 
+    func assertReusedName(_ h: CollisionCreateFixture, category: String, requests: [DeployIntentRecord],
+                          file: StaticString = #filePath, line: UInt = #line) throws {
+        let rows = try h.f.manifest.snapshot(from: h.context)
+        XCTAssertEqual(rows.skills.first { $0.slug == "item" }?.tags, ["replacement"], file: file, line: line)
+        XCTAssertEqual(rows.categories.first { $0.name == category }?.skillSlugs, ["item"], file: file, line: line)
+        XCTAssertEqual(rows.deployIntents.filter { $0.skillSlug == "item" }.sorted { $0.machineID < $1.machineID },
+            requests.sorted { $0.machineID < $1.machineID }, file: file, line: line)
+    }
+
 }

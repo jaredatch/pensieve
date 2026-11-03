@@ -164,18 +164,33 @@ struct ManifestLocalIntentMove: Codable {
     }
 
     func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
+        let reusedSlugs = reusedCarriedSlugs(in: snapshot, local: local)
         for index in snapshot.deployIntents.indices
             where oldSlugs.contains(snapshot.deployIntents[index].skillSlug)
+                && !reusedSlugs.contains(snapshot.deployIntents[index].skillSlug)
                 && snapshot.deployIntents[index].machineID == machineID {
             snapshot.deployIntents[index].skillSlug = newSlug
         }
         for intent in local?.deployIntents ?? [] where intent.skillSlug == newSlug && intent.machineID == machineID {
             if !snapshot.deployIntents.contains(intent) { snapshot.deployIntents.append(intent) }
         }
-        if !carriedSlugs.isEmpty { applyCarried(to: &snapshot, local: local) }
+        if !carriedSlugs.isEmpty {
+            applyCarried(to: &snapshot, local: local, carriedSlugs: carriedSlugs.subtracting(reusedSlugs))
+        }
     }
 
-    private func applyCarried(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
+    /// A whole-row save can publish this creation before the window acknowledges it. Only
+    /// an overlay from another creation makes a carried name belong to a replacement skill.
+    private func reusedCarriedSlugs(in snapshot: ManifestSnapshot, local: ManifestSnapshot?) -> Set<String> {
+        let renamed = local?.skills.first { $0.slug == newSlug } ?? snapshot.skills.first { $0.slug == newSlug }
+        return Set(snapshot.skills.filter {
+            guard carriedSlugs.contains($0.slug) else { return false }
+            guard let renamed else { return true }
+            return !ManifestService.sameCreation($0, renamed)
+        }.map(\.slug))
+    }
+
+    private func applyCarried(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?, carriedSlugs: Set<String>) {
         guard let local else {
             for index in snapshot.categories.indices {
                 snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map {
