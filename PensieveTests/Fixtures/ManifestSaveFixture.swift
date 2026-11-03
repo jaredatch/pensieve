@@ -280,13 +280,14 @@ final class CollisionCreateFixture {
         skill = try context.fetch(FetchDescriptor<Skill>()).first
     }
 
-    func relaunch(failingSnapshots: Int = 0) throws {
+    func relaunch(failingSnapshots: Int = 0, afterManifestRead: (() throws -> Void)? = nil) throws {
         precondition(persistent)
         quit()
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: storeURL))
         context = ModelContext(container)
         recording = RecordingSaveManifest()
         recording.failingSnapshots = failingSnapshots
+        recording.afterRead = afterManifestRead
         saves = ManifestSaveModel(manifest: recording, root: f.app, lockPath: support + "/sync.lock",
             refusedCreatesPath: recordPath, log: { [weak self] in self?.logs.append($0) })
         let files = FaultyFileService(wrapped: f.files, failDeletePath: failDelete ? f.app + "/skills/item" : nil)

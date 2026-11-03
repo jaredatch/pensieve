@@ -23,7 +23,7 @@ extension ManifestSaveModel {
     }
 
     /// Register projections on the window's container before any worker rebuild can replace its rows.
-    /// One failed row snapshot leaves the complete file untouched, including preserved peers.
+    /// A failed row snapshot skips held creates; preserved peers stay registered and the file stays untouched.
     @MainActor
     func restoreRefusedCreates(context: ModelContext) {
         guard let refusedCreatesPath else { return }
@@ -35,23 +35,30 @@ extension ManifestSaveModel {
             return
         }
         guard !record.held.isEmpty || !record.preserved.isEmpty else { return }
-        let local: ManifestSnapshot
-        do { local = try manifest.snapshot(from: context) } catch {
-            log("Couldn't restore refused creates: " + error.localizedDescription)
-            return
-        }
-        let durable: ManifestSnapshot?
-        do { durable = try manifest.read(fromRoot: root) } catch {
-            durable = nil
-            log("Couldn't probe refused creates against the library: " + error.localizedDescription)
-        }
+        let durable = probeLibraryForRecordRestore()
         let state = StoreIngestState.shared(for: context.container)
         for slug in record.preserved where durable.map({ $0.skills.contains { $0.slug == slug } }) ?? true {
             preservedPeerSlugs.insert(slug)
             state.preservePeer(slug)
         }
+        let local: ManifestSnapshot
+        do { local = try manifest.snapshot(from: context) } catch {
+            log("Couldn't restore refused creates: " + error.localizedDescription)
+            return
+        }
         restoreHeldCreates(record.held, local: local, durable: durable, context: context)
         persistRefusedCreates()
+    }
+
+    /// A daemon may be replacing overlays. Contention is an unreadable probe, never evidence
+    /// that a peer's slug disappeared. Release before AppRuntime's launch job takes the same lock.
+    private func probeLibraryForRecordRestore() -> ManifestSnapshot? {
+        guard let lock = SyncLock.tryAcquire(at: lockPath) else { return nil }
+        defer { lock.release() }
+        do { return try manifest.read(fromRoot: root) } catch {
+            log("Couldn't probe refused creates against the library: " + error.localizedDescription)
+            return nil
+        }
     }
 
     private func restoreHeldCreates(_ held: [RefusedCreateRecords.Held], local: ManifestSnapshot,
@@ -71,7 +78,8 @@ extension ManifestSaveModel {
     }
 
     /// Mirror collision-held creates, renamed pending creates and peers kept after rename/delete.
-    /// Ordinary refused creates never enter this file. Previously recorded creates stay until an
+    /// A renamed create also stays here after an ordinary write failure, carrying its intent move.
+    /// Other ordinary refused creates are omitted. Previously recorded creates stay until an
     /// acknowledgement even when a readable probe finds their slug temporarily absent on disk.
     func persistRefusedCreates(excludingPublished: UUID? = nil) {
         guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }

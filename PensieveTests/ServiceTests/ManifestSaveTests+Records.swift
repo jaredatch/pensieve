@@ -85,6 +85,7 @@ extension ManifestSaveTests {
         try await checkRecordedManifestProbes()
         try await checkRecordedIntentMove()
         try await checkPreservedRecordPruning()
+        try await checkRestoreDuringALockedLibraryUpdate()
     }
 
     private func checkStaleRecordIdentities() async throws {
@@ -196,6 +197,44 @@ extension ManifestSaveTests {
         XCTAssertEqual(try h.preserved(), [])
     }
 
+    private func checkRestoreDuringALockedLibraryUpdate() async throws {
+        let h = try CollisionCreateFixture(persistent: true)
+        defer { h.cleanup() }
+        await h.saves.waitUntilIdle()
+        var peer = h.peer
+        var preserved = h.peer.skills[0]
+        preserved.slug = "kept-peer"
+        peer.skills.append(preserved)
+        try h.f.manifest.write(peer, toRoot: h.f.app)
+        try h.writeRecord(held: h.held(), preserved: ["kept-peer"])
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.support + "/sync.lock"))
+        defer { held.release() }
+        // A daemon can temporarily remove overlays while replacing its tree under sync.lock.
+        var partial = peer
+        partial.skills = []
+        try h.f.manifest.write(partial, toRoot: h.f.app)
+        var reads = 0
+        try h.relaunch(afterManifestRead: { reads += 1 })
+        XCTAssertEqual(reads, 0, "A contended launch must not probe the intermediate library")
+        XCTAssertTrue(h.saves.hasCollision("item", context: h.context))
+        XCTAssertEqual(try h.heldSlugs(), ["item"])
+        XCTAssertEqual(try h.preserved(), ["kept-peer"])
+        try h.assertLocal()
+        try h.f.manifest.write(peer, toRoot: h.f.app)
+        held.release()
+        try h.sync()
+        try h.assertPeer()
+        XCTAssertEqual(try h.f.manifest.read(fromRoot: h.f.app).skills.first { $0.slug == "kept-peer" }, preserved)
+        try h.relaunch(afterManifestRead: {
+            reads += 1
+            XCTAssertNil(SyncLock.tryAcquire(at: h.support + "/sync.lock"), "The readable probe must own sync.lock")
+        })
+        XCTAssertEqual(reads, 1)
+        let released = try XCTUnwrap(SyncLock.tryAcquire(at: h.saves.lockPath), "Restore must release before launch rebuild")
+        released.release()
+        XCTAssertTrue(h.saves.hasCollision("item", context: h.context))
+    }
+
     func testAnUnreadableCollisionRecordRestoresNothingAndIsNeverDowngraded() async throws {
         for directory in [false, true] {
             let h = try CollisionCreateFixture(persistent: true)
@@ -242,6 +281,28 @@ extension ManifestSaveTests {
         XCTAssertFalse(h.logs.isEmpty)
         XCTAssertEqual(try h.f.files.readData(at: h.recordPath), bytes)
         XCTAssertEqual(h.skill.tags, h.peer.skills[0].tags, "Failed restore does not block launch rebuild")
+        try await checkFailedRowReadKeepsPreservedPeers()
+    }
+
+    private func checkFailedRowReadKeepsPreservedPeers() async throws {
+        let h = try CollisionCreateFixture(persistent: true)
+        defer { h.cleanup() }
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(h.rename("item-2"))
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.preserved(), ["item"])
+        let bytes = try h.f.files.readData(at: h.recordPath)
+        try h.relaunch(failingSnapshots: 1)
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        XCTAssertFalse(h.logs.isEmpty)
+        XCTAssertEqual(try h.f.files.readData(at: h.recordPath), bytes)
+        try h.assertLocal(slug: "item-2")
+        try h.sync()
+        try h.assertPeer()
+        try h.relaunch()
+        try h.sync()
+        try h.assertPeer()
+        XCTAssertEqual(try h.preserved(), ["item"])
     }
 
     private func submitCollision(_ h: CollisionCreateFixture) async throws {
