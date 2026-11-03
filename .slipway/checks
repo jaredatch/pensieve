@@ -1,0 +1,10 @@
+paths = Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/Services/StoreIngestState.swift Pensieve/Services/RefusedCreateRecords.swift Pensieve/Services/ManifestChange.swift Pensieve/AppRuntime.swift Pensieve/AppRuntime+Paths.swift Pensieve/Utilities/RuntimePaths.swift Pensieve.xcodeproj/project.pbxproj PensieveTests/Fixtures/ManifestSaveFixture.swift PensieveTests/ServiceTests/ManifestSaveTests+Creates.swift PensieveTests/ServiceTests/ManifestSaveTests+Records.swift PensieveTests/ServiceTests/ManifestRenameTests.swift docs/ARCHITECTURE.md docs/SPEC.md CHANGELOG.md .slipway/changelog/210.md .slipway/mutations/
+risk = Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/Services/StoreIngestState.swift Pensieve/Services/RefusedCreateRecords.swift Pensieve/AppRuntime.swift Pensieve/AppRuntime+Paths.swift
+check.relaunchRename = tests PensieveTests/ManifestRenameTests/testAfterARelaunchRenamingACollisionRefusedSkillKeepsItsValuesAndLeavesTheOtherMacsRecord
+mutation.relaunchRename = .slipway/mutations/relaunchRename.patch
+check.relaunchDelete = tests PensieveTests/ManifestSaveTests/testAfterARelaunchDeletingACollisionRefusedSkillLeavesTheOtherMacsRecord
+mutation.relaunchDelete = .slipway/mutations/relaunchDelete.patch
+check.records = tests PensieveTests/ManifestSaveTests/testTheCollisionRecordFollowsTheRefusedCreate
+mutation.records = .slipway/mutations/records.patch
+check.recordFailures = tests PensieveTests/ManifestSaveTests/testAnUnreadableCollisionRecordRestoresNothingAndIsNeverDowngraded
+mutation.recordFailures = .slipway/mutations/recordFailures.patch
