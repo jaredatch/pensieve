@@ -139,6 +139,9 @@ final class ManifestRenameTests: XCTestCase {
         try h.sync()
         try h.assertPeer()
         try h.assertLocal(slug: "item-2")
+        let thirdLaunch = try h.f.manifest.read(fromRoot: h.f.app)
+        XCTAssertEqual(thirdLaunch.skills.first { $0.slug == "item-2" }.map { CollisionCreateFixture.writtenDate($0.createdAt) },
+            CollisionCreateFixture.writtenDate(h.local.createdAt))
         XCTAssertEqual(try h.preserved(), ["item"])
     }
 

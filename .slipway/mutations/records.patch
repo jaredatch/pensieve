@@ -1,7 +1,7 @@
 --- a/Pensieve/ViewModels/ManifestSaveModel+Records.swift
 +++ b/Pensieve/ViewModels/ManifestSaveModel+Records.swift
-@@ -74,7 +74,7 @@
-     /// Ordinary refused creates never enter this file. Previously recorded creates stay until an
+@@ -82,7 +82,7 @@
+     /// Other ordinary refused creates are omitted. Previously recorded creates stay until an
      /// acknowledgement even when a readable probe finds their slug temporarily absent on disk.
      func persistRefusedCreates(excludingPublished: UUID? = nil) {
 -        guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }
