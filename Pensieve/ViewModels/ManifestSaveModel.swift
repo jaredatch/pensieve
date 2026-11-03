@@ -211,7 +211,7 @@ final class ManifestSaveModel {
             && items.contains(where: { $0.id == pending.id }) {
             if case .createSkill = pending.change {
                 pending.presentation.cache(local: try? manifest.snapshot(from: context))
-                pending.presentation.project(onto: &snapshot)
+                pending.presentation.project(onto: &snapshot, knownCreates: knownCreates)
                 continue
             }
             do { try pending.change.validate(in: snapshot) } catch {

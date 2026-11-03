@@ -163,8 +163,8 @@ struct ManifestLocalIntentMove: Codable {
         try values.encode(carriedSlugs.sorted(), forKey: .carriedSlugs)
     }
 
-    func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
-        let reusedSlugs = reusedCarriedSlugs(in: snapshot, local: local)
+    func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?, knownCreates: [SkillOverlay] = []) {
+        let reusedSlugs = reusedCarriedSlugs(in: snapshot, local: local, knownCreates: knownCreates)
         for index in snapshot.deployIntents.indices
             where oldSlugs.contains(snapshot.deployIntents[index].skillSlug)
                 && !reusedSlugs.contains(snapshot.deployIntents[index].skillSlug)
@@ -179,11 +179,13 @@ struct ManifestLocalIntentMove: Codable {
         }
     }
 
-    /// A whole-row save can publish this creation before the window acknowledges it. Only
-    /// an overlay from another creation makes a carried name belong to a replacement skill.
-    private func reusedCarriedSlugs(in snapshot: ManifestSnapshot, local: ManifestSnapshot?) -> Set<String> {
+    /// Another creation can hold a freed name on disk, in the window or in another queue
+    /// entry. A whole-row save of this same creation still belongs to the rename.
+    private func reusedCarriedSlugs(in snapshot: ManifestSnapshot, local: ManifestSnapshot?,
+                                    knownCreates: [SkillOverlay]) -> Set<String> {
         let renamed = local?.skills.first { $0.slug == newSlug } ?? snapshot.skills.first { $0.slug == newSlug }
-        return Set(snapshot.skills.filter {
+        let visible = snapshot.skills + (local?.skills ?? []) + knownCreates
+        return Set(visible.filter {
             guard carriedSlugs.contains($0.slug) else { return false }
             guard let renamed else { return true }
             return !ManifestService.sameCreation($0, renamed)
@@ -231,9 +233,17 @@ struct RefusedManifestProjection {
     var collision: SkillOverlay?
     var intentMove: ManifestLocalIntentMove?
 
-    func project(onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false) {
+    var createdSkills: [SkillOverlay] {
+        fields.compactMap {
+            if case .change(.createSkill(let skill)) = $0 { return skill }
+            return nil
+        }
+    }
+
+    func project(onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false,
+                 knownCreates: [SkillOverlay] = []) {
         for field in fields { project(field, onto: &snapshot, keepingLocalCreates: keepingLocalCreates) }
-        intentMove?.apply(to: &snapshot, local: cachedLocal)
+        intentMove?.apply(to: &snapshot, local: cachedLocal, knownCreates: knownCreates)
     }
 
     func project(_ field: Field, onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false) {

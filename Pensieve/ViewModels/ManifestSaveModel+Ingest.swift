@@ -36,6 +36,10 @@ extension ManifestSaveModel {
         }
     }
 
+    var knownCreates: [SkillOverlay] {
+        (refused + items.map(\.presentation)).compactMap(\.createdSkill)
+    }
+
     @MainActor
     func publish(_ item: Item, disk: ManifestSnapshot?, head: GitHeadStamp.State) async throws
         -> Publication? {
@@ -57,7 +61,7 @@ extension ManifestSaveModel {
                 return .skipped(saved)
             }
         }
-        item.intentMove?.apply(to: &saved, local: try? manifest.snapshot(from: context))
+        item.intentMove?.apply(to: &saved, local: try? manifest.snapshot(from: context), knownCreates: knownCreates)
         let snapshot = saved, manifest = manifest, root = root, files = files
         let headChanged = try await BlockingWork.run { () -> Bool? in
             let stamp = GitHeadStamp(fileService: files)
@@ -200,13 +204,16 @@ extension ManifestSaveModel {
     private func acceptRebuild(_ item: Item, prepared: PreparedStoreRebuild, durable: ManifestSnapshot,
                                includingHeadEdit: Bool) throws -> HeadEditVerdict {
         var displayed = durable
-        for edit in refused where edit.context === item.presentation.context { edit.project(onto: &displayed) }
+        let creates = knownCreates
+        for edit in refused where edit.context === item.presentation.context {
+            edit.project(onto: &displayed, knownCreates: creates)
+        }
         var verdict = HeadEditVerdict.ready(prepared)
         if includingHeadEdit, !item.wasHealed {
             do {
                 if case .createSkill = item.change {
                     item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
-                    item.presentation.project(onto: &displayed)
+                    item.presentation.project(onto: &displayed, knownCreates: creates)
                 } else {
                     try item.change.validate(in: displayed)
                     item.change.apply(to: &displayed)
