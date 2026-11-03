@@ -130,10 +130,21 @@ enum ManifestChange {
 
 /// A refused create's rename moves only this Mac's deployment intent. The folder and row
 /// have already moved, so retain this plain edit alongside the create if publication fails.
-struct ManifestLocalIntentMove {
+struct ManifestLocalIntentMove: Codable {
     let oldSlugs: Set<String>
     let newSlug: String
     let machineID: String
+
+    enum CodingKeys: String, CodingKey {
+        case oldSlugs = "old_slugs", newSlug = "new_slug", machineID = "machine_id"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(oldSlugs.sorted(), forKey: .oldSlugs)
+        try values.encode(newSlug, forKey: .newSlug)
+        try values.encode(machineID, forKey: .machineID)
+    }
 
     func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?) {
         for index in snapshot.deployIntents.indices

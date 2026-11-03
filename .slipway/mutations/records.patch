@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Records.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Records.swift
+@@ -74,7 +74,7 @@
+     /// Ordinary refused creates never enter this file. Previously recorded creates stay until an
+     /// acknowledgement even when a readable probe finds their slug temporarily absent on disk.
+     func persistRefusedCreates(excludingPublished: UUID? = nil) {
+-        guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }
++        guard let refusedCreatesPath, recordsRequireNewerVersion else { return }
+         let retained = refused.compactMap { edit -> RefusedCreateRecords.Held? in
+             guard let create = edit.createdSkill,
+                   edit.isCollisionHeld || edit.intentMove != nil || recordedCreateSlugs.contains(create.slug) else { return nil }

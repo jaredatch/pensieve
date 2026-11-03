@@ -147,26 +147,40 @@ final class RecordingSaveManifest: ManifestSnapshotting {
 @MainActor
 final class CollisionCreateFixture {
     let f: IncompleteIngestFixture
-    let context: ModelContext
-    let recording = RecordingSaveManifest()
-    let saves: ManifestSaveModel
-    let library: SkillLibraryViewModel
-    let skill: Skill
+    var context: ModelContext!
+    var recording = RecordingSaveManifest()
+    var saves: ManifestSaveModel!
+    var library: SkillLibraryViewModel!
+    var skill: Skill!
     let local: SkillOverlay
     var peer: ManifestSnapshot
     let platform: PlatformViewModel
     let support: String
 
-    static func message(_ slug: String) -> String {
-        "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope: "
-            + "they aren't saved, and quitting Pensieve loses them."
+    var runtime: AppRuntime?
+    let persistent: Bool
+    let failDelete: Bool
+    var logs: [String] = []
+    var recordPath: String { RuntimePaths(storeRoot: f.app, appSupportDir: support).refusedCreatesPath }
+    var storeURL: URL { URL(fileURLWithPath: f.base + "/library.store") }
+
+    static func writtenDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
-    init(committed: Bool = false, unreadable: Bool = false, failDelete: Bool = false) throws {
+    static func message(_ slug: String) -> String {
+        "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope; "
+            + "they aren't saved until you do."
+    }
+
+    init(committed: Bool = false, unreadable: Bool = false, failDelete: Bool = false, persistent: Bool = false) throws {
+        self.persistent = persistent; self.failDelete = failDelete
         let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
         f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
         support = base + "/support"
-        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let container = try Self.makeContainer(base: base, persistent: persistent)
         try NativeTestWork.run(container: container) { worker in
             _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: base + "/app", context: worker)
         }
@@ -176,7 +190,8 @@ final class CollisionCreateFixture {
         try f.files.deleteDirectory(at: f.app + "/skills/item")
         let files = FaultyFileService(wrapped: f.files,
             failDeletePath: failDelete ? f.app + "/skills/item" : nil)
-        saves = ManifestSaveModel(manifest: recording, root: f.app, lockPath: base + "/sync.lock")
+        saves = ManifestSaveModel(manifest: recording, root: f.app, lockPath: base + "/sync.lock",
+            refusedCreatesPath: persistent ? RuntimePaths(storeRoot: f.app, appSupportDir: support).refusedCreatesPath : nil)
         library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: f.app + "/skills", storeRoot: f.app),
             fileWatchService: RecordingWatcher(), manifestRoot: f.app, manifestSaves: saves)
         // The worker cannot run on the main actor until init returns, so the peer arrives after
@@ -214,7 +229,107 @@ final class CollisionCreateFixture {
             deployStateStore: DeployStateStore(fileService: f.files, appSupportDir: support), skillsDirectory: f.app + "/skills")
     }
 
-    func cleanup() { try? f.files.deleteDirectory(at: f.base) }
+    private static func makeContainer(base: String, persistent: Bool) throws -> ModelContainer {
+        try AppRuntime.makeContainer(configuration: persistent
+            ? ModelConfiguration(url: URL(fileURLWithPath: base + "/library.store"))
+            : ModelConfiguration(isStoredInMemoryOnly: true))
+    }
+
+    func cleanup() {
+        runtime?.commandServer?.stop()
+        library?.stopWatching()
+        runtime = nil
+        skill = nil
+        library = nil
+        saves = nil
+        context = nil
+        try? f.files.deleteDirectory(at: f.base)
+    }
+
+    /// A new container has fresh ingest state, just as a new process does. Release the previous
+    /// window and its refused edits before opening it; the persistent rows are the only local truth.
+    func quit() {
+        runtime?.commandServer?.stop()
+        library?.stopWatching()
+        runtime = nil
+        skill = nil
+        library = nil
+        saves = nil
+        context = nil
+    }
+
+    func relaunchThroughRuntime() async throws {
+        precondition(persistent)
+        quit()
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: storeURL))
+        let paths = AppRuntimePaths(storeRoot: f.app, appSupportDir: support)
+        let defaults = try paths.makeDefaults()
+        defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
+        // The fixture represents a Mac that already created a skill in an established library.
+        defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
+        let runtime = try AppRuntime(container: container,
+            scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
+            defaults: defaults, launchBackfill: { _ in },
+            paths: paths, updateCheckOperation: { _ in RuntimeUpdateCheckResult(report: UpdateCheckReport(), skills: [:]) },
+            gitUsabilityProbe: { .usable }, coordinatorConfigure: { coordinator in
+                await coordinator.configure(engine: RecoveredPresentationEngine(), git: paths.makeGitService(),
+                    credentials: InMemoryCredentialStore(), root: paths.storeRoot,
+                    audit: SyncAudit(appSupport: paths.appSupportDir),
+                    machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()))
+            })
+        self.runtime = runtime
+        context = container.mainContext
+        library = runtime.library
+        saves = try XCTUnwrap(library.manifestSaves)
+        await runtime.performLaunchWorkIfNeeded(context: context)
+        library.stopWatching()
+        skill = try context.fetch(FetchDescriptor<Skill>()).first
+    }
+
+    func relaunch(failingSnapshots: Int = 0) throws {
+        precondition(persistent)
+        quit()
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: storeURL))
+        context = ModelContext(container)
+        recording = RecordingSaveManifest()
+        recording.failingSnapshots = failingSnapshots
+        saves = ManifestSaveModel(manifest: recording, root: f.app, lockPath: support + "/sync.lock",
+            refusedCreatesPath: recordPath, log: { [weak self] in self?.logs.append($0) })
+        let files = FaultyFileService(wrapped: f.files, failDeletePath: failDelete ? f.app + "/skills/item" : nil)
+        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: f.app + "/skills", storeRoot: f.app),
+            fileWatchService: RecordingWatcher(), manifestRoot: f.app, manifestSaves: saves)
+        saves.restoreRefusedCreates(context: context)
+        let f = f
+        try NativeTestWork.run(container: container) { worker in
+            _ = StoreRebuildService().rebuild(fromRoot: f.app, context: worker)
+        }
+        skill = try context.fetch(FetchDescriptor<Skill>()).first
+    }
+
+    func record() throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: f.files.readData(at: recordPath)) as? [String: Any])
+    }
+
+    func held() throws -> [[String: Any]] { try XCTUnwrap(record()["held"] as? [[String: Any]]) }
+    func heldSlugs() throws -> [String] { try held().compactMap { $0["slug"] as? String }.sorted() }
+    func preserved() throws -> [String] { try XCTUnwrap(record()["preserved"] as? [String]).sorted() }
+
+    func writeRecord(held: [[String: Any]], preserved: [String] = [], version: Int = 1) throws {
+        let bytes = try JSONSerialization.data(withJSONObject: ["schema_version": version, "held": held, "preserved": preserved],
+            options: [.sortedKeys])
+        try f.files.writeFile(at: recordPath, content: try XCTUnwrap(String(data: bytes, encoding: .utf8)))
+    }
+
+    func addOwnIntent() throws {
+        context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID, skillSlug: "item",
+            platformRaw: PlatformTarget.claudeCode.rawValue))
+        try context.save()
+    }
+
+    func ownIntents() throws -> [String] {
+        try context.fetch(FetchDescriptor<MachineDeployIntent>()).filter { $0.machineID == ProjectIntentHarness.localID }
+            .map(\.skillSlug).sorted()
+    }
 
     func assertPeer(file: StaticString = #filePath, line: UInt = #line) throws {
         let durable = try f.manifest.read(fromRoot: f.app)
@@ -229,7 +344,8 @@ final class CollisionCreateFixture {
         XCTAssertEqual(current.tags, tags ?? local.tags, file: file, line: line)
         XCTAssertEqual(current.scope, scope ?? local.scope, file: file, line: line)
         XCTAssertEqual(current.origin, local.origin, file: file, line: line)
-        XCTAssertEqual(current.createdAt, local.createdAt, file: file, line: line)
+        XCTAssertEqual(current.createdAt.timeIntervalSince1970, local.createdAt.timeIntervalSince1970,
+            accuracy: 0.001, file: file, line: line)
     }
 
     func sync() throws {

@@ -39,6 +39,7 @@ struct RuntimePaths {
     static let production = RuntimePaths(storeRoot: PathConstants.pensieveBaseDir,
                                          appSupportDir: PathConstants.pensieveAppSupportDir)
     var skillsDir: String { deployPaths.skillsDirectory }
+    var refusedCreatesPath: String { appSupportDir + "/refused-creates.json" }
     var syncLockPath: String { appSupportDir + "/sync.lock" }
     var gitAskpassHelperPath: String { appSupportDir + "/git-askpass.sh" }
 

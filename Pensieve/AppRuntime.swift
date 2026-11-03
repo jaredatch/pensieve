@@ -237,6 +237,7 @@ final class AppRuntime {
         guard !didPerformLaunchWork else { return false }
         didPerformLaunchWork = true
         launchWorkInvocationCount += 1
+        library.manifestSaves?.restoreRefusedCreates(context: context)
         let result = await runLaunchJob()
         acceptLaunchIngest(result, context: context)
         checkForSkillUpdatesIfDue()

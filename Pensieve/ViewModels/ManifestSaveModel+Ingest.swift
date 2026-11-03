@@ -75,6 +75,7 @@ extension ManifestSaveModel {
         }
         if let collisionDelete { discardRefusedCreate(collisionDelete, context: context) }
         refused = refused.filter { $0.acknowledge(durable: saved) }
+        persistRefusedCreates(excludingPublished: item.id)
         return headChanged ? .headChanged : .saved(saved)
     }
 
@@ -239,8 +240,8 @@ enum ManifestSaveError: LocalizedError {
                 : "Rebuilding the local store failed: ") + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
         case .createCollision(let slug):
-            "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope: "
-                + "they aren't saved, and quitting Pensieve loses them."
+            "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope; "
+                + "they aren't saved until you do."
         }
     }
 }
