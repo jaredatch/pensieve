@@ -1,0 +1,8 @@
+paths = Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift Pensieve/Services/ManifestChange.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/Services/RefusedCreateRecords.swift Pensieve/Services/StoreIngestState.swift PensieveTests/Fixtures/ManifestSaveFixture.swift PensieveTests/ServiceTests/ManifestRenameTests.swift PensieveTests/ServiceTests/ManifestSaveTests+Records.swift docs/ARCHITECTURE.md docs/SPEC.md .slipway/changelog/211.md .slipway/mutations/
+risk = Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift Pensieve/Services/ManifestChange.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/Services/RefusedCreateRecords.swift Pensieve/Services/StoreIngestState.swift
+check.renameRefused = tests PensieveTests/ManifestRenameTests/testRenamingAWriteRefusedCreateCarriesItsCategoriesAndEveryMacsIntentsToTheNewName
+mutation.renameRefused = .slipway/mutations/renameRefused.patch
+check.relaunchRenameRefused = tests PensieveTests/ManifestRenameTests/testAfterARelaunchARenamedWriteRefusedCreateKeepsItsCategoriesAndIntents
+mutation.relaunchRenameRefused = .slipway/mutations/relaunchRenameRefused.patch
+check.mixedChain = tests PensieveTests/ManifestRenameTests/testRenamingACollisionRefusedSkillTwiceCarriesItsOwnCategoriesAndLeavesTheOtherMacsAlone
+mutation.mixedChain = .slipway/mutations/mixedChain.patch
