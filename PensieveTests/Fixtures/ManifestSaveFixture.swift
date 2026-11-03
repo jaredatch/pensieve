@@ -175,7 +175,8 @@ final class CollisionCreateFixture {
             + "they aren't saved until you do."
     }
 
-    init(committed: Bool = false, unreadable: Bool = false, failDelete: Bool = false, persistent: Bool = false) throws {
+    init(committed: Bool = false, unreadable: Bool = false, failDelete: Bool = false,
+         persistent: Bool = false, noPeer: Bool = false) throws {
         self.persistent = persistent; self.failDelete = failDelete
         let base = TestTemporaryDirectory.url.appendingPathComponent(UUID().uuidString).path
         f = try NativeTestWork.run { try IncompleteIngestFixture(base: base) }
@@ -205,9 +206,9 @@ final class CollisionCreateFixture {
         remote.scope = .project
         remote.origin = .imported(from: "cursor")
         peer = try f.manifest.read(fromRoot: f.app)
-        peer.skills = [remote]
-        peer.categories[0].skillSlugs = ["item"]
-        peer.deployIntents = [DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
+        peer.skills = noPeer ? [] : [remote]
+        peer.categories[0].skillSlugs = noPeer ? [] : ["item"]
+        peer.deployIntents = noPeer ? [] : [DeployIntentRecord(machineID: ProjectIntentHarness.remoteID, skillSlug: "item",
             platformRaw: PlatformTarget.claudeCode.rawValue, projectKey: nil)]
         try f.manifest.write(peer, toRoot: committed ? f.peer : f.app)
         if committed {
@@ -219,6 +220,7 @@ final class CollisionCreateFixture {
             }
         }
         recording.failingSnapshots = unreadable ? .max : 0
+        recording.failingWrites = noPeer ? 1 : 0
         try f.files.writeFile(at: support + "/machine-id", content: ProjectIntentHarness.localID)
         let paths = DeployPaths(skillsDirectory: f.app + "/skills", userSkillsDirectories: [:],
             cursorUserRulesDirectory: base + "/cursor")

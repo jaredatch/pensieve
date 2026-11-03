@@ -602,6 +602,7 @@
 		7E128F8C4520F3598ACD0DA7 /* PlatformViewModelTestSafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A3B5FE685D3E382FC150CF /* PlatformViewModelTestSafetyTests.swift */; };
 		7E1682660A644D8FFAD22C22 /* CategorySaveUndoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F55AB2FAB0D3FA1320B199 /* CategorySaveUndoTests.swift */; };
 		7E5CBE0BC35EA68FE36A47AA /* SkillEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91D84B4061CAA80BAB3BAD5 /* SkillEditorView.swift */; };
+		7E935F7F82617964B982FC73 /* ManifestRenameTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1944FC5E538955427600A98C /* ManifestRenameTestSupport.swift */; };
 		7E94E42ECBDB5A06D27EB37B /* RemoteProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97462EE9D92C7D27BF06E141 /* RemoteProjectDetailView.swift */; };
 		7EF2E4452391A36EC9173643 /* AdapterConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB2CFCA75644C73EC77EB2E /* AdapterConfig.swift */; };
 		7EFE0F079ADE3CDAD0FCA71B /* StoreRebuildServiceTests+InstalledOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87DB942BBB483C2848CA7FF /* StoreRebuildServiceTests+InstalledOrigin.swift */; };
@@ -1454,6 +1455,7 @@
 		18E68265687214EB7ED167D2 /* TestWaitTests+Gate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TestWaitTests+Gate.swift"; sourceTree = "<group>"; };
 		18FE44F5FC070BB1EA9CCD8F /* SyncNudgeInstallTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncNudgeInstallTestSupport.swift; sourceTree = "<group>"; };
 		19037D584ACDBF02516D31B1 /* PensieveAppInstallPathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PensieveAppInstallPathsTests.swift; sourceTree = "<group>"; };
+		1944FC5E538955427600A98C /* ManifestRenameTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestRenameTestSupport.swift; sourceTree = "<group>"; };
 		1953B0F42571A32374BB753A /* ProjectRemovalReviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectRemovalReviewTests.swift; sourceTree = "<group>"; };
 		19642102010F256B2EA9540B /* CheckedYAMLLoaderTests+ResourceBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CheckedYAMLLoaderTests+ResourceBudget.swift"; sourceTree = "<group>"; };
 		19FD6FB4B896C94A6B86F9EE /* ProjectIdentityServiceTests+MissingFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProjectIdentityServiceTests+MissingFolder.swift"; sourceTree = "<group>"; };
@@ -3689,6 +3691,7 @@
 				58531BB7EF893174F299A0A9 /* ManifestProjectDeployIntentTests.swift */,
 				0B4F9A147EB6D2426E47CED2 /* ManifestProjectsRetiredTests.swift */,
 				4B4594B33F86CE043FF97B65 /* ManifestRenameTests.swift */,
+				1944FC5E538955427600A98C /* ManifestRenameTestSupport.swift */,
 				205AB8063954A0E3DC02A52A /* ManifestRetirementTests.swift */,
 				762F39D70E981D9B9252529E /* ManifestRetirementTests+Concurrency.swift */,
 				C5AE7B2FED73B10880A5EB1B /* ManifestSaveTests.swift */,
@@ -4479,6 +4482,7 @@
 				8A050DFA30FF7608F74198F2 /* ManifestMaintenanceTests.swift in Sources */,
 				68DAE30243FB305C7FC79813 /* ManifestProjectDeployIntentTests.swift in Sources */,
 				AA87DEE3E37BD00F6336359A /* ManifestProjectsRetiredTests.swift in Sources */,
+				7E935F7F82617964B982FC73 /* ManifestRenameTestSupport.swift in Sources */,
 				3B83070A1E4D26E41BC694EA /* ManifestRenameTests.swift in Sources */,
 				5A77314A7F4E78D797BE21A9 /* ManifestRetirementTests+Concurrency.swift in Sources */,
 				8B1E1325112777192C6BEBA0 /* ManifestRetirementTests.swift in Sources */,
