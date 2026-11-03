@@ -85,4 +85,56 @@ extension ManifestRenameTests {
             requests.sorted { $0.machineID < $1.machineID }, file: file, line: line)
     }
 
+    func checkReusedName(replacementWriteFails: Bool) async throws {
+        let h = try CollisionCreateFixture(persistent: true, noPeer: true)
+        defer { h.cleanup() }
+        let originalCategory = try await prepareWriteRefused(h)
+        h.recording.failingWrites = 1
+        XCTAssertTrue(h.rename("item-2"), h.library.error ?? "")
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(h.saves.hasRefusedCreate("item-2", context: h.context))
+        h.recording.failingWrites = replacementWriteFails ? 1 : 0
+        let replacement = try XCTUnwrap(h.library.createSkill(name: "Item", description: "Replacement", body: "new body",
+            tags: ["replacement"], context: h.context))
+        XCTAssertEqual(replacement.directoryName, "item")
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.saves.hasRefusedCreate("item", context: h.context), replacementWriteFails)
+        let category = try XCTUnwrap(try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+            .first { $0.name != originalCategory })
+        CategoryStore(manifestSaves: h.saves).setSkill(replacement, inCategory: category, assigned: true, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.saves.categoryNotice)
+        var disk = try h.f.manifest.read(fromRoot: h.f.app)
+        let requests = [ProjectIntentHarness.localID, ProjectIntentHarness.remoteID].map {
+            DeployIntentRecord(machineID: $0, skillSlug: "item", platformRaw: PlatformTarget.claudeCode.rawValue, projectKey: nil)
+        }
+        disk.deployIntents.removeAll { $0.skillSlug == "item" }
+        disk.deployIntents.append(contentsOf: requests)
+        try h.f.manifest.write(disk, toRoot: h.f.app)
+        for request in requests {
+            h.context.insert(MachineDeployIntent(machineID: request.machineID, skillSlug: request.skillSlug,
+                platformRaw: request.platformRaw))
+        }
+        try h.context.save()
+        try assertReusedName(h, category: category.name, requests: requests)
+        try h.rebuild()
+        try assertReusedName(h, category: category.name, requests: requests)
+        let categoryName = category.name
+        try await h.relaunchThroughRuntime()
+        XCTAssertTrue(h.saves.hasRefusedCreate("item-2", context: h.context))
+        try assertReusedName(h, category: categoryName, requests: requests)
+        try h.sync()
+        try assertReusedName(h, category: categoryName, requests: requests)
+        let published = try h.f.manifest.read(fromRoot: h.f.app)
+        XCTAssertEqual(published.skills.map(\.slug).sorted(), ["item", "item-2"])
+        XCTAssertEqual(published.skills.first { $0.slug == "item" }?.tags, ["replacement"])
+        XCTAssertEqual(published.categories.first { $0.name == categoryName }?.skillSlugs, ["item"])
+        XCTAssertEqual(published.deployIntents.filter { $0.skillSlug == "item" }
+            .sorted { $0.machineID < $1.machineID }, requests.sorted { $0.machineID < $1.machineID })
+        try await h.relaunchThroughRuntime()
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        XCTAssertEqual(try h.heldSlugs(), [])
+        try assertReusedName(h, category: categoryName, requests: requests)
+    }
+
 }

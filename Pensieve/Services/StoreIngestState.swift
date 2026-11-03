@@ -100,16 +100,20 @@ final class StoreIngestState {
         let changes = edits
         let retainedEdits = refused
         lock.unlock()
+        let creates = retainedEdits.flatMap { $0.projection.createdSkills } + changes.compactMap { edit -> SkillOverlay? in
+            if case .createSkill(let skill) = edit.change { return skill }
+            return nil
+        }
         var projected = snapshot
         for edit in retainedEdits {
-            edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates)
+            edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates, knownCreates: creates)
         }
         var retained: Set<UUID> = []
         for edit in changes {
             let change = edit.change
             if keepingLocalCreates, case .createSkill = change {
                 RefusedManifestProjection(fields: [.change(change)], cachedLocal: nil)
-                    .project(onto: &projected, keepingLocalCreates: true)
+                    .project(onto: &projected, keepingLocalCreates: true, knownCreates: creates)
                 continue
             }
             do { try change.validate(in: projected) } catch { continue }
@@ -143,12 +147,12 @@ final class StoreIngestState {
         state.lock.unlock()
         // A queued or failed create may meet a peer for the first time during a rebuild or a whole-row
         // write. Probe identity here too; HEAD can be current and the queue need not run again.
-        let creates = queuedCreates + projections.flatMap(\.fields).compactMap { field -> SkillOverlay? in
-            if case .change(.createSkill(let original)) = field { return original }
-            return nil
-        }
+        let creates = queuedCreates + projections.flatMap(\.createdSkills)
         let disk = preserved.isEmpty && creates.isEmpty ? nil : try manifest.read(fromRoot: root)
-        for projection in projections { projection.intentMove?.apply(to: &snapshot, local: projection.cachedLocal) }
+        let known = creates + (disk?.skills ?? [])
+        for projection in projections {
+            projection.intentMove?.apply(to: &snapshot, local: projection.cachedLocal, knownCreates: known)
+        }
         for peer in disk?.skills ?? [] {
             let collision = creates.contains { $0.slug == peer.slug && !ManifestService.sameCreation($0, peer) }
             guard preserved.contains(peer.slug) || collision else { continue }
