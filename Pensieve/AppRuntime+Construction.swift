@@ -19,7 +19,9 @@ extension AppRuntimePaths {
             categoryReconciler: CategoryReconciler(platformVM: platformVM),
             intentReconciler: intentReconciler,
             auditLog: { SyncAudit(appSupport: appSupportDir).append(category: $0, detail: $1) },
-            didConverge: { platformVM.noteDeployStateChanged() }
+            didConverge: { platformVM.noteDeployStateChanged() },
+            removedSkillCleanup: RemovedSkillCleanup(fileService: platformVM.deployStateStore.fileService,
+                paths: deployPaths, stateStore: platformVM.deployStateStore)
         )
     }
 
