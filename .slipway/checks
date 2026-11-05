@@ -1,0 +1,10 @@
+paths = Pensieve/Services/PostSyncConvergence.swift Pensieve/Services/RemovedSkillCleanup.swift Pensieve/ViewModels/PlatformViewModel+SkillCleanup.swift Pensieve/ViewModels/PlatformViewModel+Removal.swift Pensieve/AppRuntime+Construction.swift PensieveTests/ServiceTests/RemoteSkillRemovalTests.swift PensieveTests/ServiceTests/RemoteSkillRemovalTestSupport.swift docs/SPEC.md docs/ARCHITECTURE.md CHANGELOG.md .slipway/changelog/202.md .slipway/mutations/
+risk = Pensieve/Services/PostSyncConvergence.swift Pensieve/Services/RemovedSkillCleanup.swift Pensieve/ViewModels/PlatformViewModel+SkillCleanup.swift Pensieve/ViewModels/PlatformViewModel+Removal.swift Pensieve/AppRuntime+Construction.swift
+check.renamedElsewhere = tests PensieveTests/RemoteSkillRemovalTests/testARenameOnAnotherMacRemovesTheOldNamesProjectLinksAndRulesHere
+mutation.renamedElsewhere = .slipway/mutations/renamedElsewhere.patch
+check.deletedWhileClosed = tests PensieveTests/RemoteSkillRemovalTests/testADeleteThatArrivedWhilePensieveWasClosedRemovesItsProjectLinksAndRulesAtLaunch
+mutation.deletedWhileClosed = .slipway/mutations/deletedWhileClosed.patch
+check.missingFolder = tests PensieveTests/RemoteSkillRemovalTests/testCleanupWaitsForAMissingProjectFolderAndFinishesWhenItIsBack
+mutation.missingFolder = .slipway/mutations/missingFolder.patch
+check.deletedHere = tests PensieveTests/RemoteSkillRemovalTests/testDeletingASkillHereThenStartingUpChangesNothingInYourProjects
+mutation.deletedHere = .slipway/mutations/deletedHere.patch
