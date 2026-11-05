@@ -1,0 +1,16 @@
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -195,8 +195,13 @@
+                                        reusedSlugs: Set<String>) {
+         for index in snapshot.categories.indices {
+             let window = local.categories.first { $0.name == snapshot.categories[index].name }
++            let hadLeftover = snapshot.categories[index].skillSlugs.contains { reusedSlugs.contains($0) }
+             snapshot.categories[index].skillSlugs.removeAll {
+                 reusedSlugs.contains($0) && window?.skillSlugs.contains($0) != true
++            }
++            if hadLeftover, window?.skillSlugs.contains(newSlug) != true,
++               !snapshot.categories[index].skillSlugs.contains(newSlug) {
++                snapshot.categories[index].skillSlugs.append(newSlug)
+             }
+         }
+         snapshot.deployIntents.removeAll { reusedSlugs.contains($0.skillSlug) && !local.deployIntents.contains($0) }

@@ -347,4 +347,24 @@ extension ManifestRenameTests {
         try assertMixedChain(h, category: category)
     }
 
+    func testReusingARenamedRefusedSkillsOldNameLeavesTheRenamedSkillsCategoriesAndIntentsWithIt() async throws {
+        for replacementWriteFails in [false, true] {
+            try await checkLeftoverOwnership(replacementWriteFails: replacementWriteFails, removed: false)
+        }
+    }
+
+    func testReusingAnOldNameDoesNotPutTheRenamedSkillBackInACategoryItLeft() async throws {
+        for replacementWriteFails in [false, true] {
+            try await checkLeftoverOwnership(replacementWriteFails: replacementWriteFails, removed: true)
+        }
+    }
+
+    func testReusingAnOldNameBeforeTheRenameSavesPublishesEachSkillsOwnCategoriesAndIntents() async throws {
+        try await checkQueuedOwnership(unreadable: false)
+    }
+
+    func testReusingAnOldNameWhileTheWindowCannotBeReadLeavesEachSkillItsOwnCategoriesAndIntents() async throws {
+        try await checkQueuedOwnership(unreadable: true)
+    }
+
 }

@@ -163,7 +163,8 @@ struct ManifestLocalIntentMove: Codable {
         try values.encode(carriedSlugs.sorted(), forKey: .carriedSlugs)
     }
 
-    func apply(to snapshot: inout ManifestSnapshot, local: ManifestSnapshot?, knownCreates: [SkillOverlay] = []) {
+    func apply(to snapshot: inout ManifestSnapshot, durable: ManifestSnapshot, local: ManifestSnapshot?,
+               localIsCurrent: Bool = true, knownCreates: [SkillOverlay] = []) {
         let reusedSlugs = reusedCarriedSlugs(in: snapshot, local: local, knownCreates: knownCreates)
         for index in snapshot.deployIntents.indices
             where oldSlugs.contains(snapshot.deployIntents[index].skillSlug)
@@ -174,9 +175,31 @@ struct ManifestLocalIntentMove: Codable {
         for intent in local?.deployIntents ?? [] where intent.skillSlug == newSlug && intent.machineID == machineID {
             if !snapshot.deployIntents.contains(intent) { snapshot.deployIntents.append(intent) }
         }
+        if localIsCurrent, let local,
+           let renamed = local.skills.first(where: { $0.slug == newSlug }),
+           !durable.skills.contains(where: { $0.slug == newSlug && ManifestService.sameCreation($0, renamed) }) {
+            removeReusedLeftovers(from: &snapshot, local: local, reusedSlugs: reusedSlugs)
+        }
         if !carriedSlugs.isEmpty {
             applyCarried(to: &snapshot, local: local, carriedSlugs: carriedSlugs.subtracting(reusedSlugs))
         }
+    }
+
+    func reusesCarriedName(in snapshot: ManifestSnapshot, knownCreates: [SkillOverlay]) -> Bool {
+        !reusedCarriedSlugs(in: snapshot, local: nil, knownCreates: knownCreates).isEmpty
+    }
+
+    /// Until the renamed creation reaches disk, rows distinguish the replacement's own
+    /// values from old-name leftovers. Afterwards a peer can legitimately request that name.
+    private func removeReusedLeftovers(from snapshot: inout ManifestSnapshot, local: ManifestSnapshot,
+                                       reusedSlugs: Set<String>) {
+        for index in snapshot.categories.indices {
+            let window = local.categories.first { $0.name == snapshot.categories[index].name }
+            snapshot.categories[index].skillSlugs.removeAll {
+                reusedSlugs.contains($0) && window?.skillSlugs.contains($0) != true
+            }
+        }
+        snapshot.deployIntents.removeAll { reusedSlugs.contains($0.skillSlug) && !local.deployIntents.contains($0) }
     }
 
     /// Another creation can hold a freed name on disk, in the window or in another queue
@@ -241,9 +264,12 @@ struct RefusedManifestProjection {
     }
 
     func project(onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false,
-                 knownCreates: [SkillOverlay] = []) {
+                 knownCreates: [SkillOverlay] = [], local: ManifestSnapshot? = nil,
+                 durable: ManifestSnapshot? = nil) {
+        let durable = durable ?? snapshot
         for field in fields { project(field, onto: &snapshot, keepingLocalCreates: keepingLocalCreates) }
-        intentMove?.apply(to: &snapshot, local: cachedLocal, knownCreates: knownCreates)
+        intentMove?.apply(to: &snapshot, durable: durable, local: local ?? cachedLocal,
+                          localIsCurrent: local != nil, knownCreates: knownCreates)
     }
 
     func project(_ field: Field, onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false) {

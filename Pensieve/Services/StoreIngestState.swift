@@ -94,7 +94,8 @@ final class StoreIngestState {
     }
 
     /// Plain edits cross contexts; SwiftData objects remain on their owning executor.
-    func projectingEdits(onto snapshot: ManifestSnapshot, keepingLocalCreates: Bool = false)
+    func projectingEdits(onto snapshot: ManifestSnapshot, keepingLocalCreates: Bool = false,
+                         local: ManifestSnapshot? = nil)
         -> (snapshot: ManifestSnapshot, retainedWindows: Set<UUID>) {
         lock.lock()
         let changes = edits
@@ -106,7 +107,8 @@ final class StoreIngestState {
         }
         var projected = snapshot
         for edit in retainedEdits {
-            edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates, knownCreates: creates)
+            edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates,
+                                    knownCreates: creates, local: local, durable: snapshot)
         }
         var retained: Set<UUID> = []
         for edit in changes {
@@ -136,6 +138,7 @@ final class StoreIngestState {
     static func snapshotForPublication(using manifest: ManifestSnapshotting, context: ModelContext,
                                        root: String) throws -> ManifestSnapshot {
         var snapshot = try manifest.snapshot(from: context)
+        let local = snapshot
         let state = shared(for: context.container)
         state.lock.lock()
         let projections = state.refused.map(\.projection)
@@ -151,7 +154,7 @@ final class StoreIngestState {
         let disk = preserved.isEmpty && creates.isEmpty ? nil : try manifest.read(fromRoot: root)
         let known = creates + (disk?.skills ?? [])
         for projection in projections {
-            projection.intentMove?.apply(to: &snapshot, local: projection.cachedLocal, knownCreates: known)
+            projection.intentMove?.apply(to: &snapshot, durable: disk ?? local, local: local, knownCreates: known)
         }
         for peer in disk?.skills ?? [] {
             let collision = creates.contains { $0.slug == peer.slug && !ManifestService.sameCreation($0, peer) }

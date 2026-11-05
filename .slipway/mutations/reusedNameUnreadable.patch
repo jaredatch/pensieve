@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
+@@ -92,7 +92,7 @@
+         do { return try manifest.snapshot(from: context) } catch {
+             // Refuse before writing: a missing window cannot decide which creation owns
+             // the old name's memberships and requests. Retention will preserve the move.
+-            if move.reusesCarriedName(in: snapshot, knownCreates: knownCreates) { throw error }
++            if move.reusesCarriedName(in: snapshot, knownCreates: knownCreates) { return nil }
+             return nil
+         }
+     }

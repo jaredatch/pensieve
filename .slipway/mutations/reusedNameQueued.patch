@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
+@@ -63,7 +63,7 @@
+         }
+         if let move = item.intentMove {
+             let local = try moveWindow(for: move, context: context, snapshot: saved)
+-            move.apply(to: &saved, durable: disk ?? saved, local: local, knownCreates: knownCreates)
++            move.apply(to: &saved, durable: saved, local: local, knownCreates: knownCreates)
+         }
+         let snapshot = saved, manifest = manifest, root = root, files = files
+         let headChanged = try await BlockingWork.run { () -> Bool? in

@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/StoreIngestState.swift
++++ b/Pensieve/Services/StoreIngestState.swift
+@@ -108,7 +108,7 @@
+         var projected = snapshot
+         for edit in retainedEdits {
+             edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates,
+-                                    knownCreates: creates, local: local, durable: snapshot)
++                                    knownCreates: creates, local: nil, durable: snapshot)
+         }
+         var retained: Set<UUID> = []
+         for edit in changes {
