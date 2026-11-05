@@ -454,7 +454,7 @@ Folder and machine imports seed tags from source `SKILL.md` frontmatter.
 
 Rename… in More and File › Rename Skill… move the skill's folder and update its name, deployments, categories and synced deploy requests. Confirming Rename with both the name and the folder unchanged writes nothing. Rename asks about unsaved edits first and refuses a taken folder, a folder name without a letter or digit, a folder name over 64 bytes, or a busy sync. As with Create, the name keeps its capitalization and spaces while the folder uses its slug.
 
-Other Macs apply the renamed deployment requests after syncing. Their old recorded paths follow the cleanup rules above: dangling links and marked rules go, while live links and unmarked rules stay; unavailable projects wait on history until a later launch or sync that brings changes.
+Other Macs apply the renamed deployment requests after syncing. Their old recorded paths follow the cleanup rules above: dangling links and marked rules go, while live links and unmarked rules stay; unavailable projects wait on history until a later launch or sync that brings changes. On other Macs, a deployment made without a synced request, including a direct deployment to a project without a shared identity, follows that cleanup but is not recreated under the new name.
 
 ### Keyboard Shortcuts
 

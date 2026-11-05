@@ -53,7 +53,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
-- After a delete or rename syncs from another Mac, Pensieve removes old recorded project links and managed rules. Your rewritten rules and links to live skills stay; unavailable folders are retried at launch or after a sync that brings changes.
+- After a delete or rename syncs from another Mac, Pensieve removes old recorded project links and managed rules. Your rewritten rules and links to live skills stay; unavailable folders are retried at launch or after a sync that brings changes. On other Macs, a deployment made without a synced request follows that cleanup but is not recreated under the new name after a rename. The first start after updating also clears leftover links and managed rules from earlier deletes and renames; if a rule was committed to a shared repository, git shows it as deleted.
 
 - When two Macs create a skill with the same folder name before syncing, Pensieve keeps your tags and scope in the window and asks you to rename the second skill. Renaming or deleting it leaves the other Mac's record alone, even after you quit and reopen Pensieve.
 
