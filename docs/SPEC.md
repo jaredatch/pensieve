@@ -145,6 +145,10 @@ A regular Cursor rule is Pensieve's when its closed frontmatter contains the exa
 
 Deleting a skill removes its owned user-wide rules and links, and its owned links in registered projects, for agents installed on this Mac. Removing a project Cursor rule also requires evidence that this Mac deployed it: a deploy-state record for its path or this skill's local deploy history. A marked rule committed by a teammate with no such local evidence stays.
 
+After a delete or folder-moving rename arrives from another Mac, the app cleans up this Mac's recorded deployments at launch and after a sync that brings changes. It removes dangling Pensieve links in registered projects and marked Cursor rules in those projects and the user-wide rules folder. A link pointed at a live skill, an unmarked rule (even at a recorded path), and any other foreign occupant stay unchanged. A teammate's committed rule with no local deployment history stays too. Pensieve checks only recorded paths; an artifact whose history save failed cannot be found by this cleanup.
+
+If a project's folder is unavailable, its history rows keep the cleanup pending across relaunches. A later launch or sync that brings changes retries it. This wait creates no waiting removal and uses the narrower dangling-link policy above. An absent or foreign artifact settles its history once the project is available. Paths under a name the store still holds are left to normal deployment reconciliation. Projects no longer registered here are left alone and their old history is retired.
+
 When a registered project's folder is missing or cannot be checked, skill deletion saves waiting removals before retiring any deployment records or assignment rows. The skill can then be deleted. This Mac's deployment records, assignment rows and local intents admit waiting cleanup for links. Cursor rules require a deploy-state record at their path or this skill's local deploy history. An unavailable project with no admitted evidence gets no cleanup. If deploy state or history cannot be read in full and any registered folder with an absolute path is unavailable, deletion keeps the skill.
 
 A notice names only projects with saved waiting cleanup and says their links and rules will be removed when the folder is back and can be checked. If that local save fails, the skill, its requests, assignment rows and deployment records remain. If deletion stops before request retirement is saved, unavailable projects keep their deployment records and the attempt withdraws its newly created waiting entries. A retry can save them again. Once retirement is saved, waiting entries remain and unavailable deployment records retire, even if deleting the skill's files or library entry fails. A records-write warning preserves the waiting-project notice and any manifest warning.
@@ -450,6 +454,8 @@ Folder and machine imports seed tags from source `SKILL.md` frontmatter.
 
 Rename… in More and File › Rename Skill… move the skill's folder and update its name, deployments, categories and synced deploy requests. Confirming Rename with both the name and the folder unchanged writes nothing. Rename asks about unsaved edits first and refuses a taken folder, a folder name without a letter or digit, a folder name over 64 bytes, or a busy sync. As with Create, the name keeps its capitalization and spaces while the folder uses its slug.
 
+Other Macs apply the renamed deployment requests after syncing. Their old recorded paths follow the cleanup rules above: dangling links and marked rules go, while live links and unmarked rules stay; unavailable projects wait on history until a later launch or sync that brings changes.
+
 ### Keyboard Shortcuts
 
 App-wide shortcuts live in the menu bar's command groups, never only on a toolbar item.
@@ -514,7 +520,7 @@ Each deploy/remove action is tracked in SwiftData:
 | `contentHash` | Hash of skill body at deploy time |
 | `projectID` | Which project the deploy targeted, if project-scoped (optional) |
 
-Used for freshness checking and deployment history. `DeployRecord` is **append-only/historical**: removing a deploy does not delete its record — live connected-state is read from the filesystem (symlink presence), not derived from record counts.
+Used for freshness checking and deployment history. Removing a deploy keeps its `DeployRecord`; live connected-state comes from the filesystem, not record counts. There are two exceptions: Rename retires the records of artifacts it removed, and app convergence retires records whose skill UUID no longer exists once their artifact paths are settled. This happens on every Mac, including the Mac where Delete was clicked. Delete's next convergence pass retires its remaining history without changing project files. An unavailable registered project keeps its history until cleanup can check it.
 
 ---
 
