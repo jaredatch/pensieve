@@ -1,0 +1,10 @@
+paths = Pensieve/Services/ManifestChange.swift Pensieve/Services/StoreIngestState.swift Pensieve/Services/StoreRebuildService.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestRefusedEdit.swift PensieveTests/ServiceTests/ManifestRenameTests.swift PensieveTests/ServiceTests/ManifestRenameTestSupport.swift PensieveTests/Fixtures/ManifestSaveFixture.swift docs/ARCHITECTURE.md .slipway/changelog/216.md .slipway/mutations/
+risk = Pensieve/Services/ManifestChange.swift Pensieve/Services/StoreIngestState.swift Pensieve/Services/StoreRebuildService.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestRefusedEdit.swift
+check.reusedNameLeftovers = tests PensieveTests/ManifestRenameTests/testReusingARenamedRefusedSkillsOldNameLeavesTheRenamedSkillsCategoriesAndIntentsWithIt
+mutation.reusedNameLeftovers = .slipway/mutations/reusedNameLeftovers.patch
+check.reusedNameQueued = tests PensieveTests/ManifestRenameTests/testReusingAnOldNameBeforeTheRenameSavesPublishesEachSkillsOwnCategoriesAndIntents
+mutation.reusedNameQueued = .slipway/mutations/reusedNameQueued.patch
+check.reusedNameRemoved = tests PensieveTests/ManifestRenameTests/testReusingAnOldNameDoesNotPutTheRenamedSkillBackInACategoryItLeft
+mutation.reusedNameRemoved = .slipway/mutations/reusedNameRemoved.patch
+check.reusedNameUnreadable = tests PensieveTests/ManifestRenameTests/testReusingAnOldNameWhileTheWindowCannotBeReadLeavesEachSkillItsOwnCategoriesAndIntents
+mutation.reusedNameUnreadable = .slipway/mutations/reusedNameUnreadable.patch
