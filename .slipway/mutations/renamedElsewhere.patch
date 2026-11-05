@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/RemovedSkillCleanup.swift
++++ b/Pensieve/Services/RemovedSkillCleanup.swift
+@@ -92,7 +92,7 @@
+             }
+             let occupant = try ownership.link(at: path, skillsDirectory: paths.skillsDirectory,
+                                              linksFile: platform == .codex && projectPath != nil)
+-            guard occupant.isOwned else { return occupant }
++            guard occupant.isOwned else { return .owned }
+             do {
+                 _ = try fileService.resolveRealPath(at: path)
+                 return .foreignLink

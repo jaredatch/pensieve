@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/RemovedSkillCleanup.swift
++++ b/Pensieve/Services/RemovedSkillCleanup.swift
+@@ -95,7 +95,7 @@
+             guard occupant.isOwned else { return occupant }
+             do {
+                 _ = try fileService.resolveRealPath(at: path)
+-                return .foreignLink
++                return .owned
+             } catch let error as NSError where error.domain == NSPOSIXErrorDomain
+                 && (error.code == Int(ENOENT) || error.code == Int(ENOTDIR)) {
+                 return .owned

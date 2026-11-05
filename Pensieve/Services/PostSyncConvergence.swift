@@ -19,6 +19,7 @@ final class PostSyncConvergence: PostSyncConverging {
     private let contextFactory: ContextFactory
     private let categoryReconciler: CategoryReconcilerProtocol
     private let intentReconciler: IntentReconcilerProtocol
+    private let removedSkillCleanup: RemovedSkillCleaning?
     private let auditLog: (_ category: String, _ detail: String) -> Void
     /// Fires after each convergence pass; AppRuntime refreshes the deploy index here (PLAN-29).
     private let didConverge: () -> Void
@@ -30,13 +31,15 @@ final class PostSyncConvergence: PostSyncConverging {
         categoryReconciler: CategoryReconcilerProtocol,
         intentReconciler: IntentReconcilerProtocol,
         auditLog: @escaping (_ category: String, _ detail: String) -> Void,
-        didConverge: @escaping () -> Void = {}
+        didConverge: @escaping () -> Void = {},
+        removedSkillCleanup: RemovedSkillCleaning? = nil
     ) {
         self.root = root
         self.deployReconciler = deployReconciler
         self.contextFactory = contextFactory
         self.categoryReconciler = categoryReconciler
         self.intentReconciler = intentReconciler
+        self.removedSkillCleanup = removedSkillCleanup
         self.auditLog = auditLog
         self.didConverge = didConverge
     }
@@ -61,6 +64,7 @@ final class PostSyncConvergence: PostSyncConverging {
 
         guard runLedgerReconcilers else { return }
         let context = contextFactory()
+        if let removedSkillCleanup { record(removedSkillCleanup.reconcile(context: context), name: "removedSkill") }
         record(categoryReconciler.reconcileDeployments(context: context), name: "category")
         var intents = intentReconciler.reconcileDeployments(context: context)
         intents.append(intentReconciler.reconcileWaitingRemovals(context: context))

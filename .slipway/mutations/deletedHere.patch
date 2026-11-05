@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/RemovedSkillCleanup.swift
++++ b/Pensieve/Services/RemovedSkillCleanup.swift
+@@ -88,7 +88,7 @@
+             if let projectPath { _ = try fileService.requireProjectDirectory(at: projectPath) }
+             if platform == .cursor {
+                 // Without the source, only the mark proves ownership. History never proves file ownership.
+-                return try ownership.cursor(at: path, legacyContent: nil)
++                return try fileService.entryTypeWithoutFollowingLinks(at: path) == .regular ? .owned : .foreign
+             }
+             let occupant = try ownership.link(at: path, skillsDirectory: paths.skillsDirectory,
+                                              linksFile: platform == .codex && projectPath != nil)

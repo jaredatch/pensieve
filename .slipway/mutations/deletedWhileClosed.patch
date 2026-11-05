@@ -1,0 +1,14 @@
+--- a/Pensieve/Services/RemovedSkillCleanup.swift
++++ b/Pensieve/Services/RemovedSkillCleanup.swift
+@@ -22,7 +22,10 @@
+             let liveIDs = Set(skills.map(\.id)), liveSlugs = Set(skills.map(\.directoryName))
+             let projects = try context.fetch(FetchDescriptor<Project>())
+             let byID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+-            let history = try context.fetch(FetchDescriptor<DeployRecord>()).filter { !liveIDs.contains($0.skillID) }
++            let recorded = Set(try stateStore.read().records.map(\.artifactPath))
++            let history = try context.fetch(FetchDescriptor<DeployRecord>()).filter {
++                !liveIDs.contains($0.skillID) && recorded.contains($0.targetPath)
++            }
+             let folders = ProjectFolderProbe(fileService: fileService)
+             var settled: [DeployRecord] = []
+             var pending: [(DeployRecord, DeployRemovalCandidate)] = []
