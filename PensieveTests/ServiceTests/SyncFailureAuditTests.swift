@@ -20,7 +20,7 @@ final class SyncFailureAuditTests: XCTestCase {
         for error in errors {
             _ = await h.run(error)
             let underlying = (error as? ManifestRecoveryFailure)?.underlying ?? error
-            var expected = DisplayTextSanitizer.singleLine(underlying.localizedDescription)
+            var expected = underlying.localizedDescription.replacingOccurrences(of: "\n", with: " ")
             if case let SyncError.storeUnreadable(warnings) = underlying { expected += " " + warnings.joined(separator: " ") }
             let status = try h.status()
             XCTAssertEqual(status.result, "failed")
@@ -53,7 +53,7 @@ final class SyncFailureAuditTests: XCTestCase {
             XCTAssertEqual(result, .failed(error.localizedDescription))
             let model = SyncModel(git: h.disk.paths.makeGitService(), root: h.disk.root)
             model.apply(result)
-            XCTAssertEqual(model.state, .error(DisplayTextSanitizer.singleLine(error.localizedDescription)))
+            XCTAssertEqual(model.state, .error(error.localizedDescription))
             let status = try h.status()
             for word in words { XCTAssertTrue(status.detail.contains(word), "Missing \(word) in fallback diagnosis") }
             XCTAssertTrue(try h.log().hasSuffix("\(status.timestamp) failed \(status.detail)\n"))
@@ -100,7 +100,7 @@ final class SyncFailureAuditTests: XCTestCase {
         defer { try? blank.disk.remove() }
         let absent = try await SyncFailureAuditFixture()
         defer { try? absent.disk.remove() }
-        let ordinary = LiteralAuditFailure(text: "words with spaces and tabs\tend")
+        let ordinary = LiteralAuditFailure(text: "words with spaces \t\nand tabs\tend")
         _ = await blank.run(ordinary)
         _ = await absent.run(ordinary)
         XCTAssertEqual(try blank.status().detail, try absent.status().detail)

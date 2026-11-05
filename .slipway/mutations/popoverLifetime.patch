@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SyncViews/SyncStatusView.swift
++++ b/Pensieve/Views/SyncViews/SyncStatusView.swift
+@@ -63,7 +63,7 @@
+             }
+         }
+         .onChange(of: failedReason != nil) { _, isFailure in
+-            if !isFailure { showsFailure = false }
++            if !isFailure { /* The old reason stays presented. */ }
+         }
+         .task(id: model.state) { await saves?.refreshAndRetry() }
+     }

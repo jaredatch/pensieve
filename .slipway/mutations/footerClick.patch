@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SyncViews/SyncStatusView.swift
++++ b/Pensieve/Views/SyncViews/SyncStatusView.swift
+@@ -75,7 +75,7 @@
+ 
+     private func perform(_ action: SyncFooterPresentation.Action) {
+         switch action {
+-        case .showFailure: showsFailure = true
++        case .showFailure: break
+         case .none: break
+         case .sync: model.syncNow(context: modelContext)
+         case .resolve: onResolve()

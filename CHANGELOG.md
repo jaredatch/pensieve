@@ -26,6 +26,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- Click Sync failed to see why and retry. Settings › Sync also shows the error, and the sync log keeps the reason with sync credentials removed.
+
 - History for a GitHub skill downloads only that skill's files, so large repositories load far faster.
 
 - A damaged synced library now keeps your edits waiting and offers an explicit repair. Choose Repair in the sidebar, then confirm replacing the damaged file with this Mac's library. A readable file pulled from another Mac also lets the waiting edits save.

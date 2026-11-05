@@ -5,6 +5,23 @@ import XCTest
 final class SyncFooterPresentationTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
+    func testFailedSyncLineKeepsItsLabelAndOpensItsReason() throws {
+        for hovering in [false, true] {
+            let line = try XCTUnwrap(make(.error("boom"), hovering: hovering))
+            XCTAssertEqual(line.label, "Sync failed")
+            XCTAssertEqual(line.action, .showFailure)
+            XCTAssertNotEqual(line.action, .sync)
+            XCTAssertEqual(line.voiceOverText, "Sync failed. boom")
+            XCTAssertEqual(line.help, "boom")
+            let repair = try XCTUnwrap(SyncFooterPresentation.make(state: .error("boom"), canResolve: false,
+                hovering: hovering, now: now, libraryDamaged: true))
+            XCTAssertEqual(repair.action, .repair)
+            for state in [SyncModel.SyncState.idle, .synced(at: now), .branchless] {
+                XCTAssertEqual(try XCTUnwrap(make(state, hovering: hovering)).action, .sync)
+            }
+        }
+    }
+
     func testUnconfiguredHasNoPresentation() {
         XCTAssertNil(make(.unconfigured))
     }
@@ -59,7 +76,7 @@ final class SyncFooterPresentationTests: XCTestCase {
     func testErrorHoveringOffersSyncAndKeepsHelp() throws {
         let line = try XCTUnwrap(make(.error("boom"), hovering: true))
 
-        XCTAssertEqual(line.label, "Sync now")
+        XCTAssertEqual(line.label, "Sync failed")
         XCTAssertEqual(line.help, "boom")
     }
 

@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SyncViews/SyncFailurePopover.swift
++++ b/Pensieve/Views/SyncViews/SyncFailurePopover.swift
+@@ -19,7 +19,7 @@
+                 Button("Sync Now", action: onSync)
+                     .keyboardShortcut(.defaultAction)
+                     .disabled(!canSyncNow)
+-                if reason.contains("Settings › Sync") {
++                if true {
+                     Button("Open Sync Settings…", action: onOpenSyncSettings)
+                 }
+             }

@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SyncViews/SyncFooterPresentation.swift
++++ b/Pensieve/Views/SyncViews/SyncFooterPresentation.swift
+@@ -55,7 +55,7 @@
+                                           emphasized: false, action: .sync, help: nil)
+         case let .error(message):
+             return SyncFooterPresentation(symbol: "exclamationmark.triangle", showsSpinner: false,
+-                                          label: "Sync failed", emphasized: true, action: .showFailure, help: message)
++                                          label: "Sync failed", emphasized: true, action: .sync, help: message)
+         case let .conflicted(paths):
+             let label = hovering && canResolve ? "Resolve…" : "\(paths.count) conflict\(paths.count == 1 ? "" : "s")"
+             return SyncFooterPresentation(symbol: "exclamationmark.arrow.triangle.2.circlepath", showsSpinner: false,

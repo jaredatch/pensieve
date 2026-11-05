@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SyncViews/SyncStatusView.swift
++++ b/Pensieve/Views/SyncViews/SyncStatusView.swift
+@@ -44,7 +44,7 @@
+                     .disabled(line.action == .none)
+                     .onHover { isHovering = $0 }
+                     .help(line.help ?? "")
+-                    .accessibilityLabel(line.voiceOverText)
++                    .accessibilityLabel(line.label)
+                     .padding(.horizontal, Spacing.xl)
+                     .padding(.vertical, Spacing.sm)
+                 }

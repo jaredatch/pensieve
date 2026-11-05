@@ -54,6 +54,17 @@ final class SyncStatusWiringTests: XCTestCase {
         XCTAssertEqual(matches(binding, in: header), 1, "the branchless status must reach the detail banner")
     }
 
+    func testFailedSyncLineReadsItsReasonAloudAndTheMainWindowOpensSettings() throws {
+        let footer = try source("Pensieve/Views/SyncViews/SyncStatusView.swift")
+        let content = try source("Pensieve/Views/MainWindow/ContentView.swift")
+        let line = try XCTUnwrap(capture(#"if\s+let\s+(\w+)\s*=\s*SyncFooterPresentation\.make"#, in: footer))
+        XCTAssertEqual(matches(#"\.accessibilityLabel\s*\(\s*"# + line + #"\.voiceOverText\s*\)"#, in: footer), 1)
+        let opener = try XCTUnwrap(capture(#"@Environment\s*\(\s*\\\.openSettings\s*\)\s*(?:private\s+)?var\s+(\w+)"#,
+            in: content))
+        XCTAssertEqual(matches(#"onOpenSyncSettings\s*:\s*\{\s*\w+\.openSyncSettings\s*\(\s*using\s*:\s*\{\s*"#
+            + opener + #"\s*\(\s*\)\s*\}\s*\)\s*\}"#, in: content), 1)
+    }
+
     private func source(_ path: String) throws -> String {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()

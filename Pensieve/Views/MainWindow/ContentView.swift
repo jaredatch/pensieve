@@ -46,6 +46,7 @@ struct ContentView: View {
     @Query(sort: \Project.name) private var projects: [Project]
     @Query(sort: \Category.name) private var categories: [Category]
     @Environment(AppRuntime.self) private var runtime
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
@@ -61,7 +62,8 @@ struct ContentView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if syncModel.showsFooter(saves: library.manifestSaves) {
                         SyncStatusView(model: syncModel, saves: library.manifestSaves,
-                            onResolve: { showConflictResolution = true })
+                            onResolve: { showConflictResolution = true },
+                            onOpenSyncSettings: { runtime.openSyncSettings(using: { openSettings() }) })
                     }
                 }
         } content: {

@@ -1,0 +1,10 @@
+--- a/Pensieve/AppRuntime.swift
++++ b/Pensieve/AppRuntime.swift
+@@ -8,7 +8,6 @@
+     enum SettingsTab: Hashable { case general, sync, platforms, github }
+     var selectedSettingsTab: SettingsTab = .general
+     func openSyncSettings(using opener: () -> Void) {
+-        selectedSettingsTab = .sync
+         opener()
+     }
+ 

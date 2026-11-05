@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SettingsViews/SyncSettingsView.swift
++++ b/Pensieve/Views/SettingsViews/SyncSettingsView.swift
+@@ -28,7 +28,7 @@
+                 if model.syncToken.remote != nil {
+                     tokenRow
+                 }
+-                if case let .error(reason) = runtime.syncModel.state, reason != remoteError {
++                if case let .error(reason) = runtime.syncModel.state, false, reason != remoteError {
+                     HStack(alignment: .top, spacing: Spacing.sm) {
+                         Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+                         VStack(alignment: .leading, spacing: Spacing.xs) {
