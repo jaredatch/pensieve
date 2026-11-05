@@ -205,13 +205,14 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot) throws {
+    func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot,
+                        local: ManifestSnapshot?, durable: ManifestSnapshot) throws {
         for pending in items.dropFirst() where !pending.wasHealed
             && pending.categoryEdit?.wasRebuilt != true && pending.presentation.context === context
             && items.contains(where: { $0.id == pending.id }) {
             if case .createSkill = pending.change {
-                pending.presentation.cache(local: try? manifest.snapshot(from: context))
-                pending.presentation.project(onto: &snapshot, knownCreates: knownCreates)
+                pending.presentation.cache(local: pending.intentMove == nil ? try? manifest.snapshot(from: context) : local)
+                pending.presentation.project(onto: &snapshot, knownCreates: knownCreates, local: local, durable: durable)
                 continue
             }
             do { try pending.change.validate(in: snapshot) } catch {

@@ -61,7 +61,10 @@ extension ManifestSaveModel {
                 return .skipped(saved)
             }
         }
-        item.intentMove?.apply(to: &saved, local: try? manifest.snapshot(from: context), knownCreates: knownCreates)
+        if let move = item.intentMove {
+            let local = try moveWindow(for: move, context: context, snapshot: saved)
+            move.apply(to: &saved, durable: disk ?? saved, local: local, knownCreates: knownCreates)
+        }
         let snapshot = saved, manifest = manifest, root = root, files = files
         let headChanged = try await BlockingWork.run { () -> Bool? in
             let stamp = GitHeadStamp(fileService: files)
@@ -81,6 +84,17 @@ extension ManifestSaveModel {
         refused = refused.filter { $0.acknowledge(durable: saved) }
         persistRefusedCreates(excludingPublished: item.id)
         return headChanged ? .headChanged : .saved(saved)
+    }
+
+    @MainActor
+    private func moveWindow(for move: ManifestLocalIntentMove, context: ModelContext,
+                            snapshot: ManifestSnapshot) throws -> ManifestSnapshot? {
+        do { return try manifest.snapshot(from: context) } catch {
+            // Refuse before writing: a missing window cannot decide which creation owns
+            // the old name's memberships and requests. Retention will preserve the move.
+            if move.reusesCarriedName(in: snapshot, knownCreates: knownCreates) { throw error }
+            return nil
+        }
     }
 
     private func collisionDeletion(for item: Item) throws -> String? {
@@ -110,12 +124,12 @@ extension ManifestSaveModel {
                 var accepted = durable
                 let overlays = Dictionary(durable.skills.map { ($0.slug, $0) }, uniquingKeysWith: { first, _ in first })
                 accepted.skills = prepared.snapshot.skills.map { overlays[$0.slug] ?? $0 }
-                _ = try acceptRebuild(item, prepared: prepared, durable: accepted, includingHeadEdit: false)
+                _ = try acceptRebuild(item, prepared: prepared, snapshot: accepted, durable: durable, includingHeadEdit: false)
             } else {
                 let observation = try await prepareRebuild(item, durable: durable)
                 guard observation.stable else { throw SyncError.ingestIncomplete }
-                _ = try acceptRebuild(item, prepared: observation.value, durable: observation.value.snapshot,
-                                      includingHeadEdit: false)
+                _ = try acceptRebuild(item, prepared: observation.value, snapshot: observation.value.snapshot,
+                                      durable: durable, includingHeadEdit: false)
                 StoreIngestState.shared(for: item.presentation.context.container)
                     .accept(observation.ingest, result: RebuildResult())
             }
@@ -149,7 +163,8 @@ extension ManifestSaveModel {
                     // The bracket starts before the manifest read, not just before the skill scan.
                     guard observation.stable, before == observation.before else { continue }
                     verdict = try acceptRebuild(item, prepared: observation.value,
-                                                durable: observation.value.snapshot, includingHeadEdit: true)
+                                                snapshot: observation.value.snapshot, durable: durable,
+                                                includingHeadEdit: true)
                     ingest.accept(observation.ingest, result: RebuildResult())
                     acceptedFinalAttempt = true
                 } catch { throw rebuildFailure(error, item: item, manifestSaved: item.wasHealed) }
@@ -201,30 +216,37 @@ extension ManifestSaveModel {
     }
 
     @MainActor
-    private func acceptRebuild(_ item: Item, prepared: PreparedStoreRebuild, durable: ManifestSnapshot,
-                               includingHeadEdit: Bool) throws -> HeadEditVerdict {
-        var displayed = durable
+    private func acceptRebuild(_ item: Item, prepared: PreparedStoreRebuild, snapshot: ManifestSnapshot,
+                               durable: ManifestSnapshot, includingHeadEdit: Bool) throws -> HeadEditVerdict {
+        var displayed = snapshot
         let creates = knownCreates
+        // The scan can synthesize an overlay from a folder before its create is on disk.
+        // Only the actual durable manifest can say the move has already been published.
+        let needsMoveWindow = (refused + items.map(\.presentation)).contains {
+            $0.context === item.presentation.context && $0.intentMove != nil
+        }
+        let local = needsMoveWindow ? (try? manifest.snapshot(from: item.presentation.context)) : nil
         for edit in refused where edit.context === item.presentation.context {
-            edit.project(onto: &displayed, knownCreates: creates)
+            edit.project(onto: &displayed, knownCreates: creates, local: local, durable: durable)
         }
         var verdict = HeadEditVerdict.ready(prepared)
         if includingHeadEdit, !item.wasHealed {
             do {
                 if case .createSkill = item.change {
-                    item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
-                    item.presentation.project(onto: &displayed, knownCreates: creates)
+                    item.presentation.cache(local: item.intentMove == nil
+                        ? try? manifest.snapshot(from: item.presentation.context) : local)
+                    item.presentation.project(onto: &displayed, knownCreates: creates, local: local, durable: durable)
                 } else {
                     try item.change.validate(in: displayed)
                     item.change.apply(to: &displayed)
                 }
             } catch {
                 // Restore identity before name-based acceptance; report and reconcile afterwards.
-                stageCategoryRefusal(item, durable: durable, error: error)
+                stageCategoryRefusal(item, durable: snapshot, error: error)
                 verdict = .refused(error)
             }
         }
-        try projectPending(in: item.presentation.context, onto: &displayed)
+        try projectPending(in: item.presentation.context, onto: &displayed, local: local, durable: durable)
         try item.accept(prepared, displayed)
         return verdict
     }

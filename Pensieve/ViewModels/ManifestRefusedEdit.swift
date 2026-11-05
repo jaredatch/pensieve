@@ -117,8 +117,10 @@ final class ManifestRefusedEdit {
         return !remaining.isEmpty
     }
 
-    func project(onto displayed: inout ManifestSnapshot, knownCreates: [SkillOverlay] = []) {
-        projection.project(onto: &displayed, keepingLocalCreates: true, knownCreates: knownCreates)
+    func project(onto displayed: inout ManifestSnapshot, knownCreates: [SkillOverlay] = [],
+                 local: ManifestSnapshot? = nil, durable: ManifestSnapshot? = nil) {
+        projection.project(onto: &displayed, keepingLocalCreates: true, knownCreates: knownCreates,
+                           local: local, durable: durable)
     }
 
     /// A category deleted before retirement may be restored by undo afterward.
