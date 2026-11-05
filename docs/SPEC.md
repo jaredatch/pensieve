@@ -520,7 +520,7 @@ Each deploy/remove action is tracked in SwiftData:
 | `contentHash` | Hash of skill body at deploy time |
 | `projectID` | Which project the deploy targeted, if project-scoped (optional) |
 
-Used for freshness checking and deployment history. Removing a deploy keeps its `DeployRecord`; live connected-state comes from the filesystem, not record counts. There are two exceptions: Rename retires the records of artifacts it removed, and app convergence retires records whose skill UUID no longer exists once their artifact paths are settled. This happens on every Mac, including the Mac where Delete was clicked. Delete's next convergence pass retires its remaining history without changing project files. An unavailable registered project keeps its history until cleanup can check it.
+Used for freshness checking and deployment history. Removing a deploy keeps its `DeployRecord`; live connected-state comes from the filesystem, not record counts. There are two exceptions: Rename retires the records of artifacts it removed, and app convergence retires records whose skill UUID no longer exists once their artifact paths are settled. This happens on every Mac, including the Mac where Delete was clicked. Retiring history on the Mac where Delete was clicked does not itself change project files. Delete's saved waiting removals still follow their own retry policy. An unavailable registered project keeps its history until cleanup can check it.
 
 ---
 
