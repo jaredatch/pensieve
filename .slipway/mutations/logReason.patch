@@ -1,0 +1,14 @@
+--- a/Pensieve/Services/SyncCoordinator.swift
++++ b/Pensieve/Services/SyncCoordinator.swift
+@@ -163,7 +163,10 @@
+             audit.record(category: fields.category, detail: fields.detail)
+             return
+         }
+-        let reason = auditDescription(error)
++        let reason: String
++        if case .manifestDamaged = result { reason = auditDescription(error) }
++        else if case GitError.authenticationFailed = error { reason = auditDescription(error) }
++        else { reason = fields.detail }
+         audit.record(category: fields.category, detail: DisplayTextSanitizer.scrubbingSecrets(reason, token: token))
+     }
+ 

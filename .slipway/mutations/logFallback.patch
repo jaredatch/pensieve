@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SyncCoordinator.swift
++++ b/Pensieve/Services/SyncCoordinator.swift
+@@ -225,7 +225,7 @@
+         case let error as LocalizedError:
+             return .failed(error.errorDescription ?? "Sync failed.")
+         default:
+-            return .failed(error.localizedDescription)
++            return .failed("Sync failed.")
+         }
+     }
+ 

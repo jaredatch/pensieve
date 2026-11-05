@@ -1,0 +1,20 @@
+--- a/Pensieve/Services/SyncAudit.swift
++++ b/Pensieve/Services/SyncAudit.swift
+@@ -31,7 +31,7 @@
+ 
+     func record(category: String, detail: String) {
+         let category = DisplayTextSanitizer.singleLine(category)
+-        let detail = Self.boundedDetail(DisplayTextSanitizer.singleLine(detail))
++        let detail = DisplayTextSanitizer.singleLine(detail)
+         try? fileService.createDirectory(at: appSupport)
+         guard let lock = SyncLock.acquire(at: appSupport + "/daemon-audit.lock") else { return }
+         defer { lock.release() }
+@@ -43,7 +43,7 @@
+     /// Append supporting detail without replacing the CLI-compatible last-cycle status snapshot.
+     func append(category: String, detail: String) {
+         let category = DisplayTextSanitizer.singleLine(category)
+-        let detail = Self.boundedDetail(DisplayTextSanitizer.singleLine(detail))
++        let detail = DisplayTextSanitizer.singleLine(detail)
+         try? fileService.createDirectory(at: appSupport)
+         guard let lock = SyncLock.acquire(at: appSupport + "/daemon-audit.lock") else { return }
+         defer { lock.release() }
