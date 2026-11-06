@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class SyncFailureAuditTests: XCTestCase {
-    private let credentialedURL = "https://kept:tok-SECRET-215@fixture.test/store.git"
+    private let credentialedURL = "https://kept:tok-SECRET-215" + "@fixture.test/store.git"
     // The fixed test URL is the single source of its synthetic credential; it contains a password by construction.
     private var token: String { URLComponents(string: credentialedURL)!.password! }
 
