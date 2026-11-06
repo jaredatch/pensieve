@@ -49,11 +49,12 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         }
 
         let snapshotter = (manifestService as? ManifestSnapshotting) ?? ManifestService(fileService: fileService)
-        // A failed row read is missing ownership evidence. The cached projection may still
-        // add the renamed skill's values, but cannot remove anything under a reused name.
-        let local = try? snapshotter.snapshot(from: context)
         let displayed = StoreIngestState.shared(for: context.container)
-            .projectingEdits(onto: snapshot, keepingLocalCreates: true, local: local)
+            .projectingEdits(onto: snapshot, keepingLocalCreates: true) {
+                // A failed row read is missing ownership evidence. The cached projection may still
+                // add the renamed skill's values, but cannot remove anything under a reused name.
+                try? snapshotter.snapshot(from: context)
+            }
         result = rebuild(snapshot: displayed.snapshot, fromRoot: root, context: context)
         if !result.ingestIncomplete, var read = result.categoryRead {
             read.retainedWindows = displayed.retainedWindows

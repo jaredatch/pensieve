@@ -1,0 +1,12 @@
+diff --git a/Pensieve/Services/StoreIngestState.swift b/Pensieve/Services/StoreIngestState.swift
+--- a/Pensieve/Services/StoreIngestState.swift
++++ b/Pensieve/Services/StoreIngestState.swift
+@@ -102,7 +102,7 @@ final class StoreIngestState {
+         let changes = edits
+         let retainedEdits = refused
+         lock.unlock()
+-        let local = retainedEdits.contains { $0.projection.intentMove != nil } ? readLocal() : nil
++        let local = readLocal()
+         let creates = retainedEdits.flatMap { $0.projection.createdSkills } + changes.compactMap { edit -> SkillOverlay? in
+             if case .createSkill(let skill) = edit.change { return skill }
+             return nil

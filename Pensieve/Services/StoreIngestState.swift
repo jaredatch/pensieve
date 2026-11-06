@@ -95,12 +95,13 @@ final class StoreIngestState {
 
     /// Plain edits cross contexts; SwiftData objects remain on their owning executor.
     func projectingEdits(onto snapshot: ManifestSnapshot, keepingLocalCreates: Bool = false,
-                         local: ManifestSnapshot? = nil)
+                         readLocal: () -> ManifestSnapshot? = { nil })
         -> (snapshot: ManifestSnapshot, retainedWindows: Set<UUID>) {
         lock.lock()
         let changes = edits
         let retainedEdits = refused
         lock.unlock()
+        let local = retainedEdits.contains { $0.projection.intentMove != nil } ? readLocal() : nil
         let creates = retainedEdits.flatMap { $0.projection.createdSkills } + changes.compactMap { edit -> SkillOverlay? in
             if case .createSkill(let skill) = edit.change { return skill }
             return nil
