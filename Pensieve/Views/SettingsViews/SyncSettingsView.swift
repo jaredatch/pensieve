@@ -28,6 +28,19 @@ struct SyncSettingsView: View {
                 if model.syncToken.remote != nil {
                     tokenRow
                 }
+                if case let .error(reason) = runtime.syncModel.state, reason != remoteError {
+                    HStack(alignment: .top, spacing: Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Sync failed")
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
                 if remoteError != nil && model.state != .working && !model.isDisconnecting {
                     EmptyView()
                 } else if model.state == .working || (runtime.syncModel.canConnect && !model.isDisconnecting) {

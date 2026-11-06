@@ -5,6 +5,13 @@ import SwiftData
 @MainActor
 @Observable
 final class AppRuntime {
+    enum SettingsTab: Hashable { case general, sync, platforms, github }
+    var selectedSettingsTab: SettingsTab = .general
+    func openSyncSettings(using opener: () -> Void) {
+        selectedSettingsTab = .sync
+        opener()
+    }
+
     typealias LaunchReconcile = (ModelContext, Bool) -> LaunchReconcileOutcome
     typealias LaunchBackfill = (ModelContext) -> Void
     typealias CoordinatorConfigure = (SyncCoordinator) async -> Void

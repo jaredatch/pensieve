@@ -138,7 +138,9 @@ actor SyncCoordinator {
                 result = Self.cycleFailure(authentication.reporting(error))
             }
         }
-        Self.recordAudit(for: result, error: cycleError, audit: audit)
+        let token: String?
+        if case let .httpsToken(_, value, _) = authentication.credential { token = value } else { token = nil }
+        Self.recordAudit(for: result, error: cycleError, token: token, audit: audit)
         return result
     }
 
@@ -154,18 +156,28 @@ actor SyncCoordinator {
                                            headStamp: { self.headState().oid })
     }
 
-    /// Recovery keeps damage and app-authored credential advice in the UI; audit retains the underlying error.
-    private static func recordAudit(for result: SyncCycleResult, error: Error?, audit: SyncAuditWriting) {
+    /// All failed cycles share one scrub, including sign-in and the cause of a failed repair.
+    private static func recordAudit(for result: SyncCycleResult, error: Error?, token: String?, audit: SyncAuditWriting) {
         let fields = result.auditFields
-        if let error, case ManifestError.damaged = error {
+        guard fields.category == "failed", let error else {
             audit.record(category: fields.category, detail: fields.detail)
-        } else if let error, case .manifestDamaged = result {
-            audit.record(category: fields.category, detail: error.localizedDescription)
-        } else if let error, case GitError.authenticationFailed = error {
-            audit.record(category: fields.category, detail: error.localizedDescription)
-        } else {
-            audit.record(category: fields.category, detail: fields.detail)
+            return
         }
+        let reason = auditDescription(error)
+        audit.record(category: fields.category, detail: DisplayTextSanitizer.scrubbingSecrets(reason, token: token))
+    }
+
+    private static func auditDescription(_ error: Error) -> String {
+        // Localized errors can carry private associated values (notably rejectedRemote's raw URL).
+        // Only their public description belongs in the audit; untyped errors also need their diagnosis.
+        if error is LocalizedError {
+            let description = error.localizedDescription
+            if case let SyncError.storeUnreadable(warnings) = error, !warnings.isEmpty {
+                return description + " " + warnings.joined(separator: " ")
+            }
+            return description
+        }
+        return "\(String(reflecting: type(of: error))): \(String(describing: error))"
     }
 
     private func cycleResult(
@@ -213,7 +225,7 @@ actor SyncCoordinator {
         case let error as LocalizedError:
             return .failed(error.errorDescription ?? "Sync failed.")
         default:
-            return .failed("Sync failed.")
+            return .failed(error.localizedDescription)
         }
     }
 

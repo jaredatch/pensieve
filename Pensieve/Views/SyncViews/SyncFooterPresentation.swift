@@ -8,6 +8,7 @@ struct SyncFooterPresentation: Equatable {
     enum Action: Equatable {
         case none
         case sync
+        case showFailure
         case resolve
         case repair
     }
@@ -21,6 +22,8 @@ struct SyncFooterPresentation: Equatable {
     var action: Action
     /// Tooltip text, when there is more to say than the label (an error message).
     var help: String?
+
+    var voiceOverText: String { action == .showFailure ? label + ". " + (help ?? "") : label }
 
     /// `nil` when sync is unconfigured and the library is readable; damage still returns the repair line.
     static func make(state: SyncModel.SyncState, canResolve: Bool, hovering: Bool,
@@ -51,12 +54,8 @@ struct SyncFooterPresentation: Equatable {
                                           label: RelativeTime.compact(for: at, relativeTo: now),
                                           emphasized: false, action: .sync, help: nil)
         case let .error(message):
-            if hovering {
-                return SyncFooterPresentation(symbol: "arrow.triangle.2.circlepath", showsSpinner: false,
-                                              label: "Sync now", emphasized: true, action: .sync, help: message)
-            }
             return SyncFooterPresentation(symbol: "exclamationmark.triangle", showsSpinner: false,
-                                          label: "Sync failed", emphasized: true, action: .sync, help: message)
+                                          label: "Sync failed", emphasized: true, action: .showFailure, help: message)
         case let .conflicted(paths):
             let label = hovering && canResolve ? "Resolve…" : "\(paths.count) conflict\(paths.count == 1 ? "" : "s")"
             return SyncFooterPresentation(symbol: "exclamationmark.arrow.triangle.2.circlepath", showsSpinner: false,

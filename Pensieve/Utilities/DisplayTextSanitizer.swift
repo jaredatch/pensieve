@@ -29,6 +29,17 @@ enum DisplayTextSanitizer {
         return output
     }
 
+    /// Strip URL userinfo and the attempt's literal token before any length cut can split a secret.
+    /// SCP-style SSH remotes have no scheme and retain their git@host:path spelling.
+    static func scrubbingSecrets(_ value: String, token: String?) -> String {
+        var scrubbed = value.replacingOccurrences(
+            of: #"://[^\s/?#]*@"#, with: "://", options: .regularExpression)
+        if let token, !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            scrubbed = scrubbed.replacingOccurrences(of: token, with: "[redacted]")
+        }
+        return scrubbed
+    }
+
     private static func terminalEscapeEnd(in scalars: [Unicode.Scalar], at start: Int) -> Int? {
         let first = scalars[start].value
         let isEscape = first == 0x1B
