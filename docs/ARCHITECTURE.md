@@ -248,7 +248,7 @@ Once disk holds the renamed creation, the move leaves reused names alone: anothe
 
 The move takes the renamed skill's new-slug memberships and intents from the window at publication, during rebuilds and in whole-row writes. Submitted creates and category edits update the refused edit's cached snapshot. Launch restores it from persisted rows before rebuilding.
 
-Rebuilds read current rows for ownership evidence, and whole-row writers use their successfully read rows. Without a current window read, a cached snapshot may still add new-name values, but the move removes and re-slugs nothing under a reused name. A failed read never proves that an assignment was removed or that the cache is current.
+Rebuilds read current rows for ownership evidence only when a retained create carries a rename's move, and whole-row writers use their successfully read rows. Without a current window read, a cached snapshot may still add new-name values, but the move removes and re-slugs nothing under a reused name. A failed read never proves that an assignment was removed or that the cache is current.
 
 A queued rename with a reused carried name declines publication if its window read fails, retaining its create and move before any write. Without a window snapshot, carried names with no visible replacement still move as a whole.
 
