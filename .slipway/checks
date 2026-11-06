@@ -1,0 +1,4 @@
+paths = Pensieve/Services/StoreRebuildService.swift Pensieve/Services/StoreIngestState.swift docs/ARCHITECTURE.md .slipway/changelog/223.md .slipway/mutations/
+risk = Pensieve/Services/StoreRebuildService.swift Pensieve/Services/StoreIngestState.swift
+check.failedCategoryRead = tests PensieveTests/CategorySaveUndoTests/testRefusedRenameRestoresNameForNewerSchemaLockWriteAndFallbackRead
+mutation.failedCategoryRead = .slipway/mutations/failedCategoryRead.patch
