@@ -1,0 +1,8 @@
+paths = Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/Services/ManifestChange.swift Pensieve/Services/StoreIngestState.swift Pensieve/Services/CategorySaveEdit.swift PensieveTests/ServiceTests/CategorySaveUndoTests+Retirement.swift PensieveTests/Fixtures/ManifestSaveFixture.swift PensieveTests/Fixtures/FaultyFileService.swift PensieveTests/Fixtures/DeletionTestSupport.swift docs/ARCHITECTURE.md .slipway/changelog/186.md .slipway/mutations/
+risk = Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/Services/ManifestChange.swift Pensieve/Services/StoreIngestState.swift Pensieve/Services/CategorySaveEdit.swift
+check.renameUndo = tests PensieveTests/CategorySaveUndoTests/testACategoryRenamedAfterAFailedSkillDeletionKeepsTheSkillYouAddedWhenTheRenameIsUndone
+mutation.renameUndo = .slipway/mutations/renameUndo.patch
+check.deleteUndo = tests PensieveTests/CategorySaveUndoTests/testACategoryDeletedAfterAFailedSkillDeletionKeepsTheSkillYouAddedWhenTheDeleteIsUndone
+mutation.deleteUndo = .slipway/mutations/deleteUndo.patch
+check.olderMembership = tests PensieveTests/CategorySaveUndoTests/testACategoryDeletedBeforeAFailedSkillDeletionDoesNotGetTheSkillBackWhenTheDeleteIsUndone
+mutation.olderMembership = .slipway/mutations/olderMembership.patch
