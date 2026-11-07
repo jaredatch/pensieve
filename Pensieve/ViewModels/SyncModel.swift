@@ -126,9 +126,9 @@ final class SyncModel {
             } else if manualRetry != .queued {
                 manualRetry = nil
             }
-        } else if manualRetry == .awaitingOutage {
+        } else if manualRetry == .awaitingOutage || manualRetry == .queued {
             manualRetry = .inOutage
-        } else if manualRetry == .ready || manualRetry == .queued {
+        } else if manualRetry == .ready {
             manualRetry = nil
         }
         updateConfigurationState(wasUnavailable: wasUnavailable)

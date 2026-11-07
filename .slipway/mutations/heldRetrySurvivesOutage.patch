@@ -1,0 +1,15 @@
+diff --git a/Pensieve/ViewModels/SyncModel.swift b/Pensieve/ViewModels/SyncModel.swift
+--- a/Pensieve/ViewModels/SyncModel.swift
++++ b/Pensieve/ViewModels/SyncModel.swift
+@@ -126,9 +126,9 @@
+             } else if manualRetry != .queued {
+                 manualRetry = nil
+             }
+-        } else if manualRetry == .awaitingOutage || manualRetry == .queued {
++        } else if manualRetry == .awaitingOutage {
+             manualRetry = .inOutage
+-        } else if manualRetry == .ready {
++        } else if manualRetry == .ready || manualRetry == .queued {
+             manualRetry = nil
+         }
+         updateConfigurationState(wasUnavailable: wasUnavailable)
