@@ -1,0 +1,4 @@
+paths = Pensieve/Services/AppSocketServer.swift Pensieve/Services/FileService+Socket.swift PensieveTests/ServiceTests/AppSocketServerTests.swift
+risk = Pensieve/Services/AppSocketServer.swift Pensieve/Services/FileService+Socket.swift
+check.rebind = tests PensieveTests/AppSocketServerTests/testStopReleasesTheEndpointBeforeItReturns
+mutation.rebind = .slipway/mutations/rebind.patch
