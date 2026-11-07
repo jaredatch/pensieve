@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/AppSocketServer.swift
++++ b/Pensieve/Services/AppSocketServer.swift
+@@ -78,7 +78,7 @@
+         let released = released
+         released.enter()
+         source.setCancelHandler {
+-            lease.listener = nil
++            withExtendedLifetime(lease.listener) {}
+             released.leave()
+         }
+         source.resume()
