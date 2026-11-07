@@ -266,6 +266,44 @@ final class AppSocketServerTests: XCTestCase {
     }
 }
 
+extension AppSocketServerTests {
+    func testStopReleasesTheEndpointBeforeItReturns() async throws {
+        let directory = try SocketTestDirectory()
+        let path = directory.path + "/s"
+        for round in 1...50 {
+            var server: AppSocketServer? = try self.server(at: path)
+            defer { server?.stop() }
+            let client = try SocketTransport.connect(to: path)
+            defer { close(client) }
+            try await BlockingWork.run {
+                _ = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
+            }
+            let lock = try FileService.openRegularFile(at: path + ".lock").descriptor
+            let released = withExtendedLifetime(server) {
+                server?.stop()
+                let result = flock(lock, LOCK_EX | LOCK_NB)
+                XCTAssertEqual(result, 0, "Round \(round): stop must release the endpoint while the server is alive")
+                if result == 0 { flock(lock, LOCK_UN) }
+                close(lock)
+                return result == 0
+            }
+            // Keep a retained-lock regression an assertion failure in every round, rather than a bind error.
+            guard released else { continue }
+            let replacement = try self.server(at: path)
+            defer { replacement.stop() }
+            let reply = try await exchange(path)
+            withExtendedLifetime(server) {
+                XCTAssertEqual(reply.envelope, CLIReply.success(.string("answered")).envelope, "Round \(round)")
+            }
+            server?.stop()
+            server = nil
+            let next = try await exchange(path)
+            XCTAssertEqual(next.envelope, CLIReply.success(.string("answered")).envelope, "Round \(round)")
+            XCTAssertTrue(directory.files.fileExists(at: path), "Round \(round): old cleanup must preserve the replacement")
+        }
+    }
+}
+
 /// Reports the kernel-query result only; the real server still owns admission and socket I/O.
 private struct ReportedSocketPeer: SocketPeerCredentialReading {
     let user: uid_t?

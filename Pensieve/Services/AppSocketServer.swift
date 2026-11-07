@@ -23,7 +23,15 @@ final class AppSocketServer: AppSocketServing {
     }
     typealias Admit = @MainActor (CLIRequest) -> Admission
     private let source: DispatchSourceRead
-    private let listener: SocketListener
+    private let lease: ListenerLease
+    private let released = DispatchGroup()
+
+    /// Shared with the cancel handler, which alone releases the listener after accept work drains.
+    private final class ListenerLease {
+        var listener: SocketListener?
+
+        init(_ listener: SocketListener) { self.listener = listener }
+    }
 
     init(path: String, handshake: CLIHandshake, fileService: FileServiceProtocol,
          timeouts: SocketTimeouts = .init(), credentials: SocketPeerCredentialReading = SocketPeerCredentials(),
@@ -33,16 +41,19 @@ final class AppSocketServer: AppSocketServing {
         handshake.supportsReadiness = readiness != nil
         handshake.supportsCommit = true
         let listener = try fileService.makeSocketListener(at: path)
-        self.listener = listener
+        let lease = ListenerLease(listener)
+        self.lease = lease
+        let descriptor = listener.descriptor
         let queue = DispatchQueue(label: "com.jaredatch.pensieve.socket.accept")
         let clients = DispatchQueue(label: "com.jaredatch.pensieve.socket.clients", attributes: .concurrent)
         let slots = DispatchSemaphore(value: 32)
         let session = AppSocketSession(handshake: handshake, timeouts: timeouts,
             credentials: credentials, readiness: readiness, admit: admit, handler: handler)
-        source = DispatchSource.makeReadSource(fileDescriptor: listener.descriptor, queue: queue)
+        source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
         source.setEventHandler { [weak self] in
             while true {
-                let client = accept(listener.descriptor, nil, nil)
+                guard self?.source.isCancelled == false else { return }
+                let client = accept(descriptor, nil, nil)
                 guard client >= 0 else {
                     if errno == EMFILE || errno == ENFILE, let source = self?.source {
                         source.suspend()
@@ -64,18 +75,24 @@ final class AppSocketServer: AppSocketServing {
             }
         }
         // Retain the lease until cancellation has drained the event handler, avoiding descriptor reuse races.
-        source.setCancelHandler { withExtendedLifetime(listener) {} }
+        let released = released
+        released.enter()
+        source.setCancelHandler {
+            lease.listener = nil
+            released.leave()
+        }
         source.resume()
     }
 
+    /// Releases the endpoint before returning, without waiting for accepted client sessions.
     func stop() {
         source.cancel()
-        listener.removeOwnedPath()
+        released.wait()
     }
 
     deinit {
+        // The last reference can disappear on the accept queue, so only explicit stop() may wait.
         source.cancel()
-        listener.removeOwnedPath()
     }
 
 }
