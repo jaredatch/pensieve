@@ -82,10 +82,11 @@ final class ManifestSaveModel {
                 report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
         for edit in refused where edit.context === context { edit.observe(change) }
+        for item in items where item.presentation.context === context { item.presentation.observePending(change) }
         let manifest = manifest, files = files
         let item = Item(order: nextOrder, change: change, intentMove: intentMove, categoryEdit: categoryEdit,
             reconcile: reconcile,
-            presentation: ManifestRefusedEdit(change, context: context, intentMove: intentMove),
+            presentation: ManifestRefusedEdit(change, context: context, order: nextOrder, intentMove: intentMove),
             fallback: { try manifest.snapshot(from: context) },
             accept: { prepared, snapshot in
                 try StoreRebuildService(fileService: files, manifestService: manifest)
@@ -337,6 +338,7 @@ extension ManifestSaveModel {
     private func restoreCategories(_ affected: [Item], reason: Error) -> () -> Void {
         var notices: [OrderedCategoryNotice] = []
         var reports: [() -> Void] = []
+        var undos: [(order: Int, edit: CategorySaveEdit)] = []
         for (index, item) in affected.enumerated().reversed() {
             guard let edit = item.categoryEdit else { continue }
             let error = index == 0 ? reason : ManifestSaveError.unsavedTarget
@@ -344,6 +346,7 @@ extension ManifestSaveModel {
             do {
                 let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
+                if restored == .undone { undos.append((item.order, edit)) }
                 notices.append((item.order, CategorySaveNotice.entry(edit: edit,
                     error: restored == .saved ? reason : error, outcome: restored)))
                 wasKept = restored == .saved
@@ -355,14 +358,7 @@ extension ManifestSaveModel {
             reports.append { item.report(wasKept ? nil : error) }
         }
         if let context = affected.first?.presentation.context {
-            do {
-                let categories = try context.fetch(FetchDescriptor<Category>())
-                for edit in refused where edit.context === context { edit.preserveRetirement(in: categories) }
-                for item in items where item.presentation.context === context {
-                    item.presentation.preserveRetirement(in: categories)
-                }
-                try context.save()
-            } catch { log("Couldn't preserve skill retirement during category undo: " + error.localizedDescription) }
+            preserveRetirements(in: context, undoing: undos)
         }
         // All inverses land before convergence, so a dependent rename never briefly takes a name
         // that its parent is about to restore. A missing folder keeps the existing cleanup ledger.
@@ -374,5 +370,17 @@ extension ManifestSaveModel {
                 if result.hasFailures { self.log("Restored category deployments need another reconcile.") }
             }
         }
+    }
+
+    @MainActor
+    private func preserveRetirements(in context: ModelContext, undoing undos: [(order: Int, edit: CategorySaveEdit)]) {
+        do {
+            let categories = try context.fetch(FetchDescriptor<Category>())
+            for edit in refused where edit.context === context { edit.preserveRetirement(in: categories, undoing: undos) }
+            for item in items where item.presentation.context === context {
+                item.presentation.preserveRetirement(in: categories, undoing: undos)
+            }
+            try context.save()
+        } catch { log("Couldn't preserve skill retirement during category undo: " + error.localizedDescription) }
     }
 }

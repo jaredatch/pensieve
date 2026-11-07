@@ -247,6 +247,10 @@ struct ManifestLocalIntentMove: Codable {
 /// Immutable, context-free values for retaining refused fields across worker rebuilds.
 /// Only requested fields project, and newer queued edits apply after these values.
 struct RefusedManifestProjection {
+    struct CategoryRename: Equatable {
+        let old: String
+        let new: String
+    }
     enum Field {
         case change(ManifestChange)
         case intent(DeployIntentRecord)
@@ -255,6 +259,12 @@ struct RefusedManifestProjection {
     let cachedLocal: ManifestSnapshot?
     var collision: SkillOverlay?
     var intentMove: ManifestLocalIntentMove?
+    var categoryRenames: [CategoryRename] = []
+
+    /// Fields keep their durable names; only the lookup in the window follows queued renames.
+    func windowCategoryName(for name: String) -> String {
+        categoryRenames.reduce(name) { current, rename in current == rename.old ? rename.new : current }
+    }
 
     var createdSkills: [SkillOverlay] {
         fields.compactMap {
@@ -312,7 +322,7 @@ struct RefusedManifestProjection {
             } else { snapshot.deployIntents.removeAll { $0 == intent } }
         case .change(let change):
             if case .categorySkill(let name, let slug, _) = change {
-                guard let record = local.categories.first(where: { $0.name == name }) else {
+                guard let record = local.categories.first(where: { $0.name == windowCategoryName(for: name) }) else {
                     // A newly read retirement field can name a category the window has never seen.
                     if case .categorySkill(_, _, false) = change { change.apply(to: &snapshot) }
                     return

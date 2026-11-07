@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -322,7 +322,7 @@
+             } else { snapshot.deployIntents.removeAll { $0 == intent } }
+         case .change(let change):
+             if case .categorySkill(let name, let slug, _) = change {
+-                guard let record = local.categories.first(where: { $0.name == windowCategoryName(for: name) }) else {
++                guard let record = local.categories.first(where: { $0.name == name }) else {
+                     // A newly read retirement field can name a category the window has never seen.
+                     if case .categorySkill(_, _, false) = change { change.apply(to: &snapshot) }
+                     return

@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestRefusedEdit.swift
++++ b/Pensieve/ViewModels/ManifestRefusedEdit.swift
+@@ -148,7 +148,7 @@
+             }
+         }
+         for undo in undos {
+-            guard undo.order < order, undo.edit.restoredSkillSlugs.contains(slug),
++            guard undo.order != order, undo.edit.restoredSkillSlugs.contains(slug),
+                   let category = categories.first(where: { $0.id == undo.edit.id }) else { continue }
+             if let fields, !fields.contains(where: { field in
+                 guard case .change(.categorySkill(let name, let target, _)) = field else { return false }
