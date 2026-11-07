@@ -5,6 +5,12 @@ import XCTest
 
 @MainActor
 final class AppRuntimeSyncRecoveryTests: XCTestCase {
+    func testOutageOnQueuedRetryKeepsItForTheNextRecovery() async throws {
+        try await assertQueuedRetryHeldThroughOutage()
+        try await assertQueuedRetryWhenIngestFinishesDuringOutage()
+        try await assertDispatchedRetryWaitsForRecovery()
+    }
+
     func testRecoveryDuringCycleQueuesCatchUpForEligibleOutcomes() async throws {
         let outcomes: [Result<SyncOutcome, Error>] = [
             .success(.synced(pushed: false, warnings: [])), .success(.noRemote),
@@ -146,68 +152,6 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
 
 }
 private extension AppRuntimeSyncRecoveryTests {
-    func assertPrivilegedRequestsSurviveGitOutage() async throws {
-        for scenario in ["queued manual", "idle manual", "preflight", "first manual", "first preflight"] {
-            let outcomes: [Result<SyncOutcome, Error>] = scenario == "queued manual"
-                ? [.failure(GitError.unusable(.developerToolsMissing))] : []
-            let probe = RuleProbe()
-            let firstAnswer = scenario.hasPrefix("first")
-            let h = try await makeSyncRecoveryHarness(outcomes: outcomes, probe: probe,
-                initialProbeError: firstAnswer ? GitError.outputReadFailed(detail: "bootstrap EIO") : nil)
-            h.preference.enabled = scenario == "queued manual"
-            h.runtime.scheduler.launchIngestCompleted()
-            if scenario == "queued manual" { await h.waitForCycle(1) }
-            h.preference.enabled = false
-            if firstAnswer {
-                XCTAssertNil(h.runtime.gitUsability)
-            } else {
-                h.probe.set { .developerToolsMissing }
-                await h.runtime.refreshGitUsability()
-            }
-            if scenario.hasSuffix("preflight") {
-                h.runtime.scheduler.enqueueLaunchPreflight()
-            } else if scenario == "queued manual" {
-                await h.runtime.syncModel.syncNowAndReport()
-            } else {
-                h.runtime.scheduler.enqueueManualTrigger()
-            }
-            if scenario == "queued manual" { h.release.open() }
-            await h.waitForIdle()
-            let before = h.engine.count
-            h.probe.set { .usable }
-            await h.runtime.refreshGitUsability()
-            await h.waitForFollowUpOrIdle(after: before)
-            XCTAssertEqual(h.engine.count, before + 1, scenario + " must retain its background-off bypass")
-            if h.engine.count == before + 1 {
-                XCTAssertEqual(h.engine.priorities.last,
-                               scenario.hasSuffix("preflight") ? QOS_CLASS_DEFAULT : QOS_CLASS_USER_INITIATED)
-                h.probe.set { .usable }
-                h.release.open()
-            }
-            await h.finish()
-            XCTAssertEqual(h.engine.count, before + 1)
-        }
-    }
-
-    func assertRetryExpiresWithUsableEvidence() async throws {
-        let h = try await makeSyncRecoveryHarness(outcomes: [
-            .failure(GitError.repositoryUnreadable(path: "fixture", detail: "offline"))
-        ])
-        h.preference.enabled = false
-        h.runtime.scheduler.launchIngestCompleted()
-        let manual = Task { await h.runtime.syncModel.syncNowAndReport() }
-        await h.waitForCycle(1)
-        h.release.open()
-        await manual.value
-        await h.waitForIdle()
-        await h.runtime.refreshGitUsability() // Usable evidence after the failed cycle answers its host question.
-        await h.recover() // An unrelated later outage must not revive the failed manual request.
-        await h.waitForFollowUpOrIdle()
-        XCTAssertEqual(h.engine.count, 1, "usable evidence must retire an unrelated failed Sync Now")
-        await h.finish()
-        XCTAssertEqual(h.engine.count, 1)
-    }
-
     func assertRecoveryWhileIneligible() async throws {
         for block in ["conflict", "branchless", "absent"] {
             let h = try await makeSyncRecoveryHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
@@ -250,6 +194,65 @@ private extension AppRuntimeSyncRecoveryTests {
     }
 }
 private extension AppRuntimeSyncRecoveryTests {
+    func assertQueuedRetryHeldThroughOutage() async throws {
+        let h = try await heldRecoveryBeforeIngest()
+        await h.recover()
+        h.runtime.scheduler.launchIngestCompleted()
+        await h.waitForFollowUpOrIdle()
+        XCTAssertEqual(h.engine.count, 2)
+        h.release.open()
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 2, "one retry, run once")
+    }
+
+    func assertQueuedRetryWhenIngestFinishesDuringOutage() async throws {
+        let h = try await heldRecoveryBeforeIngest()
+        h.probe.set { .developerToolsMissing }
+        await h.runtime.refreshGitUsability()
+        h.runtime.scheduler.launchIngestCompleted()
+        await h.waitForIdle()
+        XCTAssertEqual(h.engine.count, 1, "no retry runs while the tools are missing")
+        h.probe.set { .usable }
+        await h.runtime.refreshGitUsability()
+        await h.waitForFollowUpOrIdle()
+        XCTAssertEqual(h.engine.count, 2)
+        h.release.open()
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 2, "one retry, run once")
+    }
+
+    func assertDispatchedRetryWaitsForRecovery() async throws {
+        let h = try await heldRecoveryBeforeIngest()
+        let runtime = h.runtime
+        let syncModel = runtime.syncModel
+        let scheduler = runtime.scheduler
+        var released = false
+        scheduler.installDrain(
+            isConfigured: { [weak syncModel] in syncModel?.isConfigured ?? false },
+            isGitUsable: { [weak runtime] in runtime?.gitUsability == .usable },
+            isConflicted: { [weak syncModel] in syncModel?.isConflicted ?? false },
+            requestDiscarded: { [weak syncModel] request in syncModel?.syncRequestWasDiscarded(request) },
+            action: { [weak syncModel, weak scheduler] request in
+                await TestWait.until(failureMessage: "dispatched retry was not released") { released }
+                await syncModel?.syncAndReport(request, onCycleStart: { scheduler?.cycleDidStart() })
+            }
+        )
+        scheduler.launchIngestCompleted()
+        XCTAssertTrue(scheduler.isSyncing, "the retry's task is dispatched")
+        h.probe.set { .developerToolsMissing }
+        await runtime.refreshGitUsability()
+        released = true
+        await h.waitForIdle()
+        XCTAssertEqual(h.engine.count, 1, "no retry runs while the tools are missing")
+        h.probe.set { .usable }
+        await runtime.refreshGitUsability()
+        await h.waitForFollowUpOrIdle()
+        XCTAssertEqual(h.engine.count, 2)
+        h.release.open()
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 2, "exactly one retry after recovery")
+    }
+
     func heldRecoveryBeforeIngest() async throws -> RecoveryHarness {
         let h = try await makeSyncRecoveryHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
         h.preference.enabled = false

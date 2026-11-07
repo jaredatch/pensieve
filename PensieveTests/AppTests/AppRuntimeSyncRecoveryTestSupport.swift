@@ -157,3 +157,68 @@ final class RecoveryConvergence: PostSyncConverging {
     func run(after result: SyncCycleResult) {}
     func runAfterLaunchIngest() {}
 }
+
+// Shared recovery assertions live here to keep the owning test file within the lint limit.
+extension AppRuntimeSyncRecoveryTests {
+    func assertPrivilegedRequestsSurviveGitOutage() async throws {
+        for scenario in ["queued manual", "idle manual", "preflight", "first manual", "first preflight"] {
+            let outcomes: [Result<SyncOutcome, Error>] = scenario == "queued manual"
+                ? [.failure(GitError.unusable(.developerToolsMissing))] : []
+            let probe = RuleProbe()
+            let firstAnswer = scenario.hasPrefix("first")
+            let h = try await makeSyncRecoveryHarness(outcomes: outcomes, probe: probe,
+                initialProbeError: firstAnswer ? GitError.outputReadFailed(detail: "bootstrap EIO") : nil)
+            h.preference.enabled = scenario == "queued manual"
+            h.runtime.scheduler.launchIngestCompleted()
+            if scenario == "queued manual" { await h.waitForCycle(1) }
+            h.preference.enabled = false
+            if firstAnswer {
+                XCTAssertNil(h.runtime.gitUsability)
+            } else {
+                h.probe.set { .developerToolsMissing }
+                await h.runtime.refreshGitUsability()
+            }
+            if scenario.hasSuffix("preflight") {
+                h.runtime.scheduler.enqueueLaunchPreflight()
+            } else if scenario == "queued manual" {
+                await h.runtime.syncModel.syncNowAndReport()
+            } else {
+                h.runtime.scheduler.enqueueManualTrigger()
+            }
+            if scenario == "queued manual" { h.release.open() }
+            await h.waitForIdle()
+            let before = h.engine.count
+            h.probe.set { .usable }
+            await h.runtime.refreshGitUsability()
+            await h.waitForFollowUpOrIdle(after: before)
+            XCTAssertEqual(h.engine.count, before + 1, scenario + " must retain its background-off bypass")
+            if h.engine.count == before + 1 {
+                XCTAssertEqual(h.engine.priorities.last,
+                               scenario.hasSuffix("preflight") ? QOS_CLASS_DEFAULT : QOS_CLASS_USER_INITIATED)
+                h.probe.set { .usable }
+                h.release.open()
+            }
+            await h.finish()
+            XCTAssertEqual(h.engine.count, before + 1)
+        }
+    }
+
+    func assertRetryExpiresWithUsableEvidence() async throws {
+        let h = try await makeSyncRecoveryHarness(outcomes: [
+            .failure(GitError.repositoryUnreadable(path: "fixture", detail: "offline"))
+        ])
+        h.preference.enabled = false
+        h.runtime.scheduler.launchIngestCompleted()
+        let manual = Task { await h.runtime.syncModel.syncNowAndReport() }
+        await h.waitForCycle(1)
+        h.release.open()
+        await manual.value
+        await h.waitForIdle()
+        await h.runtime.refreshGitUsability() // Usable evidence after the failed cycle answers its host question.
+        await h.recover() // An unrelated later outage must not revive the failed manual request.
+        await h.waitForFollowUpOrIdle()
+        XCTAssertEqual(h.engine.count, 1, "usable evidence must retire an unrelated failed Sync Now")
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 1)
+    }
+}
