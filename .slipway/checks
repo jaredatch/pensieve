@@ -1,0 +1,3 @@
+paths = Pensieve/ViewModels/SyncModel.swift PensieveTests/AppTests/AppRuntimeSyncRecoveryTests.swift docs/ARCHITECTURE.md .slipway/changelog/225.md .slipway/mutations/
+check.heldRetrySurvivesOutage = tests PensieveTests/AppRuntimeSyncRecoveryTests/testOutageOnQueuedRetryKeepsItForTheNextRecovery
+mutation.heldRetrySurvivesOutage = .slipway/mutations/heldRetrySurvivesOutage.patch
