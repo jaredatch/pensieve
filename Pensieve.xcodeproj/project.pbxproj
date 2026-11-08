@@ -1119,6 +1119,7 @@
 		DFD4A6A90B35D830A2DF3513 /* DeployStateRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F650CA64CF4A1A86777DC3A /* DeployStateRecordingTests.swift */; };
 		DFEA040A5A5C79E241B3E824 /* DaemonCLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B708BC2AAFF95AE6FE4E76 /* DaemonCLI.swift */; };
 		E00458047FFC72DBB1F159C6 /* GitService+UpdateCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F8EDF4E03776B3FF54E430 /* GitService+UpdateCheck.swift */; };
+		E00E464D70B0F9DDB411680F /* CategorySaveUndoTests+Retirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14A14913DBA2DED7FB7B450 /* CategorySaveUndoTests+Retirement.swift */; };
 		E03004055C8CF2B34270F41C /* ProjectListModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D1AAC4F132F452BD3F9CAD /* ProjectListModelTests.swift */; };
 		E034244A9244CB8236B630B8 /* GitServiceRebaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D052F72CE4FEA20D56B242 /* GitServiceRebaseTests.swift */; };
 		E0448D5F2F08160B1A388272 /* MachineStateServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAE87A1D21FA9BDDA44E152 /* MachineStateServiceTests.swift */; };
@@ -2406,6 +2407,7 @@
 		F1104149410CE16327DFBD09 /* UpstreamHistorySequenceHarness+Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpstreamHistorySequenceHarness+Diagnostics.swift"; sourceTree = "<group>"; };
 		F11254888B489A681AF863E3 /* CategorySaveEdit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategorySaveEdit.swift; sourceTree = "<group>"; };
 		F13E836C9D575CD092268A18 /* ViewChangesFileHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewChangesFileHeader.swift; sourceTree = "<group>"; };
+		F14A14913DBA2DED7FB7B450 /* CategorySaveUndoTests+Retirement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CategorySaveUndoTests+Retirement.swift"; sourceTree = "<group>"; };
 		F15C71B19225219D57ABDB5E /* FileService+BoundedRead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FileService+BoundedRead.swift"; sourceTree = "<group>"; };
 		F163C1D1D22765D449EEAA99 /* TestWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestWait.swift; sourceTree = "<group>"; };
 		F1A3B5FE685D3E382FC150CF /* PlatformViewModelTestSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformViewModelTestSafetyTests.swift; sourceTree = "<group>"; };
@@ -3569,6 +3571,7 @@
 				B9243E187E8A3BDA31601B48 /* CategorySaveUndoTests+FetchFailure.swift */,
 				841878A5EC29ADFBF411A654 /* CategorySaveUndoTests+Healing.swift */,
 				1EDD37C3A2D4FF1BA4CB1D05 /* CategorySaveUndoTests+Interleaving.swift */,
+				F14A14913DBA2DED7FB7B450 /* CategorySaveUndoTests+Retirement.swift */,
 				5BD176EDFCD3036762BB29CF /* CategorySaveUndoTests+Sync.swift */,
 				673FB5465525632573CCA2BE /* CategoryStoreTests.swift */,
 				CB3AEA8418C45809783A9780 /* CategoryStoreTests+Names.swift */,
@@ -4302,6 +4305,7 @@
 				094E78C3C6A03AF5825EB5B8 /* CategorySaveUndoTests+FetchFailure.swift in Sources */,
 				E24CCC250E88D3B0366CC487 /* CategorySaveUndoTests+Healing.swift in Sources */,
 				BA452E7F42A4162B48D522DC /* CategorySaveUndoTests+Interleaving.swift in Sources */,
+				E00E464D70B0F9DDB411680F /* CategorySaveUndoTests+Retirement.swift in Sources */,
 				A105F0BAF67B835897A68916 /* CategorySaveUndoTests+Sync.swift in Sources */,
 				7E1682660A644D8FFAD22C22 /* CategorySaveUndoTests.swift in Sources */,
 				C41FD27EA6E6F31D33D73331 /* CategoryStoreTests+Names.swift in Sources */,

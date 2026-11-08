@@ -17,13 +17,15 @@ final class ManifestSaveFixture {
     let messages = Messages()
     let library: SkillLibraryViewModel
     let categories: CategoryStore
+    let platform: PlatformViewModel
     let local = Pensieve.Category(name: "Local")
     let doomed = Pensieve.Category(name: "ZDelete")
     let alpha = Skill(name: "Alpha", directoryName: "alpha")
     let beta = Skill(name: "Beta", directoryName: "beta")
     let project: Project
 
-    init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01, rebuildFiles: FileServiceProtocol? = nil) throws {
+    init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01,
+         rebuildFiles: FileServiceProtocol? = nil, failAlphaDeletion: Bool = false) throws {
         root = directory.storeRoot
         lockPath = root + "/support/sync.lock"
         context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
@@ -32,10 +34,16 @@ final class ManifestSaveFixture {
         let messages = messages
         saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath,
         waitSeconds: waitSeconds, files: rebuildFiles ?? files, log: { messages.lines.append($0) })
-        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root),
+        let skillFiles: FileServiceProtocol = failAlphaDeletion
+            ? FaultyFileService(wrapped: files, failDeletePath: root + "/skills/alpha") : files
+        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: skillFiles,
+            baseDir: root + "/skills", storeRoot: root),
             fileWatchService: FileWatchService(rootDir: root + "/skills"),
             manifestRoot: root, manifestSaves: saves)
         categories = CategoryStore( manifestSaves: saves)
+        platform = PlatformViewModel(fileService: files, linkService: DeletionTestLinkService(),
+            cursorCompiler: DeletionTestCursorCompiler(), agentDetection: DeletionTestDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: root + "/skills")
         project = Project(name: "Local", path: root + "/project")
         project.identityKey = "local-key"
         for skill in [alpha, beta] {

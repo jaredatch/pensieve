@@ -42,6 +42,29 @@ struct CategorySaveEdit {
         }
     }
 
+    /// Only these memberships can be re-added by this inverse. A rename restores no membership.
+    var restoredSkillSlugs: [String] {
+        guard let before else { return [] }
+        switch change {
+        case .deleteCategory: return before.skillSlugs
+        case .categorySkill(_, let slug, _): return before.skillSlugs.contains(slug) ? [slug] : []
+        default: return []
+        }
+    }
+
+    /// Replay a completed undo into a refused edit's cached projection without reading the window.
+    var inverse: ManifestChange? {
+        if case .createCategory(let record) = change { return .deleteCategory(record.name) }
+        guard let before else { return nil }
+        switch change {
+        case .deleteCategory: return .createCategory(before)
+        case .renameCategory(_, let new): return .renameCategory(new, before.name)
+        case .categorySkill(_, let slug, _): return .categorySkill(before.name, slug, before.skillSlugs.contains(slug))
+        case .categoryProject(_, let key, _): return .categoryProject(before.name, key, before.projectKeys.contains(key))
+        default: return nil
+        }
+    }
+
     /// Compare the edited result with saved rules, or with the window for a superseded notice.
     /// Healing publication is tracked permanently by the queue.
     func isSaved(in durable: ManifestSnapshot) -> Bool {

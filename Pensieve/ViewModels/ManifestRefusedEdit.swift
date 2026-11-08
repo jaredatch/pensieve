@@ -11,7 +11,7 @@ final class ManifestRefusedEdit {
     private var registration: StoreIngestState?
     private var projection: RefusedManifestProjection {
         RefusedManifestProjection(fields: fields ?? [.change(original)], cachedLocal: cachedLocal,
-                                  collision: collision, intentMove: intentMove)
+                                  collision: collision, intentMove: intentMove, categoryRenames: categoryRenames)
     }
 
     deinit { registration?.forgetRefused(id) }
@@ -25,6 +25,7 @@ final class ManifestRefusedEdit {
         registration?.retainRefused(projection, id: id)
     }
     let context: ModelContext
+    private let order: Int
     private let original: ManifestChange
     private(set) var collision: SkillOverlay?
     private var collisionProbePending = false
@@ -52,10 +53,12 @@ final class ManifestRefusedEdit {
 
     private var fields: [Field]?
     private var cachedLocal: ManifestSnapshot?
+    private var categoryRenames: [RefusedManifestProjection.CategoryRename] = []
 
-    init(_ change: ManifestChange, context: ModelContext, intentMove: ManifestLocalIntentMove? = nil) {
+    init(_ change: ManifestChange, context: ModelContext, order: Int = 0, intentMove: ManifestLocalIntentMove? = nil) {
         self.intentMove = intentMove
         self.context = context
+        self.order = order
         original = change
         switch change {
         case .skillMetadata(let slug, let tags, let scope):
@@ -74,11 +77,19 @@ final class ManifestRefusedEdit {
 
     /// Keep the last readable local snapshot current while a later projection read is unavailable.
     func observe(_ change: ManifestChange) {
+        if case .retireSkill = original, case .renameCategory(let old, let new) = change {
+            categoryRenames.append(.init(old: old, new: new))
+        }
         if var local = cachedLocal {
             change.apply(to: &local)
             cachedLocal = local
-            updateRegistration()
         }
+        updateRegistration()
+    }
+
+    /// A retirement can still be waiting for its first attempt when the category is renamed.
+    func observePending(_ change: ManifestChange) {
+        if case .retireSkill = original { observe(change) }
     }
 
     func suppliesTarget(for edit: ManifestRefusedEdit) -> Bool {
@@ -123,19 +134,33 @@ final class ManifestRefusedEdit {
                            local: local, durable: durable)
     }
 
-    /// A category deleted before retirement may be restored by undo afterward.
-    func preserveRetirement(in categories: [Category]) {
+    /// Decide from capture order, never from membership copied back into the window by undo.
+    func preserveRetirement(in categories: [Category], undoing undos: [(order: Int, edit: CategorySaveEdit)]) {
         guard case .retireSkill(let slug) = original else { return }
-        for category in categories {
+        for undo in undos {
+            if case .renameCategory(let old, let new) = undo.edit.change,
+               let index = categoryRenames.lastIndex(of: .init(old: old, new: new)) {
+                categoryRenames.remove(at: index)
+            }
+            if let inverse = undo.edit.inverse, var local = cachedLocal {
+                inverse.apply(to: &local)
+                cachedLocal = local
+            }
+        }
+        for undo in undos {
+            guard undo.order < order, undo.edit.restoredSkillSlugs.contains(slug),
+                  let category = categories.first(where: { $0.id == undo.edit.id }) else { continue }
             if let fields, !fields.contains(where: { field in
                 guard case .change(.categorySkill(let name, let target, _)) = field else { return false }
-                return name == category.name && target == slug
+                return projection.windowCategoryName(for: name) == category.name && target == slug
             }) { continue }
-            // Current local values still win. An acknowledged field or a later reassignment
-            // must not be retired again just because another retirement field remains refused.
-            if cachedLocal?.categories.first(where: { $0.name == category.name })?.skillSlugs.contains(slug) == true { continue }
             category.skillSlugs.removeAll { $0 == slug }
+            if var local = cachedLocal {
+                ManifestChange.categorySkill(category.name, slug, false).apply(to: &local)
+                cachedLocal = local
+            }
         }
+        updateRegistration()
     }
 
     private func retirementFields(durable: ManifestSnapshot) -> [Field] {
