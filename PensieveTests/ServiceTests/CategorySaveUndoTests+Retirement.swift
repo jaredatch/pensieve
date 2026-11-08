@@ -30,6 +30,10 @@ extension CategorySaveUndoTests {
     }
 
     func testACategoryDeletedAfterAFailedSkillDeletionKeepsTheSkillYouAddedWhenTheDeleteIsUndone() async throws {
+        try await checkCategoryDeleteUndoKeepsNewerAssignment()
+    }
+
+    private func checkCategoryDeleteUndoKeepsNewerAssignment() async throws {
         let h = try retirementFixture()
         defer { h.cleanup() }
         let id = h.local.id
@@ -78,6 +82,10 @@ extension CategorySaveUndoTests {
         XCTAssertTrue(h.recording.writes.isEmpty)
         assertWorkerMembership(h, durable: durable, members: [])
         try assertRetirementAndUndo(h)
+
+        // Pair the older-membership constraint with the assignment loss this update fixes,
+        // so this check also fails on code that already handles the older capture correctly.
+        try await checkCategoryDeleteUndoKeepsNewerAssignment()
     }
 
     private func retirementFixture() throws -> ManifestSaveFixture {
