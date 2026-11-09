@@ -89,7 +89,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Literal `*` and `&` in frontmatter now work in Source edits, the Rendered table, import and migration. Values like `allowed-tools: Bash(npm run *)` no longer get mistaken for YAML anchors or aliases.
 - Import from Folder… and Add Skill from GitHub… now say "Found 1 Skill" when there's just one.
 - A category change Pensieve couldn't save, say because another Mac with a newer Pensieve had written the library, used to stay in the window as if it had worked. It's undone now, and an alert names the category and the reason.
-- When a git command fails, Pensieve's error keeps git's own message, even when part of git's output isn't valid UTF-8.
+- When a git command fails, the sync log keeps git's own message, even when part of git's output isn't valid UTF-8.
 - Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
 - Launch, Connect, resolving sync conflicts and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone. A Restore that doesn't finish tells you why.
