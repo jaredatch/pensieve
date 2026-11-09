@@ -1,0 +1,10 @@
+--- a/Pensieve/Services/SyncFailureCause.swift
++++ b/Pensieve/Services/SyncFailureCause.swift
+@@ -5,6 +5,7 @@
+     static func message(for error: Error, fallback: String? = nil) -> String {
+         switch error {
+         case let git as GitError:
++            if case .commandFailed = git { return git.errorDescription ?? "Sync failed." }
+             return git.cause
+         case let blocked as ConflictAbortBlocked:
+             return message(for: blocked.underlying) + " " + blocked.folderAdvice

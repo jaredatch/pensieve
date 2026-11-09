@@ -185,7 +185,8 @@ final class SyncConflictResolutionTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         assertConflictIndexRemovalDefault(StubGit(conflictPath: "skills/x/SKILL.md"), at: root)
         let failures: [(GitError, String)] = [
-            (.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"), "git rebase failed (exit 1): boom"),
+            (.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"),
+             "Pensieve couldn’t merge the other Macs’ changes into the store. Sync again."),
             (.outputReadFailed(detail: "Authentication failed; CONFLICT; Xcode license not accepted"),
              "Pensieve couldn’t read git’s output: Authentication failed; CONFLICT; Xcode license not accepted")
         ]

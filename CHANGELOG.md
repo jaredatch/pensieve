@@ -26,7 +26,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
-- Click Sync failed to see why and retry. Settings › Sync also shows the error, and the sync log keeps the reason with sync credentials removed.
+- Click Sync failed to see why and retry. Settings › Sync also shows the error. Sync failures now use plain sentences with advice on what to do next, and the sync log keeps git’s output with sync credentials removed.
 
 - History for a GitHub skill downloads only that skill's files, so large repositories load far faster.
 
@@ -71,7 +71,6 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - If sync can't sign in while it checks your other Macs for a fixed library file, the damage message now says how to fix the sign-in in Settings › Sync, so you don't replace the file when the problem is your access token.
 - Connecting sync refuses a library whose `skills` folder is a link or isn't a folder, and names the folder, before it changes anything.
 - When another tool commits to the library while an edit saves, the message now says the edit was saved.
-- When git refuses to abort a conflicted sync for a reason that isn't about one folder, Pensieve shows git's own message.
 
 - If saving a new project fails, Pensieve cleans up its new identity marker when it can. Retrying reuses any marker left behind, and simultaneous adds share one registration.
 

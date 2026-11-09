@@ -34,6 +34,43 @@ enum GitError: LocalizedError, Equatable {
 }
 
 extension GitError {
+    /// Sync presentation uses fixed app text; errorDescription retains the command and output for audit.
+    var cause: String {
+        guard case let .commandFailed(args, _, _, _) = self else {
+            return errorDescription ?? localizedDescription
+        }
+        if isNetworkFailure {
+            return "Pensieve couldn’t reach the sync store. Check your connection, then sync again."
+        }
+        if isRepositoryNotFound {
+            return "The sync store can’t be found at its remote. Check the repository in Settings › Sync."
+        }
+        var command = args[...]
+        while let first = command.first {
+            if first == "-C" || first == "-c" {
+                command = command.dropFirst(2)
+            } else if first.hasPrefix("--") {
+                command = command.dropFirst()
+            } else {
+                break
+            }
+        }
+        switch command.first {
+        case "push":
+            return "Pensieve couldn’t push this Mac’s changes to the sync store. Sync again."
+        case "fetch", "pull":
+            return "Pensieve couldn’t fetch the other Macs’ changes from the sync store. Sync again."
+        case "rebase" where command.dropFirst().contains("--abort"):
+            return "Pensieve couldn’t undo an interrupted sync in the store."
+        case "rebase":
+            return "Pensieve couldn’t merge the other Macs’ changes into the store. Sync again."
+        case "add", "commit":
+            return "Pensieve couldn’t record this Mac’s changes in the store. Sync again."
+        default:
+            return "Pensieve couldn’t finish a step in the sync store. Sync again."
+        }
+    }
+
     var isRepositoryNotFound: Bool {
         guard case let .commandFailed(_, _, stderr, _) = self else { return false }
         let detail = stderr.lowercased()

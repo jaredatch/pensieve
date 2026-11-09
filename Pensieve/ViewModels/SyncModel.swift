@@ -147,7 +147,7 @@ final class SyncModel {
         case let .failure(error):
             knownAbsent = false
             knownBranchless = false
-            remoteReadError = DisplayTextSanitizer.singleLine(error.localizedDescription)
+            remoteReadError = DisplayTextSanitizer.singleLine(SyncFailureCause.message(for: error))
         case let .success(configuration):
             knownAbsent = configuration.remoteURL == nil
             knownBranchless = !knownAbsent && !configuration.hasLocalBranches

@@ -34,7 +34,7 @@ extension ConflictFolderResolutionTests {
             XCTAssertTrue(message.contains("can’t replace the folder"), message)
             assertMoveFolderMessage(message, path: fixture.path)
             XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
-            XCTAssertTrue(message.contains("would lose untracked files"), message)
+            XCTAssertFalse(message.contains("would lose untracked files"), message)
         } else {
             XCTFail("\(occupant): expected refused abort, got \(model.phase); "
                 + "selection error: \(model.selectionError ?? "none"); abort trace: \(trace.debugDescription)")
@@ -111,8 +111,9 @@ extension ConflictFolderResolutionTests {
         guard case let .error(message) = model.phase else { return XCTFail("Inspect must report its failed abort") }
         assertMoveFolderMessage(message, path: fixture.path)
         XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
-        XCTAssertEqual(message.components(separatedBy: "would lose untracked files").count - 1, 1,
-                       "Do not repeat the native refusal in the error")
+        XCTAssertEqual(message.components(separatedBy: "would lose untracked files").count - 1, 0)
+        XCTAssertEqual(message.components(separatedBy: "Move the folder at").count - 1, 1,
+                       "Do not repeat the folder advice in the error")
         XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/abort-results"), "128\n",
                        "Inspection must attempt its failed abort only once")
         XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra")
@@ -135,7 +136,7 @@ extension ConflictFolderResolutionTests {
         XCTAssertTrue(message.contains("can’t replace the folder"), message)
         assertMoveFolderMessage(message, path: fixture.path)
         XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
-        XCTAssertTrue(message.contains("would lose untracked files"), "Keep Git’s refusal when the proof fails: " + message)
+        XCTAssertFalse(message.contains("would lose untracked files"), message)
         XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra")
         XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/abort-results"), "128\n")
     }
