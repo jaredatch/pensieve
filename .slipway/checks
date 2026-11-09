@@ -1,0 +1,2 @@
+paths = PensieveTests/ViewTests/SkillPreviewLayoutTests.swift PensieveTests/ViewTests/SkillPreviewLayoutTests+Diagnostics.swift Pensieve.xcodeproj/project.pbxproj .slipway/quarantine
+check.unquarantined = run bash -c '! grep -q SkillPreviewLayoutTests .slipway/quarantine'
