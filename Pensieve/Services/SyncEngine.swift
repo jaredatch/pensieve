@@ -14,7 +14,7 @@ enum SyncError: LocalizedError, Equatable {
     case conflictFolderMustMove(path: String)
     case localConflictFolderMustMove(path: String)
     case incompatibleConflictPicks(path: String)
-    case returnToRestFailed(reason: String, detail: String)
+    case returnToRestFailed(reason: String, detail: String, reasonCause: String, detailCause: String)
     case rejectedRemote(String)
     case syncInProgress
 
@@ -40,7 +40,7 @@ enum SyncError: LocalizedError, Equatable {
             return "Move the folder at \(path), then choose Other Mac again. You can also keep This Mac."
         case let .incompatibleConflictPicks(path):
             return "These picks don’t fit together. Choose the same Mac for \(path) and its contents."
-        case let .returnToRestFailed(reason, detail):
+        case let .returnToRestFailed(reason, detail, _, _):
             return reason + " Pensieve couldn’t return the store to rest. Resolve this problem, then sync again: " + detail
         case .rejectedRemote:
             return "This store's git remote uses an unsupported form. Reconnect with an https:// URL "
@@ -241,8 +241,9 @@ struct SyncEngine: SyncEngineProtocol {
             throw error
         }
         do { try gitService.abortRebase(at: root) } catch {
-            throw SyncError.returnToRestFailed(reason: "Pensieve couldn't finish inspecting conflicts.",
-                                              detail: error.localizedDescription)
+            let reason = "Pensieve couldn't finish inspecting conflicts."
+            throw SyncError.returnToRestFailed(reason: reason, detail: error.localizedDescription,
+                                              reasonCause: reason, detailCause: SyncFailureCause.message(for: error))
         }
         return .conflicts(conflicts)
     }

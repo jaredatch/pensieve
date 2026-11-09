@@ -26,7 +26,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
-- Click Sync failed to see why and retry. Settings › Sync also shows the error, and the sync log keeps the reason with sync credentials removed.
+- Click Sync failed to see why and retry. Settings › Sync also shows the error. Sync failures now use plain sentences with advice on what to do next, and the sync log keeps git’s output with sync credentials removed.
 
 - History for a GitHub skill downloads only that skill's files, so large repositories load far faster.
 
@@ -71,7 +71,6 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - If sync can't sign in while it checks your other Macs for a fixed library file, the damage message now says how to fix the sign-in in Settings › Sync, so you don't replace the file when the problem is your access token.
 - Connecting sync refuses a library whose `skills` folder is a link or isn't a folder, and names the folder, before it changes anything.
 - When another tool commits to the library while an edit saves, the message now says the edit was saved.
-- When git refuses to abort a conflicted sync for a reason that isn't about one folder, Pensieve shows git's own message.
 
 - If saving a new project fails, Pensieve cleans up its new identity marker when it can. Retrying reuses any marker left behind, and simultaneous adds share one registration.
 
@@ -90,7 +89,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Literal `*` and `&` in frontmatter now work in Source edits, the Rendered table, import and migration. Values like `allowed-tools: Bash(npm run *)` no longer get mistaken for YAML anchors or aliases.
 - Import from Folder… and Add Skill from GitHub… now say "Found 1 Skill" when there's just one.
 - A category change Pensieve couldn't save, say because another Mac with a newer Pensieve had written the library, used to stay in the window as if it had worked. It's undone now, and an alert names the category and the reason.
-- When a git command fails, Pensieve's error keeps git's own message, even when part of git's output isn't valid UTF-8.
+- When a git command fails, the sync log keeps git's own message, even when part of git's output isn't valid UTF-8.
 - Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
 - Launch, Connect, resolving sync conflicts and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone. A Restore that doesn't finish tells you why.

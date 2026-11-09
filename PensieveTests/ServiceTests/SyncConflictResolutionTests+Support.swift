@@ -78,13 +78,15 @@ extension SyncConflictResolutionTests {
         func manifestMatchesHead(at path: String) throws -> Bool { false }
         let conflictPath: String
         let pullError: Error?
+        let abortError: Error?
         private(set) var stagedPaths: [String] = []
         private(set) var pullAttempted = false
         private(set) var abortsAfterPull = 0
 
-        init(conflictPath: String, pullError: Error? = nil) {
+        init(conflictPath: String, pullError: Error? = nil, abortError: Error? = nil) {
             self.conflictPath = conflictPath
             self.pullError = pullError
+            self.abortError = abortError
         }
 
         func remoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
@@ -111,7 +113,12 @@ extension SyncConflictResolutionTests {
             return .conflicted([conflictPath])
         }
         func push(at path: String, credential: GitCredential?) throws {}
-        func abortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
+        func abortRebase(at path: String) throws {
+            if pullAttempted {
+                abortsAfterPull += 1
+                if let abortError { throw abortError }
+            }
+        }
         func conflictedFiles(at path: String) -> [String] { [conflictPath] }
         func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
             Data((stage == 3 ? "this" : "other").utf8)
