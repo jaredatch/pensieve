@@ -106,7 +106,17 @@ extension ConflictFolderResolutionTests {
         try fixture.files.writeFile(at: fixture.root + "/folder-armed", content: "partial index failure")
         await model.applyAndReport(container: fixture.contextB.container)
         guard case let .error(message) = model.phase else { return XCTFail("Report the failed index write") }
-        XCTAssertTrue(message.contains("fixture failure after native index removal"))
+        XCTAssertTrue(message.contains(fixture.path), message)
+        XCTAssertTrue(message.contains("out of the store"), message)
+        XCTAssertTrue(message.contains("sync again"), message)
+        XCTAssertTrue(message.contains("couldn’t finish a step in the sync store"), message)
+        XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
+        XCTAssertFalse(message.contains("fixture failure after native index removal"), message)
+        XCTAssertFalse(message.contains("would lose untracked files"), message)
+        XCTAssertFalse(message.contains("failed (exit"), message)
+        XCTAssertFalse(message.contains("git "), message)
+        XCTAssertFalse(message.contains("\n"), message)
+        XCTAssertFalse(message.contains(fixture.storeB), message)
         XCTAssertEqual(try fixture.files.readData(at: fixture.root + "/before-abort.json"),
                        try fixture.files.readData(at: fixture.root + "/after-change.json"),
                        "An index failure must hand the intact folder to abort")
