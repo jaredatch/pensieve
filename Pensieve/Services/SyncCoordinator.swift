@@ -223,9 +223,9 @@ actor SyncCoordinator {
         case let SyncError.storeUnreadable(warnings):
             return .storeUnreadable(SyncError.storeUnreadable(warnings).errorDescription ?? "Sync failed.")
         case let error as LocalizedError:
-            return .failed(error.errorDescription ?? "Sync failed.")
+            return .failed(SyncFailureCause.message(for: error, fallback: "Sync failed."))
         default:
-            return .failed(error.localizedDescription)
+            return .failed(SyncFailureCause.message(for: error))
         }
     }
 

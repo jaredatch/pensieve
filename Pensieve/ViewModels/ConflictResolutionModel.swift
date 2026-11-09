@@ -96,7 +96,7 @@ final class ConflictResolutionModel {
             phase = result.groups.isEmpty ? .empty : .ready(result.groups)
         } catch {
             guard !presentations.isEmpty, self.inspectionID == inspectionID else { return }
-            phase = .error((error as? LocalizedError)?.errorDescription ?? "Couldn't load conflicts.")
+            phase = .error(SyncFailureCause.message(for: error, fallback: "Couldn't load conflicts."))
         }
     }
 
@@ -147,10 +147,10 @@ final class ConflictResolutionModel {
                 selectionError = error.errorDescription
                 phase = .ready(groups)
             default:
-                phase = .error(error.errorDescription ?? "Couldn't resolve conflicts.")
+                phase = .error(SyncFailureCause.message(for: error, fallback: "Couldn't resolve conflicts."))
             }
         } catch {
-            phase = .error((error as? LocalizedError)?.errorDescription ?? "Couldn't resolve conflicts.")
+            phase = .error(SyncFailureCause.message(for: error, fallback: "Couldn't resolve conflicts."))
         }
     }
 

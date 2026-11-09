@@ -24,8 +24,10 @@ struct ConflictAbortBlocked: LocalizedError {
     let paths: [String]
     let underlying: Error
     var errorDescription: String? {
-        underlying.localizedDescription + " Move the folder at " + paths.joined(separator: ", ")
-            + " out of the store, then sync again."
+        underlying.localizedDescription + " " + folderAdvice
+    }
+    var folderAdvice: String {
+        "Move the folder at " + paths.joined(separator: ", ") + " out of the store, then sync again."
     }
 }
 
