@@ -75,6 +75,7 @@ final class SkillPreviewLayoutTests: XCTestCase {
         }
     }
 
+    // Left quarantine on 2026-11-09 after passing eight full runs.
     func testListTextUsesTwoEmIndentAtEveryLevel() async throws {
         let fixture = host("Paragraph.\n\n- Bullet\n  - Nested\n\n1. Numbered")
         defer { fixture.window.close() }
@@ -114,6 +115,7 @@ final class SkillPreviewLayoutTests: XCTestCase {
                        "At equal content width, a list must preserve the placeholder's wrapping and height")
     }
 
+    // Left quarantine on 2026-11-09 after passing eight full runs.
     func testWrappedBulletSitsInsideFirstLine() async throws {
         let content = "A list item whose text wraps over multiple lines in a deliberately narrow column."
         let fixture = host("- \(content)", width: 240)
@@ -129,6 +131,7 @@ final class SkillPreviewLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be inside the first line")
     }
 
+    // Left quarantine on 2026-11-09 after passing eight full runs.
     func testWideNumberedMarkersStayInsideColumn() async throws {
         for locale in ["en_US", "de_DE", "ar_EG"] {
             let fixture = host("Paragraph.\n\n999. Three digits\n1000. Four digits\n1001. Next",
