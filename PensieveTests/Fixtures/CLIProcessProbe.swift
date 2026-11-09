@@ -85,6 +85,7 @@ enum CLIProcessProbe {
             os._exit(0)
         child.wait()
         """, receipt, release]
+        let launchedAt = ProcessInfo.processInfo.systemUptime
         let result = try run(process, timeout: 1, readyAt: receipt, beforeCleanup: { // upper-bound: before the child's self-exit
             guard exitingLeader else { return }
             do { try files.writeFile(at: release, content: "exit") } catch { XCTFail("cannot release race fixture: \(error)") }
@@ -100,7 +101,13 @@ enum CLIProcessProbe {
         let child = try XCTUnwrap(pid_t(files.readFile(at: receipt)))
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        let read = proc_pidinfo(child, PROC_PIDTBSDINFO, 0, &info, size)
+        let deadline = launchedAt + 3.5 // upper-bound: before the child's 4 s self-exit so a surviving child still fails
+        var read = proc_pidinfo(child, PROC_PIDTBSDINFO, 0, &info, size)
+        while read != 0 && info.pbi_status != UInt32(SZOMB) && ProcessInfo.processInfo.systemUptime < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+            guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+            read = proc_pidinfo(child, PROC_PIDTBSDINFO, 0, &info, size)
+        }
         XCTAssertTrue(read == 0 || info.pbi_status == UInt32(SZOMB), "the probe's child must also be stopped")
     }
 }
