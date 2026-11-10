@@ -177,6 +177,7 @@ final class IngestAllowlistedFastForwardGit: FastForwardGitService {
     func remoteURL(at path: String) throws -> String? {
         try git.remoteURL(at: path) == nil ? nil : "https://fixture.test/repo.git"
     }
+    func prepareStoreMetadata(at path: String) throws { try git.prepareStoreMetadata(at: path) }
     func isWorktreeClean(at path: String) -> Bool { git.isWorktreeClean(at: path) }
     func fetch(at path: String, credential: GitCredential?) throws {
         try git.fetch(at: path, credential: credential)

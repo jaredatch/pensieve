@@ -6,6 +6,11 @@ enum GitDispatchCalled: Error, Equatable { case operation(String) }
 final class GitDispatchOperations: GitServiceProtocol, FastForwardGitService,
                                 SkillInstallGitServing, UpdateCheckGitServing, UpstreamHistoryGitServing {
     var calls: [String] = []
+    func prepareStoreMetadata(at path: String) throws {
+        calls.append("prepareStoreMetadata(at)")
+        throw GitDispatchCalled.operation("prepareStoreMetadata(at)")
+    }
+
     func manifestMatchesHead(at path: String) throws -> Bool {
         calls.append("manifestMatchesHead(at)")
         throw GitDispatchCalled.operation("manifestMatchesHead(at)")

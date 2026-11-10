@@ -71,10 +71,17 @@ struct SyncDaemon {
         case .https: credential = credentials.credential(forHost: spec.host)
         }
 
-        // 4. Never fast-forward over a worktree we could not safely advance. Do NOT reconcile.
+        // 4. Report metadata failures by name before the conservative clean-tree probe can hide them.
+        do {
+            try git.prepareStoreMetadata(at: root)
+        } catch {
+            return finish(.failed(.preflight(error.localizedDescription)))
+        }
+
+        // 5. Never fast-forward over a worktree we could not safely advance. Do NOT reconcile.
         guard git.isWorktreeClean(at: root) else { return finish(.skipped(.dirtyTree)) }
 
-        // 5. Fast-forward only — never rewrites history. Auth error → .failed(.authentication); any other
+        // 6. Fast-forward only — never rewrites history. Auth error → .failed(.authentication); any other
         //    git error → .failed(.gitError). A non-fast-forwardable divergence → .skipped(.diverged).
         let ff: FastForwardResult
         do {
@@ -96,7 +103,7 @@ struct SyncDaemon {
         case .diverged:      return finish(.skipped(.diverged))
         }
 
-        // 6. Reconcile on BOTH success branches (self-heals even when already up-to-date). Reconcile is
+        // 7. Reconcile on BOTH success branches (self-heals even when already up-to-date). Reconcile is
         //    fail-safe internally (Stage 12.9); a reconcile error never fails the pull that already landed.
         //    GUI manifest saves wait for this whole cycle, then apply their edits to the pulled tree.
         _ = try? reconciler.reconcile(root: root)

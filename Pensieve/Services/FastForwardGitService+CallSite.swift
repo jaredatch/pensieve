@@ -2,6 +2,14 @@ import Foundation
 
 // Source defaults capture the caller; typed references dispatch public protocol witnesses.
 extension GitFastForwarding {
+    func prepareStoreMetadata(at path: String,
+                              file: StaticString = #fileID, line: UInt = #line) throws {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            let operation: (String) throws -> Void = self.prepareStoreMetadata
+            try operation(path)
+        }
+    }
+
     func isWorktreeClean(at path: String,
                          file: StaticString = #fileID, line: UInt = #line) -> Bool {
         GitThreadGuard.withCallSite(file: file, line: line) {

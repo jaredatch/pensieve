@@ -139,6 +139,7 @@ private struct PausedManifestFastForward: FastForwardGitService {
     let wrapped: AllowlistedFastForwardGit
     let gate: TestWait.Gate
     func remoteURL(at path: String) throws -> String? { try wrapped.remoteURL(at: path) }
+    func prepareStoreMetadata(at path: String) throws { try wrapped.prepareStoreMetadata(at: path) }
     func isWorktreeClean(at path: String) -> Bool { wrapped.isWorktreeClean(at: path) }
     func fetch(at path: String, credential: GitCredential?) throws { try wrapped.fetch(at: path, credential: credential) }
     func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
