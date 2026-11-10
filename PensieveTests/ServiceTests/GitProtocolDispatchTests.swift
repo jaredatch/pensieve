@@ -13,6 +13,7 @@ final class GitProtocolDispatchTests: XCTestCase {
     func testGitServiceProtocolDispatchesPublicWitnesses() throws {
         let operations = GitDispatchOperations()
         let service: GitServiceProtocol = operations
+        expectCalled("prepareStoreMetadata(at)", try service.prepareStoreMetadata(at: "fixture"))
         XCTAssertTrue(service.isWorktreeClean(at: "fixture"))
         expectCalled("fastForwardOnly(at,credential)", try service.fastForwardOnly(at: "fixture", credential: .sshAgent))
         expectCalled("manifestMatchesHead(at)", try service.manifestMatchesHead(at: "fixture"))
@@ -37,6 +38,7 @@ final class GitProtocolDispatchTests: XCTestCase {
         expectCalled("hasRemoteOriginConfigured(at)", try service.hasRemoteOriginConfigured(at: "fixture"))
         expectCalled("stageAllAndCommit(at,message)", try service.stageAllAndCommit(at: "fixture", message: "fixture"))
         XCTAssertEqual(operations.calls, [
+            "prepareStoreMetadata(at)",
             "isWorktreeClean(at)", "fastForwardOnly(at,credential)", "manifestMatchesHead(at)",
             "probeUsability()",
             "remoteURL(at)",
@@ -128,11 +130,13 @@ final class GitProtocolDispatchTests: XCTestCase {
     func testFastForwardGitServiceDispatchesPublicWitnesses() throws {
         let operations = GitDispatchOperations()
         let service: FastForwardGitService = operations
+        expectCalled("prepareStoreMetadata(at)", try service.prepareStoreMetadata(at: "fixture"))
         expectCalled("probeUsability()", try service.probeUsability())
         expectCalled("remoteURL(at)", try service.remoteURL(at: "fixture"))
         expectCalled("fetch(at,credential)", try service.fetch(at: "fixture", credential: .sshAgent))
         expectCalled("fastForwardOnly(at,credential)", try service.fastForwardOnly(at: "fixture", credential: .sshAgent))
         XCTAssertEqual(operations.calls, [
+            "prepareStoreMetadata(at)",
             "probeUsability()",
             "remoteURL(at)",
             "fetch(at,credential)",

@@ -11,6 +11,12 @@ enum FastForwardResult: Equatable {
 
 /// Fast-forward primitives shared by the app's damaged-manifest recovery and the daemon.
 extension GitService {
+    /// Surface metadata repair failures before a caller's conservative clean-tree probe.
+    @_disfavoredOverload
+    func prepareStoreMetadata(at path: String) throws {
+        _ = try storeOperation(at: path)
+    }
+
     /// Unlike staging, the damage check includes excluded and nested-repository additions under
     /// manifest/. A local .env.yaml can break a category read even though sync would not stage it.
     @_disfavoredOverload

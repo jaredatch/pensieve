@@ -287,6 +287,10 @@ final class AllowlistedFastForwardGit: FastForwardGitService {
         try wrapped.remoteURL(at: path) == nil ? nil : "https://fixture.test/pensieve-skills.git"
     }
 
+    func prepareStoreMetadata(at path: String) throws {
+        try wrapped.prepareStoreMetadata(at: path)
+    }
+
     func isWorktreeClean(at path: String) -> Bool {
         wrapped.isWorktreeClean(at: path)
     }
