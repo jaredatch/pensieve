@@ -1,0 +1,6 @@
+paths = Pensieve/Services/ManifestChange.swift Pensieve/Services/RefusedManifestProjection.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift PensieveTests/ServiceTests/CategorySaveUndoTests+Retirement.swift docs/ARCHITECTURE.md .slipway/changelog/229.md .slipway/mutations/
+risk = Pensieve/Services/ManifestChange.swift Pensieve/Services/RefusedManifestProjection.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
+check.rename_saved = tests PensieveTests/CategorySaveUndoTests/testACategoryRenamedAfterAFailedSkillDeletionKeepsTheSkillOutOnceTheRenameSaves
+mutation.rename_saved = .slipway/mutations/rename_saved.patch
+check.reassignment = tests PensieveTests/CategorySaveUndoTests/testPuttingADeletedSkillBackSettlesTheDeletionOnlyWhenThatSaveGoesThrough
+mutation.reassignment = .slipway/mutations/reassignment.patch
