@@ -1,0 +1,6 @@
+paths = Pensieve/Services/SyncDaemon.swift Pensieve/Services/FastForwardGitService.swift Pensieve/Services/FastForwardGitService+CallSite.swift Pensieve/Services/GitService+FastForward.swift PensieveTests/ServiceTests/ PensieveTests/Fixtures/ .slipway/mutations/ .slipway/changelog/197.md
+risk = Pensieve/Services/SyncDaemon.swift Pensieve/Services/GitService+FastForward.swift
+check.linkedAttributes = tests PensieveTests/SyncDaemonMetadataTests/testLinkedAttributesFileFailsTheCycleByNameThenSyncsOnceMoved
+check.readOnlyInfo = tests PensieveTests/SyncDaemonMetadataTests/testReadOnlyMetadataFolderFailsTheCycleNotAsDirty
+mutation.linkedAttributes = .slipway/mutations/swallowed-metadata-error.patch
+mutation.readOnlyInfo = .slipway/mutations/swallowed-metadata-error.patch
