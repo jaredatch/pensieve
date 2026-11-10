@@ -261,9 +261,20 @@ struct RefusedManifestProjection {
     var intentMove: ManifestLocalIntentMove?
     var categoryRenames: [CategoryRename] = []
 
-    /// Fields keep their durable names; only the lookup in the window follows queued renames.
+    /// The current window's name includes renames that have not published yet.
     func windowCategoryName(for name: String) -> String {
         categoryRenames.reduce(name) { current, rename in current == rename.old ? rename.new : current }
+    }
+
+    /// Prefer the furthest local rename present here, even if the original name has been reused.
+    func resolvedCategoryName(for name: String, in snapshot: ManifestSnapshot) -> String? {
+        var current = name
+        var resolved = snapshot.categories.contains { $0.name == current } ? current : nil
+        for rename in categoryRenames where rename.old == current {
+            current = rename.new
+            if snapshot.categories.contains(where: { $0.name == current }) { resolved = current }
+        }
+        return resolved
     }
 
     var createdSkills: [SkillOverlay] {
@@ -295,6 +306,9 @@ struct RefusedManifestProjection {
             apply(field, local: cachedLocal, onto: &snapshot)
         } else {
             switch field {
+            case .change(.categorySkill(let name, let slug, let member)):
+                ManifestChange.categorySkill(resolvedCategoryName(for: name, in: snapshot) ?? name, slug, member)
+                    .apply(to: &snapshot)
             case .change(let change): change.apply(to: &snapshot)
             case .intent(let intent): snapshot.deployIntents.removeAll { $0 == intent }
             }
@@ -322,12 +336,16 @@ struct RefusedManifestProjection {
             } else { snapshot.deployIntents.removeAll { $0 == intent } }
         case .change(let change):
             if case .categorySkill(let name, let slug, _) = change {
-                guard let record = local.categories.first(where: { $0.name == windowCategoryName(for: name) }) else {
+                let target = resolvedCategoryName(for: name, in: snapshot) ?? name
+                let windowName = resolvedCategoryName(for: name, in: local)
+                guard let record = local.categories.first(where: { $0.name == windowName }) else {
                     // A newly read retirement field can name a category the window has never seen.
-                    if case .categorySkill(_, _, false) = change { change.apply(to: &snapshot) }
+                    if case .categorySkill(_, _, false) = change {
+                        ManifestChange.categorySkill(target, slug, false).apply(to: &snapshot)
+                    }
                     return
                 }
-                let update = ManifestChange.categorySkill(name, slug, record.skillSlugs.contains(slug))
+                let update = ManifestChange.categorySkill(target, slug, record.skillSlugs.contains(slug))
                 if !update.apply(to: &snapshot) { ManifestChange.createCategory(record).apply(to: &snapshot) }
             } else { applySkill(change, local: local, onto: &snapshot) }
         }

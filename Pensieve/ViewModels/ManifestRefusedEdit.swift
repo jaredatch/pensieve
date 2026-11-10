@@ -92,6 +92,19 @@ final class ManifestRefusedEdit {
         if case .retireSkill = original { observe(change) }
     }
 
+    /// A queued re-add is only acknowledgement evidence once its own save publishes.
+    func observePublished(_ change: ManifestChange, order publishedOrder: Int, durable: ManifestSnapshot) {
+        guard publishedOrder > order, case .retireSkill = original,
+              case .categorySkill(let category, let slug, true) = change else { return }
+        if fields == nil { fields = retirementFields(durable: durable) }
+        let current = projection
+        fields?.removeAll { field in
+            guard case .change(.categorySkill(let name, let target, false)) = field else { return false }
+            return target == slug && current.resolvedCategoryName(for: name, in: durable) == category
+        }
+        updateRegistration()
+    }
+
     func suppliesTarget(for edit: ManifestRefusedEdit) -> Bool {
         switch (original, edit.original) {
         case (.createSkill(let skill), .skillMetadata(let slug, _, _)): return skill.slug == slug
@@ -119,6 +132,13 @@ final class ManifestRefusedEdit {
         if fields == nil { fields = retirementFields(durable: durable) }
         var remaining: [Field] = []
         for field in fields ?? [] {
+            if case .change(.categorySkill(let name, let slug, false)) = field {
+                let resolved = projection.resolvedCategoryName(for: name, in: durable)
+                if durable.categories.contains(where: { $0.name == resolved && $0.skillSlugs.contains(slug) }) {
+                    remaining.append(field)
+                }
+                continue
+            }
             var probe = durable
             projection.project(field, onto: &probe)
             if probe != durable { remaining.append(field) }

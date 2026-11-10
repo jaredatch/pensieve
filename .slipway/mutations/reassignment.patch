@@ -1,0 +1,16 @@
+--- a/Pensieve/ViewModels/ManifestRefusedEdit.swift
++++ b/Pensieve/ViewModels/ManifestRefusedEdit.swift
+@@ -132,13 +132,6 @@
+         if fields == nil { fields = retirementFields(durable: durable) }
+         var remaining: [Field] = []
+         for field in fields ?? [] {
+-            if case .change(.categorySkill(let name, let slug, false)) = field {
+-                let resolved = projection.resolvedCategoryName(for: name, in: durable)
+-                if durable.categories.contains(where: { $0.name == resolved && $0.skillSlugs.contains(slug) }) {
+-                    remaining.append(field)
+-                }
+-                continue
+-            }
+             var probe = durable
+             projection.project(field, onto: &probe)
+             if probe != durable { remaining.append(field) }
