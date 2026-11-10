@@ -3,6 +3,100 @@ import XCTest
 @testable import Pensieve
 
 extension CategorySaveUndoTests {
+    func testACategoryRenamedAfterAFailedSkillDeletionKeepsTheSkillOutOnceTheRenameSaves() async throws {
+        let h = try retirementFixture(remoteIntent: false)
+        defer { h.cleanup() }
+        h.recording.failingWrites = 1
+        refuseSkillDeletion(h)
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(h.library.error?.contains("updating the sync manifest failed") == true)
+        var expected = try h.manifest.read(fromRoot: h.root)
+        let original = try XCTUnwrap(expected.categories.firstIndex { $0.name == "Local" })
+        expected.categories[original].name = "Renamed"
+        h.categories.rename(h.local, to: "Renamed", context: h.context)
+        await h.saves.waitUntilIdle()
+
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: h.context)
+        XCTAssertEqual(h.local.name, "Renamed")
+        XCTAssertEqual(h.local.skillSlugs, [])
+        var durable = try h.manifest.read(fromRoot: h.root)
+        assertWorkerMembership(h, durable: durable, members: [], category: "Renamed")
+        XCTAssertEqual(h.saves.refused.count, 1)
+        XCTAssertEqual(durable.categories.first { $0.name == "Renamed" }?.skillSlugs, ["alpha"])
+        XCTAssertEqual(h.recording.writes, [expected], "Only the rename publishes, preserving all other durable fields")
+
+        let replacement = try XCTUnwrap(h.categories.create(name: "Local", context: h.context))
+        h.categories.setSkill(h.alpha, inCategory: replacement, assigned: true, context: h.context)
+        await h.saves.waitUntilIdle()
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: h.context)
+        XCTAssertEqual(replacement.skillSlugs, ["alpha"])
+        XCTAssertEqual(h.local.skillSlugs, [])
+        XCTAssertEqual(h.saves.refused.count, 1, "A re-add to the replacement does not settle the renamed category")
+
+        durable = try h.manifest.read(fromRoot: h.root)
+        let index = try XCTUnwrap(durable.categories.firstIndex { $0.name == "Renamed" })
+        durable.categories[index].skillSlugs = []
+        try h.manifest.write(durable, toRoot: h.root)
+        h.library.updateMetadata(h.beta, tags: ["later"], scope: .user, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(h.saves.refused.isEmpty, "The real durable removal settles the owed deletion")
+    }
+
+    func testPuttingADeletedSkillBackSettlesTheDeletionOnlyWhenThatSaveGoesThrough() async throws {
+        for outcome in ["undone", "undone with pending rename", "saved"] {
+            let h = try retirementFixture(remoteIntent: false)
+            defer { h.cleanup() }
+            if outcome != "saved" {
+                try await checkUndoneReassignment(h, pendingRename: outcome == "undone with pending rename")
+                continue
+            }
+            h.recording.failingWrites = 1
+            refuseSkillDeletion(h)
+            await h.saves.waitUntilIdle()
+            XCTAssertTrue(h.library.error?.contains("updating the sync manifest failed") == true)
+            h.categories.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertTrue(h.saves.refused.isEmpty, "A published re-add settles the owed deletion")
+            XCTAssertEqual(h.local.skillSlugs, ["alpha"])
+            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first { $0.name == "Local" }?.skillSlugs,
+                           ["alpha"])
+            _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: h.context)
+            XCTAssertEqual(h.local.skillSlugs, ["alpha"])
+        }
+    }
+
+    private func checkUndoneReassignment(_ h: ManifestSaveFixture, pendingRename: Bool) async throws {
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { lock.release() }
+        let before = try h.manifestBytes()
+        refuseSkillDeletion(h)
+        h.categories.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
+        if pendingRename { h.categories.rename(h.local, to: "Renamed", context: h.context) }
+        await h.assertWaitingBehindHeldLock(pending: pendingRename ? 3 : 2, before: before)
+        h.recording.failingWrites = 1
+        h.recording.afterRead = {
+            h.recording.afterRead = nil
+            try h.files.deleteFile(at: h.lockPath)
+            try h.files.createDirectory(at: h.lockPath)
+        }
+        lock.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertTrue(h.library.error?.contains("updating the sync manifest failed") == true)
+        XCTAssertEqual(h.saves.refused.count, 1)
+        XCTAssertEqual(h.local.name, "Local")
+        XCTAssertEqual(h.local.skillSlugs, [])
+        let notice = try XCTUnwrap(h.saves.categoryNotice)
+        XCTAssertTrue(notice.message.contains("undone"))
+        XCTAssertFalse(notice.message.contains("already saved"))
+        XCTAssertTrue(h.recording.writes.isEmpty)
+        XCTAssertEqual(try h.manifestBytes(), before)
+        _ = try StoreIngestState.rebuild(using: StoreRebuildService(), root: h.root, context: h.context)
+        XCTAssertEqual(h.local.skillSlugs, [])
+        let durable = try h.manifest.read(fromRoot: h.root)
+        assertWorkerMembership(h, durable: durable, members: [])
+        XCTAssertEqual(durable.categories.first { $0.name == "Local" }?.skillSlugs, ["alpha"])
+    }
+
     func testACategoryRenamedAfterAFailedSkillDeletionKeepsTheSkillYouAddedWhenTheRenameIsUndone() async throws {
         let h = try retirementFixture()
         defer { h.cleanup() }
@@ -88,13 +182,15 @@ extension CategorySaveUndoTests {
         try await checkCategoryDeleteUndoKeepsNewerAssignment()
     }
 
-    private func retirementFixture() throws -> ManifestSaveFixture {
+    private func retirementFixture(remoteIntent: Bool = true) throws -> ManifestSaveFixture {
         let h = try ManifestSaveFixture(failAlphaDeletion: true)
         h.local.skillSlugs = ["alpha"]
         // Keep the retirement refused even when its membership field is acknowledged by
         // the newer assignment. Deploy intent has its own independent acknowledgement.
-        h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.remoteID,
-            skillSlug: "alpha", platformRaw: "codex"))
+        if remoteIntent {
+            h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.remoteID,
+                skillSlug: "alpha", platformRaw: "codex"))
+        }
         try h.context.save()
         try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
         return h
@@ -119,9 +215,10 @@ extension CategorySaveUndoTests {
     }
 
     private func assertWorkerMembership(_ h: ManifestSaveFixture, durable: ManifestSnapshot, members: [String],
+                                        category: String = "Local",
                                         file: StaticString = #filePath, line: UInt = #line) {
         let projected = StoreIngestState.shared(for: h.context.container).projectingEdits(onto: durable).snapshot
-        XCTAssertEqual(projected.categories.first { $0.name == "Local" }?.skillSlugs, members,
+        XCTAssertEqual(projected.categories.first { $0.name == category }?.skillSlugs, members,
                        "Worker rebuilds must agree with the window after undo", file: file, line: line)
     }
 
