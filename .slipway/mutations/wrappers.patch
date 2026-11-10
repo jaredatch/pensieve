@@ -1,0 +1,10 @@
+--- a/Pensieve/Services/FileService+Publication.swift
++++ b/Pensieve/Services/FileService+Publication.swift
+@@ -49,6 +49,7 @@
+ 
+ extension FileService {
+     func removeEmptyDirectory(at path: String) throws {
++        return
+         guard rmdir(path) != 0 else { return }
+         let code = errno
+         guard code != ENOENT, code != ENOTEMPTY else { return }

@@ -80,6 +80,7 @@ private struct StubFileService: FileServiceProtocol {
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool { path.hasPrefix("/tmp/") }
+    func removeEmptyDirectory(at path: String) throws {}
     func createDirectory(at path: String) throws {}
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}

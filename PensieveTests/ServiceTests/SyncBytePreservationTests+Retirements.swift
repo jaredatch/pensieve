@@ -214,6 +214,7 @@ final class RetirementFileService: FileServiceProtocol {
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {

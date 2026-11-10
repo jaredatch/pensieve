@@ -72,6 +72,7 @@ final class StoreDirectorySwapFileService: FileServiceProtocol {
     func isUserExecutableFile(at path: String) -> Bool { wrapped.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool { try wrapped.directoryExistsFollowingLinks(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func createDirectoryWithoutParents(at path: String) throws { try wrapped.createDirectoryWithoutParents(at: path) }
     func writeFileWithoutParents(at path: String, content: String) throws {

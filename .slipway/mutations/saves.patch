@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/FileService+Publication.swift
++++ b/Pensieve/Services/FileService+Publication.swift
+@@ -141,9 +141,6 @@
+             }
+             defer { close(descriptor) }
+             let locked = lockStoreIntermediates(descriptor)
+-            defer {
+-                if namespace && locked { removeStoreNamespace(at: directory, heldBy: descriptor) }
+-            }
+             if namespace {
+                 var status = stat()
+                 guard fstat(descriptor, &status) == 0 else {

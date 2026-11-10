@@ -84,6 +84,7 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
     func directoryExists(at path: String) -> Bool {
         path == canonicalDirectory || (path == linkPath && state.directoryExists)
     }
+    func removeEmptyDirectory(at path: String) throws {}
     func createDirectory(at path: String) throws {}
     func directoryExistsFollowingLinks(at path: String) throws -> Bool {
         directoryProbePaths.append(path)
@@ -314,6 +315,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try beforeArtifactCreation?(physical)
         try wrapped.createSymlinkWithoutParents(at: physical, pointingTo: resolved(targetPath))
     }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: resolved(path)) }
     func createDirectory(at path: String) throws {
         try wrapped.createDirectory(at: resolved(path))
     }

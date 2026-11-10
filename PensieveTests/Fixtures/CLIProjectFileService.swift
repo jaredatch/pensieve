@@ -58,6 +58,7 @@ final class CLIProjectFileService: FileServiceProtocol {
         noteProbe(); try beforeProjectProbe?()
         return try wrapped.directoryExistsFollowingLinks(at: path)
     }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func createDirectoryWithoutParents(at path: String) throws { try wrapped.createDirectoryWithoutParents(at: path) }
     func writeFileWithoutParents(at path: String, content: String) throws {

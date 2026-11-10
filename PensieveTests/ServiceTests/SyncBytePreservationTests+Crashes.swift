@@ -167,9 +167,7 @@ extension SyncBytePreservationTests {
         XCTAssertEqual(try probe.run(root: root, writer: "create", point: "complete"), 0)
         XCTAssertFalse(files.fileExists(at: abandoned), "Replacing a store must not orphan its previous intermediate")
         let namespace = (try probe.intermediate() as NSString).deletingLastPathComponent
-        let moved = namespace + ".saved"
-        XCTAssertEqual(rename(namespace, moved), 0)
-        defer { try? files.deleteDirectory(at: namespace); try? files.deleteDirectory(at: moved) }
+        defer { try? files.deleteDirectory(at: namespace) }
         let outside = base + "/namespace-target"
         try files.createDirectory(at: outside)
         try files.createSymlink(at: namespace, pointingTo: outside)

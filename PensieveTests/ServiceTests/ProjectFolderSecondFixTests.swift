@@ -172,6 +172,7 @@ final class SecondFixPathFiles: FileServiceProtocol {
         if let probeError { throw probeError }
         return true
     }
+    func removeEmptyDirectory(at path: String) throws {}
     func createDirectory(at path: String) throws { paths.append(path) }
     func deleteDirectory(at path: String) throws { paths.append(path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { paths.append(linkPath) }

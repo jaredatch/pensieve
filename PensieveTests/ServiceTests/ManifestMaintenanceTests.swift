@@ -18,6 +18,7 @@ private struct ThrowingWriteFileService: FileServiceProtocol {
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? { nil }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
+    func removeEmptyDirectory(at path: String) throws {}
     func createDirectory(at path: String) throws { throw Boom() }
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
