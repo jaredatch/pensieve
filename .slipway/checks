@@ -1,0 +1,6 @@
+paths = Pensieve/Services/FileService+Publication.swift Pensieve/Services/FileService.swift PensieveTests/ docs/ARCHITECTURE.md
+risk = Pensieve/Services/FileService+Publication.swift
+check.saves = tests PensieveTests/StoreTemporaryFolderTests
+check.wrappers = tests PensieveTests/WrappedFileServiceTemporaryTests
+mutation.saves = .slipway/mutations/saves.patch
+mutation.wrappers = .slipway/mutations/wrappers.patch
