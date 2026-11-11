@@ -1,0 +1,3 @@
+paths = Pensieve/Views/MainWindow/DetailColumnView.swift Pensieve/Views/MainWindow/SkillListView.swift Pensieve/Views/MainWindow/DetailView.swift Pensieve/Views/MainWindow/ContentView.swift PensieveTests/ViewTests/DetailColumnDeletedSelectionTests.swift PensieveTests/ViewTests/LibraryFenceControlsTests.swift .slipway/mutations/selection.patch .slipway/changelog/230.md
+check.selection = tests PensieveTests/DetailColumnDeletedSelectionTests
+mutation.selection = .slipway/mutations/selection.patch
