@@ -18,7 +18,7 @@ extension ManifestSaveFixture {
         currentCategories = nil; currentLibrary = nil; currentSaves = nil; currentContext = nil
     }
 
-    func relaunchThroughRuntime() async throws {
+    func relaunchThroughRuntime(launchReconcile: AppRuntime.LaunchReconcile? = nil) async throws {
         precondition(persistent)
         quit()
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: storeURL))
@@ -28,7 +28,7 @@ extension ManifestSaveFixture {
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
         let runtime = try AppRuntime(container: container,
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
-            defaults: defaults, launchBackfill: { _ in }, paths: paths,
+            defaults: defaults, launchReconcile: launchReconcile, launchBackfill: { _ in }, paths: paths,
             updateCheckOperation: { _ in RuntimeUpdateCheckResult(report: UpdateCheckReport(), skills: [:]) },
             gitUsabilityProbe: { .usable }, coordinatorConfigure: { coordinator in
                 await coordinator.configure(engine: RecoveredPresentationEngine(), git: paths.makeGitService(),

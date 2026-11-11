@@ -55,6 +55,55 @@ final class SkillDeletionRestartTests: XCTestCase {
         }
     }
 
+    func testAPeerSkillArrivingDuringLaunchSurvivesDeletionReplayAndWholeSnapshotPublication() async throws {
+        let h = try ManifestSaveFixture(persistent: true)
+        defer { h.cleanup() }
+        h.local.skillSlugs = ["alpha"]
+        h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.remoteID,
+            skillSlug: "alpha", platformRaw: "codex"))
+        try h.context.save()
+        var peer = try h.manifest.snapshot(from: h.context)
+        let alpha = try XCTUnwrap(peer.skills.firstIndex { $0.slug == "alpha" })
+        peer.skills[alpha].createdAt = Date(timeIntervalSince1970: 1_800_000_000)
+        peer.skills[alpha].tags = ["peer"]
+        peer.skills[alpha].scope = .project
+        peer.categories.sort { $0.name < $1.name }
+        peer.skills.sort { $0.slug < $1.slug }
+        let arriving = peer
+        XCTAssertTrue(SkillDeletionFlow.delete(skill: h.alpha, library: h.library, platformVM: h.platform,
+                                              projects: [], context: h.context))
+        h.quit()
+
+        let root = h.root, files = h.files, manifest = h.manifest
+        let paths = AppRuntimePaths(storeRoot: root, appSupportDir: root + "/support")
+        let reconcile = paths.makeLaunchReconcile()
+        try await h.relaunchThroughRuntime(launchReconcile: { context, migrated in
+            // Restore has observed the absent folder. A helper now pulls a new peer creation.
+            if !files.directoryExists(at: root + "/skills/alpha") {
+                do {
+                    try files.writeFile(at: root + "/skills/alpha/SKILL.md",
+                        content: SkillSerializer.serialize(name: "Peer Alpha", description: "peer", body: "peer body"))
+                    try manifest.write(arriving, toRoot: root)
+                } catch { XCTFail("Couldn't deliver the peer creation: \(error)") }
+            }
+            return reconcile(context, migrated)
+        })
+        await h.saves.waitUntilIdle()
+
+        let displayed = try h.manifest.snapshot(from: h.context)
+        XCTAssertEqual(displayed.skills.first { $0.slug == "alpha" }, arriving.skills.first { $0.slug == "alpha" })
+        XCTAssertEqual(displayed.categories.sorted { $0.name < $1.name }, arriving.categories)
+        XCTAssertEqual(displayed.deployIntents, arriving.deployIntents)
+        XCTAssertEqual(try h.manifest.read(fromRoot: root), arriving)
+        // A later sync publishes the rebuilt rows through this same whole-snapshot boundary.
+        try h.manifest.write(try StoreIngestState.snapshotForPublication(using: h.manifest,
+            context: h.context, root: root), toRoot: root)
+        XCTAssertEqual(try h.manifest.read(fromRoot: root), arriving)
+        try await h.relaunchThroughRuntime()
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.manifest.read(fromRoot: root), arriving)
+    }
+
     private func assertCollisionDeletionSurvivesQuit(failRowSave: Bool) async throws {
         let h = try CollisionCreateFixture(persistent: true)
         defer { h.cleanup() }

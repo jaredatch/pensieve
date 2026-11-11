@@ -245,7 +245,10 @@ final class AppRuntime {
         didPerformLaunchWork = true
         launchWorkInvocationCount += 1
         library.manifestSaves?.restoreRefusedCreates(context: context)
-        let result = await runLaunchJob()
+        var result = await runLaunchJob()
+        while library.manifestSaves?.discardReappearedRestoredDeletions() == true {
+            result = await runLaunchJob()
+        }
         acceptLaunchIngest(result, context: context)
         library.manifestSaves?.replayRestoredDeletions(context: context)
         checkForSkillUpdatesIfDue()

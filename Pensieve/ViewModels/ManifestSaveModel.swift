@@ -19,7 +19,7 @@ final class ManifestSaveModel {
     let root: String
     let refusedCreatesPath: String?
     @ObservationIgnored var recordsRequireNewerVersion = false
-    @ObservationIgnored var restoredDeletions: [ManifestChange] = []
+    @ObservationIgnored var restoredDeletions: [RestoredDeletion] = []
     @ObservationIgnored var recordedCreateSlugs: Set<String> = []
     @ObservationIgnored var preservedPeerSlugs: Set<String> = []
     let manifest: ManifestSnapshotting
@@ -47,6 +47,12 @@ final class ManifestSaveModel {
     @ObservationIgnored private var categoryMessages: [OrderedCategoryNotice] = []
     @ObservationIgnored var stagedRefusals: [StagedRefusal] = []
     @ObservationIgnored var worker: Task<Void, Never>?
+
+    struct RestoredDeletion {
+        let slug: String
+        let changes: [ManifestChange]
+        let projectionIDs: Set<UUID>
+    }
 
     struct Item {
         let order: Int

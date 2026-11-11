@@ -236,7 +236,7 @@ Only saved category renames enter the record; restored renames are marked saved.
 
 The deletion reminder is written at retirement submit, before the folder goes, including when the later row save fails. A collision-held delete preserves the peer slug in the record and ingest state at submit; its reminder retires only this Mac's requests and never deletes the peer overlay.
 
-Restore ignores deletion reminders whose folders remain; refused retirement fields cover those kept skills. When the folder is absent, restore registers a retirement and overlay deletion before the launch rebuild, keeping categories and requests clear from the first frame. A machine-scoped reminder registers only a local retirement. After the launch job's verdict, the queue replays those edits to publish the manifest cleanup. Publication acknowledges the restored projections and clears the reminders.
+Restore ignores deletion reminders whose folders remain; refused retirement fields cover those kept skills. When the folder is absent, restore registers a retirement and overlay deletion before the launch rebuild, keeping categories and requests clear from the first frame. A machine-scoped reminder registers only a local retirement. After the launch job's verdict, launch checks those folders again. If a folder has appeared, launch drops that reminder and its projections, then rebuilds the rows from disk before completing. The queue replays the remaining edits to publish the manifest cleanup. Publication acknowledges the restored projections and clears the reminders.
 
 Preserved slugs register before the rebuild and remain until a readable launch probe finds their overlays gone. Restore adds no window notice; the next refused edit shows the rename message.
 

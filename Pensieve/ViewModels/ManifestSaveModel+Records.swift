@@ -95,19 +95,32 @@ extension ManifestSaveModel {
         for record in records where !retirementFolderMayExist(record.slug) {
             let changes: [ManifestChange] = record.machineID.map { [.retireLocalSkill(record.slug, $0)] }
                 ?? [.retireSkill(record.slug), .deleteSkill(record.slug)]
-            for change in changes {
-                let edit = ManifestRefusedEdit(change, context: context, order: -1)
+            let edits = changes.map { ManifestRefusedEdit($0, context: context, order: -1) }
+            for edit in edits {
                 edit.retain()
                 refused.append(edit)
             }
-            restoredDeletions.append(contentsOf: changes)
+            restoredDeletions.append(.init(slug: record.slug, changes: changes, projectionIDs: Set(edits.map(\.id))))
         }
+    }
+
+    /// A helper can pull a new creation while launch rebuilds. Withdraw both the replay and
+    /// its projections; the caller must rebuild again before exposing or publishing those rows.
+    func discardReappearedRestoredDeletions() -> Bool {
+        let reappeared = restoredDeletions.filter { retirementFolderMayExist($0.slug) }
+        guard !reappeared.isEmpty else { return false }
+        let slugs = Set(reappeared.map(\.slug))
+        let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
+        restoredDeletions.removeAll { slugs.contains($0.slug) }
+        refused.removeAll { projectionIDs.contains($0.id) }
+        persistRefusedCreates()
+        return true
     }
 
     /// Launch owns sync.lock while rebuilding. Replay only after its verdict, with projections
     /// already registered so no stale membership or request reaches the window in between.
     func replayRestoredDeletions(context: ModelContext) {
-        let changes = restoredDeletions
+        let changes = restoredDeletions.flatMap(\.changes)
         restoredDeletions = []
         for change in changes { submit(change, context: context) { _ in } }
     }
