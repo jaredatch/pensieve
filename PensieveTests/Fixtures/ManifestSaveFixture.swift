@@ -11,40 +11,58 @@ final class ManifestSaveFixture {
     let lockPath: String
     let files = FileService()
     let manifest = ManifestService()
-    let context: ModelContext
-    let saves: ManifestSaveModel
-    let recording: RecordingSaveManifest
+    var currentContext: ModelContext?
+    var context: ModelContext { currentContext! }
+    var currentSaves: ManifestSaveModel?
+    var saves: ManifestSaveModel { currentSaves! }
+    let recording = RecordingSaveManifest()
     let messages = Messages()
-    let library: SkillLibraryViewModel
-    let categories: CategoryStore
+    var currentLibrary: SkillLibraryViewModel?
+    var library: SkillLibraryViewModel { currentLibrary! }
+    var currentCategories: CategoryStore?
+    var categories: CategoryStore { currentCategories! }
     let platform: PlatformViewModel
-    let local = Pensieve.Category(name: "Local")
-    let doomed = Pensieve.Category(name: "ZDelete")
-    let alpha = Skill(name: "Alpha", directoryName: "alpha")
-    let beta = Skill(name: "Beta", directoryName: "beta")
-    let project: Project
+    var currentLocal: Pensieve.Category? = Pensieve.Category(name: "Local")
+    var local: Pensieve.Category { currentLocal! }
+    var currentDoomed: Pensieve.Category? = Pensieve.Category(name: "ZDelete")
+    var doomed: Pensieve.Category { currentDoomed! }
+    var currentAlpha: Skill? = Skill(name: "Alpha", directoryName: "alpha")
+    var alpha: Skill { currentAlpha! }
+    var currentBeta: Skill? = Skill(name: "Beta", directoryName: "beta")
+    var beta: Skill { currentBeta! }
+    var currentProject: Project?
+    var project: Project { currentProject! }
+
+    let persistent: Bool
+    var runtime: AppRuntime?
+    var recordPath: String { RuntimePaths(storeRoot: root, appSupportDir: root + "/support").refusedCreatesPath }
+    var storeURL: URL { URL(fileURLWithPath: directory.root + "/library.store") }
 
     init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01,
-         rebuildFiles: FileServiceProtocol? = nil, failAlphaDeletion: Bool = false) throws {
+         rebuildFiles: FileServiceProtocol? = nil, failAlphaDeletion: Bool = false, persistent: Bool = false) throws {
+        self.persistent = persistent
         root = directory.storeRoot
         lockPath = root + "/support/sync.lock"
-        context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
-        recording = RecordingSaveManifest()
-        recording.base = ManifestService(fileService: rebuildFiles ?? files)
-        let messages = messages
-        saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath,
-        waitSeconds: waitSeconds, files: rebuildFiles ?? files, log: { messages.lines.append($0) })
-        let skillFiles: FileServiceProtocol = failAlphaDeletion
-            ? FaultyFileService(wrapped: files, failDeletePath: root + "/skills/alpha") : files
-        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: skillFiles,
-            baseDir: root + "/skills", storeRoot: root),
-            fileWatchService: FileWatchService(rootDir: root + "/skills"),
-            manifestRoot: root, manifestSaves: saves)
-        categories = CategoryStore( manifestSaves: saves)
         platform = PlatformViewModel(fileService: files, linkService: DeletionTestLinkService(),
             cursorCompiler: DeletionTestCursorCompiler(), agentDetection: DeletionTestDetection(installed: []),
             deployStateStore: .memoryBacked, skillsDirectory: root + "/skills")
-        project = Project(name: "Local", path: root + "/project")
+        currentContext = ModelContext(try AppRuntime.makeContainer(configuration: persistent
+            ? ModelConfiguration(url: URL(fileURLWithPath: directory.root + "/library.store"))
+            : ModelConfiguration(isStoredInMemoryOnly: true)))
+        recording.base = ManifestService(fileService: rebuildFiles ?? files)
+        let messages = messages
+        currentSaves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath,
+            refusedCreatesPath: persistent
+                ? RuntimePaths(storeRoot: root, appSupportDir: root + "/support").refusedCreatesPath : nil,
+            waitSeconds: waitSeconds, files: rebuildFiles ?? files, log: { messages.lines.append($0) })
+        let skillFiles: FileServiceProtocol = failAlphaDeletion
+            ? FaultyFileService(wrapped: files, failDeletePath: root + "/skills/alpha") : files
+        currentLibrary = SkillLibraryViewModel(skillStore: SkillStore(fileService: skillFiles,
+            baseDir: root + "/skills", storeRoot: root),
+            fileWatchService: FileWatchService(rootDir: root + "/skills"),
+            manifestRoot: root, manifestSaves: saves)
+        currentCategories = CategoryStore( manifestSaves: saves)
+        currentProject = Project(name: "Local", path: root + "/project")
         project.identityKey = "local-key"
         for skill in [alpha, beta] {
             skill.createdAt = Date(timeIntervalSince1970: 1_700_000_000)
@@ -89,7 +107,10 @@ final class ManifestSaveFixture {
         return result
     }
 
-    func cleanup() { try? files.deleteDirectory(at: directory.root) }
+    func cleanup() {
+        quit()
+        try? files.deleteDirectory(at: directory.root)
+    }
 }
 
 /// Records the real full-snapshot writes, preserving their thread order; it does not implement merging.

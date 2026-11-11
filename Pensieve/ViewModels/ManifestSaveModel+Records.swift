@@ -34,13 +34,14 @@ extension ManifestSaveModel {
             log("Couldn't read refused creates at \(refusedCreatesPath): \(error)")
             return
         }
-        guard !record.held.isEmpty || !record.preserved.isEmpty else { return }
+        guard !record.held.isEmpty || !record.preserved.isEmpty || !record.retirements.isEmpty else { return }
         let durable = probeLibraryForRecordRestore()
         let state = StoreIngestState.shared(for: context.container)
         for slug in record.preserved where durable.map({ $0.skills.contains { $0.slug == slug } }) ?? true {
             preservedPeerSlugs.insert(slug)
             state.preservePeer(slug)
         }
+        restoreRetirements(record.retirements, durable: durable, context: context)
         let local: ManifestSnapshot
         do { local = try manifest.snapshot(from: context) } catch {
             log("Couldn't restore refused creates: " + error.localizedDescription)
@@ -77,10 +78,28 @@ extension ManifestSaveModel {
         }
     }
 
+    private func restoreRetirements(_ records: [RefusedCreateRecords.Retirement], durable: ManifestSnapshot?,
+                                    context: ModelContext) {
+        for record in records {
+            guard retirementFolderMayExist(record.slug) else { continue }
+            let edit = ManifestRefusedEdit(retirement: record, context: context)
+            if let durable, !edit.acknowledge(durable: durable) { continue }
+            edit.retain()
+            refused.append(edit)
+        }
+    }
+
+    private func retirementFolderMayExist(_ slug: String) -> Bool {
+        guard let folder = SkillStore.safeSkillDirectory(slug: slug, base: root + "/skills", fileService: files) else {
+            return true // An unsafe or unreadable folder is not evidence of a completed deletion.
+        }
+        do { return try files.entryTypeWithoutFollowingLinks(at: folder) == .directory } catch { return true }
+    }
+
     /// Mirror collision-held creates, renamed pending creates and peers kept after rename/delete.
     /// A renamed create also stays here after an ordinary write failure, carrying its intent move.
-    /// Other ordinary refused creates are omitted. Previously recorded creates stay until an
-    /// acknowledgement even when a readable probe finds their slug temporarily absent on disk.
+    /// Refused per-field retirements persist while their folders remain. Other refused creates are omitted.
+    /// Previously recorded creates stay until acknowledgement, even when their slug is temporarily absent on disk.
     func persistRefusedCreates(excludingPublished: UUID? = nil) {
         guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }
         let retained = refused.compactMap { edit -> RefusedCreateRecords.Held? in
@@ -99,9 +118,18 @@ extension ManifestSaveModel {
         let held = Dictionary((retained + queued).map { ($0.slug, $0) }, uniquingKeysWith: { _, last in last })
             .values.sorted { $0.slug < $1.slug }
         recordedCreateSlugs = Set(held.map(\.slug))
+        let retirements = refused.compactMap { edit -> RefusedCreateRecords.Retirement? in
+            let pending = items.filter {
+                $0.id != excludingPublished && !$0.wasHealed && $0.presentation.context === edit.context
+            }.map(\.change)
+            guard let record = edit.retirementRecord(excluding: pending), retirementFolderMayExist(record.slug) else {
+                return nil
+            }
+            return record
+        }
         do {
             try RefusedCreateRecords(path: refusedCreatesPath, files: files)
-                .write(.init(held: held, preserved: preservedPeerSlugs.sorted()))
+                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements))
         } catch {
             if case RefusedCreateRecords.ReadError.unsupportedSchema = error { recordsRequireNewerVersion = true }
             log("Couldn't write refused creates at \(refusedCreatesPath): \(error)")

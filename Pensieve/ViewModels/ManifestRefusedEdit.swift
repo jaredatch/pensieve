@@ -70,6 +70,41 @@ final class ManifestRefusedEdit {
         }
     }
 
+    /// The record stores only owed fields; the window snapshot is read afresh after launch.
+    func retirementRecord(excluding pending: [ManifestChange]) -> RefusedCreateRecords.Retirement? {
+        guard case .retireSkill(let slug) = original else { return nil }
+        // Submit observes renames before their saves run. Only published links belong on disk;
+        // an undone rename must not redirect a restored field to an unrelated category.
+        var renames = categoryRenames
+        for change in pending.reversed() {
+            if case .renameCategory(let old, let new) = change,
+               let index = renames.lastIndex(of: .init(old: old, new: new)) { renames.remove(at: index) }
+        }
+        let captured = fields.map { fields in
+            RefusedCreateRecords.RetirementFields(memberships: fields.compactMap {
+                guard case .change(.categorySkill(let name, _, false)) = $0 else { return nil }
+                return name
+            }, intents: fields.compactMap {
+                guard case .intent(let intent) = $0 else { return nil }
+                return .init(machineID: intent.machineID, skillSlug: intent.skillSlug,
+                             platformRaw: intent.platformRaw, projectKey: intent.projectKey)
+            })
+        }
+        return .init(slug: slug, fields: captured,
+                     categoryRenames: renames.map { .init(old: $0.old, new: $0.new) })
+    }
+
+    convenience init(retirement record: RefusedCreateRecords.Retirement, context: ModelContext) {
+        // Session edits start at zero. Even the first published re-add is newer than this replay.
+        self.init(.retireSkill(record.slug), context: context, order: -1)
+        fields = record.fields.map { fields in
+            fields.memberships.map { .change(.categorySkill($0, record.slug, false)) }
+                + fields.intents.map { .intent(.init(machineID: $0.machineID, skillSlug: $0.skillSlug,
+                                                    platformRaw: $0.platformRaw, projectKey: $0.projectKey)) }
+        }
+        categoryRenames = record.categoryRenames.map { .init(old: $0.old, new: $0.new) }
+    }
+
     func cache(local: ManifestSnapshot?) {
         if let local { cachedLocal = local }
         updateRegistration()
