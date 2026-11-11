@@ -19,6 +19,7 @@ final class ManifestSaveModel {
     let root: String
     let refusedCreatesPath: String?
     @ObservationIgnored var recordsRequireNewerVersion = false
+    @ObservationIgnored var restoredDeletions: [ManifestChange] = []
     @ObservationIgnored var recordedCreateSlugs: Set<String> = []
     @ObservationIgnored var preservedPeerSlugs: Set<String> = []
     let manifest: ManifestSnapshotting

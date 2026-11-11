@@ -192,7 +192,6 @@ final class CollisionCreateFixture {
     var logs: [String] = []
     var recordPath: String { RuntimePaths(storeRoot: f.app, appSupportDir: support).refusedCreatesPath }
     var storeURL: URL { URL(fileURLWithPath: f.base + "/library.store") }
-
     static func writtenDate(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -276,6 +275,12 @@ final class CollisionCreateFixture {
     func quit() {
         runtime?.commandServer?.stop()
         library?.stopWatching()
+        // A stopped process cannot let its queued worker publish after relaunch.
+        saves?.worker?.cancel()
+        for item in saves?.items ?? [] {
+            StoreIngestState.shared(for: item.presentation.context.container).finish(item.id)
+        }
+        saves?.items.removeAll()
         runtime = nil
         skill = nil
         library = nil

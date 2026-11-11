@@ -34,7 +34,8 @@ extension ManifestSaveModel {
             log("Couldn't read refused creates at \(refusedCreatesPath): \(error)")
             return
         }
-        guard !record.held.isEmpty || !record.preserved.isEmpty || !record.retirements.isEmpty else { return }
+        guard !record.held.isEmpty || !record.preserved.isEmpty
+            || !record.retirements.isEmpty || !record.deletions.isEmpty else { return }
         let durable = probeLibraryForRecordRestore()
         let state = StoreIngestState.shared(for: context.container)
         for slug in record.preserved where durable.map({ $0.skills.contains { $0.slug == slug } }) ?? true {
@@ -42,6 +43,7 @@ extension ManifestSaveModel {
             state.preservePeer(slug)
         }
         restoreRetirements(record.retirements, durable: durable, context: context)
+        restoreDeletions(record.deletions, context: context)
         let local: ManifestSnapshot
         do { local = try manifest.snapshot(from: context) } catch {
             log("Couldn't restore refused creates: " + error.localizedDescription)
@@ -89,6 +91,27 @@ extension ManifestSaveModel {
         }
     }
 
+    private func restoreDeletions(_ records: [RefusedCreateRecords.Deletion], context: ModelContext) {
+        for record in records where !retirementFolderMayExist(record.slug) {
+            let changes: [ManifestChange] = record.machineID.map { [.retireLocalSkill(record.slug, $0)] }
+                ?? [.retireSkill(record.slug), .deleteSkill(record.slug)]
+            for change in changes {
+                let edit = ManifestRefusedEdit(change, context: context, order: -1)
+                edit.retain()
+                refused.append(edit)
+            }
+            restoredDeletions.append(contentsOf: changes)
+        }
+    }
+
+    /// Launch owns sync.lock while rebuilding. Replay only after its verdict, with projections
+    /// already registered so no stale membership or request reaches the window in between.
+    func replayRestoredDeletions(context: ModelContext) {
+        let changes = restoredDeletions
+        restoredDeletions = []
+        for change in changes { submit(change, context: context) { _ in } }
+    }
+
     private func retirementFolderMayExist(_ slug: String) -> Bool {
         guard let folder = SkillStore.safeSkillDirectory(slug: slug, base: root + "/skills", fileService: files) else {
             return true // An unsafe or unreadable folder is not evidence of a completed deletion.
@@ -98,7 +121,7 @@ extension ManifestSaveModel {
 
     /// Mirror collision-held creates, renamed pending creates and peers kept after rename/delete.
     /// A renamed create also stays here after an ordinary write failure, carrying its intent move.
-    /// Refused per-field retirements persist while their folders remain. Other refused creates are omitted.
+    /// Retire/delete edits persist before folder removal; refused per-field retirements also keep their fields.
     /// Previously recorded creates stay until acknowledgement, even when their slug is temporarily absent on disk.
     func persistRefusedCreates(excludingPublished: UUID? = nil) {
         guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }
@@ -124,12 +147,33 @@ extension ManifestSaveModel {
             }
             return record
         }
+        let deletions = deletionRecords(excludingPublished: excludingPublished)
         do {
             try RefusedCreateRecords(path: refusedCreatesPath, files: files)
-                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements))
+                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements, deletions: deletions))
         } catch {
             if case RefusedCreateRecords.ReadError.unsupportedSchema = error { recordsRequireNewerVersion = true }
             log("Couldn't write refused creates at \(refusedCreatesPath): \(error)")
         }
+    }
+
+    private func deletionRecords(excludingPublished: UUID?) -> [RefusedCreateRecords.Deletion] {
+        let pending = items.filter { $0.id != excludingPublished && !$0.wasHealed }.map(\.presentation)
+        let records = (refused + pending).compactMap { edit -> RefusedCreateRecords.Deletion? in
+            guard let record = edit.deletionRecord else { return nil }
+            let localOnly = record.machineID != nil
+            let peer = edit.deletesSkillOverlay
+                && (hasCollision(record.slug, context: edit.context) || preservedPeerSlugs.contains(record.slug))
+            if localOnly || peer {
+                // A failed row save never queues deleteSkill. Protect its peer at retirement too.
+                preservedPeerSlugs.insert(record.slug)
+                StoreIngestState.shared(for: edit.context.container).preservePeer(record.slug)
+                if !localOnly { return nil }
+            }
+            return record
+        }
+        return Dictionary(records.map { ($0.slug, $0) }, uniquingKeysWith: { first, last in
+            first.machineID == nil ? first : last
+        }).values.sorted { $0.slug < $1.slug }
     }
 }

@@ -7,6 +7,12 @@ extension ManifestSaveFixture {
     func quit() {
         runtime?.commandServer?.stop()
         currentLibrary?.stopWatching()
+        // A stopped process cannot let its queued worker publish after relaunch.
+        currentSaves?.worker?.cancel()
+        for item in currentSaves?.items ?? [] {
+            StoreIngestState.shared(for: item.presentation.context.container).finish(item.id)
+        }
+        currentSaves?.items.removeAll()
         runtime = nil
         currentAlpha = nil; currentBeta = nil; currentLocal = nil; currentDoomed = nil; currentProject = nil
         currentCategories = nil; currentLibrary = nil; currentSaves = nil; currentContext = nil

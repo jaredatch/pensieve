@@ -247,6 +247,7 @@ final class AppRuntime {
         library.manifestSaves?.restoreRefusedCreates(context: context)
         let result = await runLaunchJob()
         acceptLaunchIngest(result, context: context)
+        library.manifestSaves?.replayRestoredDeletions(context: context)
         checkForSkillUpdatesIfDue()
         library.startWatching()
         if result.outcome.ingestionNeedsRetry { scheduleLaunchIngestRetry(context: context) }

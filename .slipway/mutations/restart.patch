@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Records.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Records.swift
+@@ -43,7 +43,7 @@
+             state.preservePeer(slug)
+         }
+         restoreRetirements(record.retirements, durable: durable, context: context)
+-        restoreDeletions(record.deletions, context: context)
++        restoreDeletions([], context: context)
+         let local: ManifestSnapshot
+         do { local = try manifest.snapshot(from: context) } catch {
+             log("Couldn't restore refused creates: " + error.localizedDescription)
