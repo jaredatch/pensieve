@@ -9,6 +9,7 @@ private final class FailOnNthWriteFileService: FileServiceProtocol {
     private let wrapped: FileService
     private let failOnWrite: Int
     var refuseTemporaryAllocation = false
+    var didWrite: ((String) throws -> Void)?
     private var writeCount = 0
     private(set) var capturedWritePaths: [String] = []
     init(wrapped: FileService, failOnWrite: Int) {
@@ -20,6 +21,7 @@ private final class FailOnNthWriteFileService: FileServiceProtocol {
         capturedWritePaths.append(path)
         if writeCount == failOnWrite { throw InducedFailure() }
         try wrapped.writeFile(at: path, content: content)
+        try didWrite?(path)
     }
     func storeTemporaryParent(root: String) throws -> String {
         if refuseTemporaryAllocation { throw InducedFailure() }
@@ -36,6 +38,7 @@ private final class FailOnNthWriteFileService: FileServiceProtocol {
     }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -107,17 +110,18 @@ final class ManifestAtomicWriteTests: XCTestCase {
             try fileService.createDirectory(at: volume + "/store")
             try fileService.createSymlink(at: root, pointingTo: volume + "/store")
             let capturing = FailOnNthWriteFileService(wrapped: fileService, failOnWrite: 99)
+            let storeIdentity = try XCTUnwrap(fileService.fileIdentity(at: volume + "/store", followingLinks: true))
+            // Inspect each completed write while its temporary still exists; publication removes its namespace.
+            capturing.didWrite = { [self] path in
+                let identity = try XCTUnwrap(fileService.fileIdentity(at: path, followingLinks: true))
+                XCTAssertEqual(identity.device, storeIdentity.device, path)
+            }
             try ManifestService(fileService: capturing).write(sampleAtomicSnapshot(), toRoot: root)
             XCTAssertFalse(capturing.capturedWritePaths.isEmpty)
             for path in capturing.capturedWritePaths {
                 XCTAssertFalse(path.hasPrefix(root + "/"), path)
                 XCTAssertFalse(path.hasPrefix(volume + "/store/"), path)
             }
-            // The tree has been renamed away, so inspect its allocation directory.
-            let tempTree = (try XCTUnwrap(capturing.capturedWritePaths.first) as NSString).deletingLastPathComponent
-            XCTAssertEqual(fileService.fileIdentity(at: (tempTree as NSString).deletingLastPathComponent,
-                                                    followingLinks: true)?.device,
-                           fileService.fileIdentity(at: volume, followingLinks: true)?.device)
             XCTAssertEqual(try service.read(fromRoot: root).skills.map(\.slug), ["swift-style"])
         }
     }

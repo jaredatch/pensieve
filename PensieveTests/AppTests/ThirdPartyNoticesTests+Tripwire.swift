@@ -202,6 +202,7 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
     func isExecutableFile(at path: String) -> Bool { base.isExecutableFile(at: path) }
     func isUserExecutableFile(at path: String) -> Bool { base.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { base.directoryExists(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try base.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
     func deleteDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {

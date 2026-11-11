@@ -236,6 +236,7 @@ final class SyncSetupModelTests: XCTestCase {
         func deleteFile(at path: String) throws { trace.events.append("delete:\(path)") }
         func fileExists(at path: String) -> Bool { files.contains(path) }
         func isExecutableFile(at path: String) -> Bool { false }
+        func removeEmptyDirectory(at path: String) throws {}
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws { trace.events.append("delete:\(path)") }
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}

@@ -149,6 +149,7 @@ private final class UnlistableDirFileService: FileServiceProtocol {
     func deleteFile(at path: String) throws { try real.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { real.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { real.isExecutableFile(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try real.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try real.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try real.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {

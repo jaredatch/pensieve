@@ -32,6 +32,7 @@ final class PlatformViewModelTests: XCTestCase {
         func fileExists(at path: String) -> Bool { false }
         func isExecutableFile(at path: String) -> Bool { false }
         func directoryExists(at path: String) -> Bool { false }
+        func removeEmptyDirectory(at path: String) throws {}
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws {}
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
@@ -59,6 +60,7 @@ final class PlatformViewModelTests: XCTestCase {
         func isExecutableFile(at path: String) -> Bool { false }
         func directoryExists(at path: String) -> Bool { false }
         func directoryExistsFollowingLinks(at path: String) throws -> Bool { projectDirectories.contains(path) }
+        func removeEmptyDirectory(at path: String) throws {}
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws {}
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
@@ -102,11 +104,9 @@ final class PlatformViewModelTests: XCTestCase {
         func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool { false }
         func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
         func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
-
         func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
         func outputPath(skill: Skill, projectPath: String?) -> String { "/tmp/cursor/" + skill.directoryName + ".mdc" }
     }
-
     @MainActor
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(

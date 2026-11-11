@@ -45,7 +45,8 @@ protocol FileServiceProtocol {
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
-    /// Remove only an empty directory entry, without following a link.
+    /// Remove only an empty directory entry, without following a link. Wrappers must forward cleanup;
+    /// modeled filesystems explicitly implement their own behavior without touching host files.
     func removeEmptyDirectory(at path: String) throws
     /// Atomically publish a sibling directory over an absent or empty directory only.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws

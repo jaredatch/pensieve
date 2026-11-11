@@ -258,6 +258,7 @@ final class LinkServiceTests: XCTestCase {
         func fileExists(at path: String) -> Bool { true }
         func isExecutableFile(at path: String) -> Bool { true }
         func directoryExists(at path: String) -> Bool { true }
+        func removeEmptyDirectory(at path: String) throws {}
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws {}
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { createSymlinkCalled = true }

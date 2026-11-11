@@ -114,6 +114,7 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
         directoryProbes.append(path)
         return files.directoryExists(at: path)
     }
+    func removeEmptyDirectory(at path: String) throws { try files.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws {
         try creationFailure?(path)
         try files.createDirectory(at: path)

@@ -4,7 +4,8 @@ import XCTest
 
 /// Runs the production writers in the existing disposable helper. A dylib intercepts their real
 /// write, rename, lock and flush syscalls to kill the child, refuse optional work or insert a race.
-/// Namespace races launch one more disposable writer. Directory creation can be observed for volume
+/// Namespace races launch another disposable writer or remove the namespace once at directory open
+/// or lock acquisition. Directory creation can be observed for volume
 /// probes; root resolution can fail after its first successful admission. It invents no intermediate name
 /// and intercepts no process outside these helper children.
 struct StoreWriteCrashProbe {
@@ -25,7 +26,7 @@ struct StoreWriteCrashProbe {
     }
 
     func run(root: String, writer: String, point: String, destination: String = "") throws -> Int32 {
-        for suffix in [".path", ".locations"] { try? FileService().deleteFile(at: library + suffix) }
+        for suffix in [".path", ".locations", ".removed"] { try? FileService().deleteFile(at: library + suffix) }
         let process = Process()
         process.executableURL = Bundle(for: SyncBytePreservationTests.self).bundleURL
             .appendingPathComponent("Contents/MacOS/GitProcessProbe")
@@ -88,6 +89,7 @@ struct StoreWriteCrashProbe {
     #include <stdlib.h>
     #include <string.h>
     #include <fcntl.h>
+    #include <stdarg.h>
     #include <signal.h>
     #include <sys/stat.h>
     #include <sys/param.h>
@@ -120,10 +122,27 @@ struct StoreWriteCrashProbe {
     }
     static int making(const char *path, mode_t mode) { location(path); return mkdir(path, mode); }
     static int makingat(int dir, const char *path, mode_t mode) { location(path); return mkdirat(dir, path, mode); }
+    static int removed_namespace;
+    static void remove_namespace(const char *path, const char *boundary) {
+        if (removed_namespace || !point(boundary) || !strstr(path, ".pensieve-store-writes-")) return;
+        if (rmdir(path)) _exit(90);
+        removed_namespace = 1;
+        char report[MAXPATHLEN]; snprintf(report, sizeof(report), "%s.removed", getenv("DYLD_INSERT_LIBRARIES"));
+        int out = open(report, O_CREAT|O_TRUNC|O_WRONLY, 0600);
+        if (out < 0 || write(out, boundary, strlen(boundary)) != strlen(boundary)) _exit(89);
+        close(out);
+    }
+    static int openingat(int directory, const char *path, int flags, ...) {
+        mode_t mode = 0;
+        if (flags & O_CREAT) { va_list args; va_start(args, flags); mode = va_arg(args, int); va_end(args); }
+        if (flags & O_DIRECTORY) remove_namespace(path, "namespace-removed-before-open");
+        return openat(directory, path, flags, mode);
+    }
     static int locking(int fd, int operation) {
         char path[MAXPATHLEN];
         int watched = !fcntl(fd, F_GETPATH, path) &&
             (strstr(path, ".pensieve-store-writes-") || strstr(path, "/.git"));
+        if (watched) remove_namespace(path, "namespace-removed-before-lock");
         if (watched && point("unsupported-lock")) { errno = ENOTSUP; return -1; }
         int result = flock(fd, operation);
         if (watched && result == 0 && point("namespace-race")) {
@@ -210,6 +229,7 @@ struct StoreWriteCrashProbe {
     INTERPOSE(stating, stat)
     INTERPOSE(making, mkdir)
     INTERPOSE(makingat, mkdirat)
+    INTERPOSE(openingat, openat)
     INTERPOSE(locking, flock)
     INTERPOSE(syncing, fsync)
     INTERPOSE(renamingat, renameat)

@@ -6,9 +6,6 @@ extension FileServiceProtocol {
     /// Path-only default for modeled filesystems; concrete FileService admits a same-device system location.
     func storeTemporaryParent(root: String) throws -> String { (root as NSString).deletingLastPathComponent }
 
-    /// Unmodeled cleanup never touches host files.
-    func removeEmptyDirectory(at path: String) throws {}
-
     /// Atomically publish over an absent or empty directory, preserving every other occupant.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws {
         try publishDirectory(at: sourcePath, to: destinationPath, exclusively: false)
@@ -79,24 +76,22 @@ extension FileService {
                 return type == nil || type == .directory
             }) else { throw storePublicationError(at: parent, code: EEXIST) }
             directory = candidate
-            try createDirectory(at: directory)
         }
-        let descriptor = try Self.openDirectory(at: directory)
-        defer { close(descriptor) }
-        let locked = lockStoreIntermediates(descriptor)
-        // Controls are swept once by rule preparation. A direct skill save owns its own sweep.
-        if locked && !control { sweepStoreIntermediates(in: descriptor) }
-        let temporary = ".pensieve-write-" + UUID().uuidString
-        defer { unlinkat(descriptor, temporary, 0) }
-        var existing = stat()
-        let mode: mode_t? = !control && lstat(path, &existing) == 0 && existing.st_mode & S_IFMT == S_IFREG
-            ? existing.st_mode & 0o7777 : nil
-        try writeStoreIntermediate(content, name: temporary, directory: descriptor, mode: mode)
-        if control, let type = try entryTypeWithoutFollowingLinks(at: path), type == .directory || type == .symlink {
-            throw storePublicationError(at: path, code: type == .directory ? EISDIR : ELOOP)
-        }
-        guard renameat(descriptor, temporary, AT_FDCWD, path) == 0 else {
-            throw storePublicationError(at: path, code: errno)
+        try withStoreWriteDirectory(at: directory, namespace: metadata == nil) { descriptor, locked in
+            // Controls are swept once by rule preparation. A direct skill save owns its own sweep.
+            if locked && !control { sweepStoreIntermediates(in: descriptor) }
+            let temporary = ".pensieve-write-" + UUID().uuidString
+            defer { unlinkat(descriptor, temporary, 0) }
+            var existing = stat()
+            let mode: mode_t? = !control && lstat(path, &existing) == 0 && existing.st_mode & S_IFMT == S_IFREG
+                ? existing.st_mode & 0o7777 : nil
+            try writeStoreIntermediate(content, name: temporary, directory: descriptor, mode: mode)
+            if control, let type = try entryTypeWithoutFollowingLinks(at: path), type == .directory || type == .symlink {
+                throw storePublicationError(at: path, code: type == .directory ? EISDIR : ELOOP)
+            }
+            guard renameat(descriptor, temporary, AT_FDCWD, path) == 0 else {
+                throw storePublicationError(at: path, code: errno)
+            }
         }
     }
 
@@ -105,7 +100,7 @@ extension FileService {
     func cleanStoreIntermediates(at root: String) throws {
         guard directoryExists(at: root) else { return }
         let metadata = try? storeMetadataDirectory(root: root)
-        if let metadata { cleanStoreDirectory(metadata) }
+        if let metadata { cleanStoreDirectory(metadata, removeWhenEmpty: false) }
         let parent: String?
         let system = FileManager.default.temporaryDirectory.path
         if sameStoreDevice(system, root) {
@@ -123,10 +118,58 @@ extension FileService {
         }
     }
 
-    private func cleanStoreDirectory(_ directory: String) {
+    private func cleanStoreDirectory(_ directory: String, removeWhenEmpty: Bool = true) {
         guard let descriptor = try? Self.openDirectory(at: directory) else { return }
         defer { close(descriptor) }
-        if lockStoreIntermediates(descriptor) { sweepStoreIntermediates(in: descriptor) }
+        guard lockStoreIntermediates(descriptor) else { return }
+        sweepStoreIntermediates(in: descriptor)
+        if removeWhenEmpty { removeStoreNamespace(at: directory, heldBy: descriptor) }
+    }
+
+    /// A competing writer can remove the namespace before open or while we wait for its lock.
+    /// APFS can retain a removed directory's link count, so ENOENT while publishing also retries.
+    private func withStoreWriteDirectory(at directory: String, namespace: Bool,
+                                         body: (Int32, Bool) throws -> Void) throws {
+        for _ in 0..<(namespace ? 4 : 1) {
+            if namespace { try createDirectory(at: directory) }
+            let descriptor: Int32
+            do {
+                descriptor = try Self.openDirectory(at: directory)
+            } catch let error as NSError
+                where namespace && error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) {
+                continue
+            }
+            defer { close(descriptor) }
+            let locked = lockStoreIntermediates(descriptor)
+            defer {
+                if namespace && locked { removeStoreNamespace(at: directory, heldBy: descriptor) }
+            }
+            if namespace {
+                var status = stat()
+                guard fstat(descriptor, &status) == 0 else {
+                    throw storePublicationError(at: directory, code: errno)
+                }
+                if status.st_nlink == 0 { continue }
+            }
+            do {
+                try body(descriptor, locked)
+                return
+            } catch let error as NSError
+                where namespace && error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) {
+                continue
+            }
+        }
+        throw storePublicationError(at: directory, code: ENOENT)
+    }
+
+    /// Called only while holding this directory's lock, after unlinking the writer's intermediate.
+    /// A renamed namespace and its replacement both belong to someone else; leave them alone.
+    private func removeStoreNamespace(at directory: String, heldBy descriptor: Int32) {
+        var status = stat()
+        guard fstat(descriptor, &status) == 0,
+              fileIdentity(at: directory, followingLinks: false) == FileIdentity(
+                device: status.st_dev, inode: status.st_ino) else { return }
+        try? removeEmptyDirectory(at: directory)
     }
 
     private func sameStoreDevice(_ first: String, _ second: String) -> Bool {

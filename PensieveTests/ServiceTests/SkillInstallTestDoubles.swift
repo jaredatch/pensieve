@@ -18,6 +18,7 @@ struct ReverseListingFileService: FileServiceProtocol {
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
     func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -63,6 +64,7 @@ struct FailingCopyFileService: FileServiceProtocol {
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
     func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
@@ -104,6 +106,7 @@ final class RecordingVendorFileService: FileServiceProtocol {
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
     func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws {
         if !reachedSwap {
             pathsCreatedBeforeSwap.append(path)
@@ -154,6 +157,7 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
     func realPath(at path: String) -> String { wrapped.realPath(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {

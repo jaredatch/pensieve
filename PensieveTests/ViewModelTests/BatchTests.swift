@@ -33,6 +33,7 @@ final class Batch: XCTestCase {
         func fileExists(at path: String) -> Bool { false }
         func isExecutableFile(at path: String) -> Bool { false }
         func directoryExists(at path: String) -> Bool { false }
+        func removeEmptyDirectory(at path: String) throws {}
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws {}
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}

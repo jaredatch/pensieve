@@ -60,6 +60,7 @@ extension GitServiceTests {
         func fileExists(at path: String) -> Bool { false }
         func isExecutableFile(at path: String) -> Bool { false }
         func directoryExists(at path: String) -> Bool { false }
+        func removeEmptyDirectory(at path: String) throws {}
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws {}
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
@@ -1070,6 +1071,7 @@ private struct AskpassWriteObservingFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws {
         beforeDelete(path)

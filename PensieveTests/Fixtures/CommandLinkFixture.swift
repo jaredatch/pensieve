@@ -116,6 +116,7 @@ final class LeafReadSwappingFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { base.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { base.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { base.directoryExists(at: path) }
+    func removeEmptyDirectory(at path: String) throws { try base.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try base.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try base.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
