@@ -119,7 +119,8 @@ struct ContentView: View {
                         skill, section: &section, entity: &entitySelection,
                         selectedSkills: &selectedSkills, filter: &skillFilter, searchText: &searchText
                     )
-                }
+                },
+                onDeleted: { selectedSkills.remove($0) }
             )
         }
 

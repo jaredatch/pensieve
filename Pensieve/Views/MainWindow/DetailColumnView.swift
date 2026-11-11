@@ -29,6 +29,7 @@ struct DetailColumnView: View {
     let onAddFromGitHub: () -> Void
     let onAdd: (SidebarSection) -> Void
     let onReveal: (Skill) -> Void
+    var onDeleted: (Skill) -> Void = { _ in }
 
     var body: some View {
         content
@@ -62,7 +63,7 @@ struct DetailColumnView: View {
             TagDetailView(tag: name, skills: skills, onReveal: onReveal)
                 .id(name)
         case .skill:
-            if let skill = selectedSkills.first {
+            if let skill = selectedSkills.first, skill.modelContext != nil && !skill.isDeleted {
                 skillDetail(skill)
             } else {
                 selectSkillPrompt
@@ -165,7 +166,8 @@ struct DetailColumnView: View {
                 upstreamHistory: upstreamHistory,
                 intentService: intentService,
                 machineStates: machineStates,
-                localMachineID: localMachineID
+                localMachineID: localMachineID,
+                onDeleted: onDeleted
             )
         }
     }

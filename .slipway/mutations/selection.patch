@@ -1,0 +1,8 @@
+--- a/Pensieve/Views/MainWindow/SkillListView.swift
++++ b/Pensieve/Views/MainWindow/SkillListView.swift
+@@ -118,5 +118,4 @@
+         if SkillDeletionFlow.delete(skill: skill, library: library, platformVM: platformVM,
+                                     projects: projects, context: context) {
+-            selectedSkills.remove(skill)
+         }
+     }
