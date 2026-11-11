@@ -81,9 +81,17 @@ extension ManifestSaveModel {
             ingest.finish(items[index].id)
         }
         if let collisionDelete { discardRefusedCreate(collisionDelete, context: context) }
-        refused = refused.filter { $0.acknowledge(durable: saved) }
+        acknowledgePublication(item, durable: saved)
         persistRefusedCreates(excludingPublished: item.id)
         return headChanged ? .headChanged : .saved(saved)
+    }
+
+    @MainActor
+    private func acknowledgePublication(_ item: Item, durable: ManifestSnapshot) {
+        for edit in refused where edit.context === item.presentation.context {
+            edit.observePublished(item.change, order: item.order, durable: durable)
+        }
+        refused = refused.filter { $0.acknowledge(durable: durable) }
     }
 
     @MainActor

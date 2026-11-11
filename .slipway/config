@@ -1,5 +1,5 @@
 # Slipway: this project's pin and settings, one `key = value` per line. `slipway install` sets version; the rest is edited by hand.
-version = 0.1.31
+version = 0.1.34
 agent_account = kramer-bot
 commit_author = git
 trusted = jaredatch
@@ -7,7 +7,7 @@ repo = jaredatch/pensieve
 main_branch = master
 module = macos
 orchestrator = claude claude-fable-5-1 high bypassPermissions
-builder = codex@0.164.0 gpt-6.1-sol high danger-full-access
+builder = codex@0.167.1 gpt-6.1-sol high danger-full-access
 reader.claude = claude claude-opus-5-5 high plan
 reader.codex = codex gpt-6-astra high read-only
 macos.scheme = Pensieve
