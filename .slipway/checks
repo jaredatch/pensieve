@@ -1,0 +1,8 @@
+paths = Pensieve/Services/RefusedCreateRecords.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestRefusedEdit.swift PensieveTests/Fixtures/ManifestSaveFixture.swift PensieveTests/ServiceTests/CategorySaveUndoTests+RetirementRecords.swift docs/ARCHITECTURE.md .slipway/changelog/242.md .slipway/mutations/
+risk = Pensieve/Services/RefusedCreateRecords.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift
+check.restart = tests PensieveTests/CategorySaveUndoTests/testAFailedSkillDeletionStaysOwedAfterYouQuitAndReopenPensieve
+mutation.restart = .slipway/mutations/restart.patch
+check.settles = tests PensieveTests/CategorySaveUndoTests/testAnOwedDeletionSurvivesRestartsAndSettlesOneFieldAtATime
+mutation.settles = .slipway/mutations/settles.patch
+check.renamed = tests PensieveTests/CategorySaveUndoTests/testARenamedCategoryStaysSettledForAnOwedDeletionAcrossARestart
+mutation.renamed = .slipway/mutations/renamed.patch
