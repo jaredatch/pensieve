@@ -119,10 +119,7 @@ extension ManifestSaveModel {
             .values.sorted { $0.slug < $1.slug }
         recordedCreateSlugs = Set(held.map(\.slug))
         let retirements = refused.compactMap { edit -> RefusedCreateRecords.Retirement? in
-            let pending = items.filter {
-                $0.id != excludingPublished && !$0.wasHealed && $0.presentation.context === edit.context
-            }.map(\.change)
-            guard let record = edit.retirementRecord(excluding: pending), retirementFolderMayExist(record.slug) else {
+            guard let record = edit.retirementRecord(), retirementFolderMayExist(record.slug) else {
                 return nil
             }
             return record

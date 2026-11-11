@@ -71,15 +71,10 @@ final class ManifestRefusedEdit {
     }
 
     /// The record stores only owed fields; the window snapshot is read afresh after launch.
-    func retirementRecord(excluding pending: [ManifestChange]) -> RefusedCreateRecords.Retirement? {
+    func retirementRecord() -> RefusedCreateRecords.Retirement? {
         guard case .retireSkill(let slug) = original else { return nil }
-        // Submit observes renames before their saves run. Only published links belong on disk;
-        // an undone rename must not redirect a restored field to an unrelated category.
-        var renames = categoryRenames
-        for change in pending.reversed() {
-            if case .renameCategory(let old, let new) = change,
-               let index = renames.lastIndex(of: .init(old: old, new: new)) { renames.remove(at: index) }
-        }
+        // Pending renames must not redirect a restored field to an unrelated category.
+        let renames = categoryRenames.filter(\.isSaved)
         let captured = fields.map { fields in
             RefusedCreateRecords.RetirementFields(memberships: fields.compactMap {
                 guard case .change(.categorySkill(let name, _, false)) = $0 else { return nil }
@@ -102,7 +97,7 @@ final class ManifestRefusedEdit {
                 + fields.intents.map { .intent(.init(machineID: $0.machineID, skillSlug: $0.skillSlug,
                                                     platformRaw: $0.platformRaw, projectKey: $0.projectKey)) }
         }
-        categoryRenames = record.categoryRenames.map { .init(old: $0.old, new: $0.new) }
+        categoryRenames = record.categoryRenames.map { .init(old: $0.old, new: $0.new, isSaved: true) }
     }
 
     func cache(local: ManifestSnapshot?) {
@@ -127,6 +122,16 @@ final class ManifestRefusedEdit {
         if case .retireSkill = original { observe(change) }
     }
 
+    /// The queue settles equal pairs in submission order; undo removes the latest instead.
+    func observeSavedRename(_ change: ManifestChange) {
+        guard case .retireSkill = original, case .renameCategory(let old, let new) = change,
+              let index = categoryRenames.firstIndex(where: { $0.old == old && $0.new == new && !$0.isSaved }) else {
+            return
+        }
+        categoryRenames[index].isSaved = true
+        updateRegistration()
+    }
+
     /// A queued re-add is only acknowledgement evidence once its own save publishes.
     func observePublished(_ change: ManifestChange, order publishedOrder: Int, durable: ManifestSnapshot) {
         guard publishedOrder > order, case .retireSkill = original,
@@ -135,7 +140,7 @@ final class ManifestRefusedEdit {
         let current = projection
         fields?.removeAll { field in
             guard case .change(.categorySkill(let name, let target, false)) = field else { return false }
-            return target == slug && current.resolvedCategoryName(for: name, in: durable) == category
+            return target == slug && current.resolveCategory(for: name, in: durable).name == category
         }
         updateRegistration()
     }
@@ -168,8 +173,10 @@ final class ManifestRefusedEdit {
         var remaining: [Field] = []
         for field in fields ?? [] {
             if case .change(.categorySkill(let name, let slug, false)) = field {
-                let resolved = projection.resolvedCategoryName(for: name, in: durable)
-                if durable.categories.contains(where: { $0.name == resolved && $0.skillSlugs.contains(slug) }) {
+                let resolved = projection.resolveCategory(for: name, in: durable)
+                if resolved.isUndecided || durable.categories.contains(where: {
+                    $0.name == resolved.name && $0.skillSlugs.contains(slug)
+                }) {
                     remaining.append(field)
                 }
                 continue
@@ -194,7 +201,7 @@ final class ManifestRefusedEdit {
         guard case .retireSkill(let slug) = original else { return }
         for undo in undos {
             if case .renameCategory(let old, let new) = undo.edit.change,
-               let index = categoryRenames.lastIndex(of: .init(old: old, new: new)) {
+               let index = categoryRenames.lastIndex(where: { $0.old == old && $0.new == new }) {
                 categoryRenames.remove(at: index)
             }
             if let inverse = undo.edit.inverse, var local = cachedLocal {

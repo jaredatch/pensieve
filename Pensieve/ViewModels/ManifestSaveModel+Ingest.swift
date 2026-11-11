@@ -58,6 +58,8 @@ extension ManifestSaveModel {
             }
             if !item.change.isDeletion {
                 log("Skipped queued manifest change: its target was removed by sync.")
+                observeSavedRename(item)
+                persistRefusedCreates(excludingPublished: item.id)
                 return .skipped(saved)
             }
         }
@@ -75,15 +77,31 @@ extension ManifestSaveModel {
         guard let headChanged else { return nil }
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
         if headChanged { ingest.invalidate() }
-        ingest.finish(item.id)
-        for index in items.indices where healedItems.contains(items[index].id) {
-            items[index].wasHealed = true
-            ingest.finish(items[index].id)
-        }
+        finishPublishedItems(item, healedItems: healedItems, ingest: ingest)
         if let collisionDelete { discardRefusedCreate(collisionDelete, context: context) }
         acknowledgePublication(item, durable: saved)
         persistRefusedCreates(excludingPublished: item.id)
         return headChanged ? .headChanged : .saved(saved)
+    }
+
+    @MainActor
+    private func finishPublishedItems(_ item: Item, healedItems: Set<UUID>, ingest: StoreIngestState) {
+        ingest.finish(item.id)
+        for index in items.indices where healedItems.contains(items[index].id) {
+            observeSavedRename(items[index])
+            items[index].wasHealed = true
+            ingest.finish(items[index].id)
+        }
+        if !healedItems.contains(item.id) { observeSavedRename(item) }
+    }
+
+    @MainActor
+    func observeSavedRename(_ item: Item) {
+        // A healed item was announced with the whole-window write, exactly once.
+        guard !item.wasHealed, case .renameCategory = item.change else { return }
+        for edit in refused + items.map(\.presentation) where edit.context === item.presentation.context {
+            edit.observeSavedRename(item.change)
+        }
     }
 
     @MainActor

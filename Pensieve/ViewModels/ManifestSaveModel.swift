@@ -304,6 +304,8 @@ extension ManifestSaveModel {
     private func prepareCategoryRefusal(_ item: Item, durable: ManifestSnapshot?, error: Error) -> () -> Void {
         guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return {} }
         if categoryIsSaved(item, durable: durable) {
+            observeSavedRename(item)
+            persistRefusedCreates(excludingPublished: item.id)
             return {
                 self.categoryMessages.append((item.order, CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved)))
                 item.report(nil)
