@@ -23,6 +23,7 @@ struct DetailView: View {
     let intentService: DeployMutationServicing
     let machineStates: [MachineState]
     let localMachineID: String?
+    var onDeleted: (Skill) -> Void = { _ in }
 
     @Environment(\.modelContext) private var context
     @Environment(\.controlActiveState) private var controlActiveState   // .key only while no sheet here holds the keyboard
@@ -123,7 +124,10 @@ struct DetailView: View {
                     projects: projects,
                     context: context
                 )
-                if deleted { upstreamHistory.remove(skillID: skill.id) }
+                if deleted {
+                    upstreamHistory.remove(skillID: skill.id)
+                    onDeleted(skill)
+                }
             }
         } message: {
             Text(SkillDeletionMessage.text(unsaved: library.hasUnsavedChanges(for: skill)))

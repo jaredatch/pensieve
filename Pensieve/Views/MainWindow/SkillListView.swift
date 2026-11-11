@@ -70,8 +70,7 @@ struct SkillListView: View {
             presenting: pendingDeletion
         ) { skill in
             Button("Delete", role: .destructive) {
-                _ = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: platformVM,
-                                             projects: projects, context: context)
+                deleteConfirmed(skill, projects: projects, context: context)
             }
         } message: { _ in
             Text(deletionMessage)
@@ -112,6 +111,13 @@ struct SkillListView: View {
                         ? "This library can't be read." : "Create a new skill or import existing ones.")
                 }
             }
+        }
+    }
+
+    func deleteConfirmed(_ skill: Skill, projects: [Project], context: ModelContext) {
+        if SkillDeletionFlow.delete(skill: skill, library: library, platformVM: platformVM,
+                                    projects: projects, context: context) {
+            selectedSkills.remove(skill)
         }
     }
 
