@@ -1,0 +1,7 @@
+--- a/Pensieve/ViewModels/ManifestRefusedEdit.swift
++++ b/Pensieve/ViewModels/ManifestRefusedEdit.swift
+@@ -98,3 +98,3 @@
+         // Session edits start at zero. Even the first published re-add is newer than this replay.
+-        self.init(.retireSkill(record.slug), context: context, order: -1)
++        self.init(.retireSkill(record.slug), context: context, order: 0)
+         fields = record.fields.map { fields in

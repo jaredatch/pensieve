@@ -1,0 +1,7 @@
+--- a/Pensieve/ViewModels/ManifestRefusedEdit.swift
++++ b/Pensieve/ViewModels/ManifestRefusedEdit.swift
+@@ -93,3 +93,3 @@
+         return .init(slug: slug, fields: captured,
+-                     categoryRenames: renames.map { .init(old: $0.old, new: $0.new) })
++                     categoryRenames: [])
+     }

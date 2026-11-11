@@ -1,0 +1,7 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Records.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Records.swift
+@@ -131,3 +131,3 @@
+             try RefusedCreateRecords(path: refusedCreatesPath, files: files)
+-                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements))
++                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: []))
+         } catch {
