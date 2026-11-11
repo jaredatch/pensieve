@@ -2,6 +2,13 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
+    struct RestoredDeletion {
+        let slug: String
+        let machineID: String?
+        let changes: [ManifestChange]
+        let projectionIDs: Set<UUID>
+    }
+
     func hasRefusedCreate(_ slug: String, context: ModelContext) -> Bool {
         refused.contains { $0.context === context && $0.createdSkill?.slug == slug }
     }
@@ -92,7 +99,7 @@ extension ManifestSaveModel {
     }
 
     private func restoreDeletions(_ records: [RefusedCreateRecords.Deletion], context: ModelContext) {
-        for record in records where !retirementFolderMayExist(record.slug) {
+        for record in records where record.machineID != nil || !retirementFolderMayExist(record.slug) {
             let changes: [ManifestChange] = record.machineID.map { [.retireLocalSkill(record.slug, $0)] }
                 ?? [.retireSkill(record.slug), .deleteSkill(record.slug)]
             let edits = changes.map { ManifestRefusedEdit($0, context: context, order: -1) }
@@ -100,14 +107,15 @@ extension ManifestSaveModel {
                 edit.retain()
                 refused.append(edit)
             }
-            restoredDeletions.append(.init(slug: record.slug, changes: changes, projectionIDs: Set(edits.map(\.id))))
+            restoredDeletions.append(.init(slug: record.slug, machineID: record.machineID,
+                                          changes: changes, projectionIDs: Set(edits.map(\.id))))
         }
     }
 
     /// A helper can pull a new creation while launch rebuilds. Withdraw both the replay and
     /// its projections; the caller must rebuild again before exposing or publishing those rows.
     func discardReappearedRestoredDeletions() -> Bool {
-        let reappeared = restoredDeletions.filter { retirementFolderMayExist($0.slug) }
+        let reappeared = restoredDeletions.filter { $0.machineID == nil && retirementFolderMayExist($0.slug) }
         guard !reappeared.isEmpty else { return false }
         let slugs = Set(reappeared.map(\.slug))
         let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
@@ -117,12 +125,40 @@ extension ManifestSaveModel {
         return true
     }
 
+    /// The save worker holds sync.lock here, after any helper pull has finished and before
+    /// any edit reaches a scan, row acceptance or publication. Cancel each restored pair together.
+    func discardReappearedQueuedDeletions() {
+        let reappeared = items.compactMap(\.restoredDeletion).filter {
+            $0.machineID == nil && retirementFolderMayExist($0.slug)
+        }
+        guard !reappeared.isEmpty else { return }
+        let slugs = Set(reappeared.map(\.slug))
+        let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
+        refused.removeAll { projectionIDs.contains($0.id) }
+        for index in items.indices {
+            guard let deletion = items[index].restoredDeletion,
+                  deletion.machineID == nil, slugs.contains(deletion.slug) else { continue }
+            items[index].wasCancelled = true
+            let state = StoreIngestState.shared(for: items[index].presentation.context.container)
+            state.finish(items[index].id)
+            state.invalidate()
+        }
+        persistRefusedCreates()
+    }
+
     /// Launch owns sync.lock while rebuilding. Replay only after its verdict, with projections
     /// already registered so no stale membership or request reaches the window in between.
     func replayRestoredDeletions(context: ModelContext) {
-        let changes = restoredDeletions.flatMap(\.changes)
+        let deletions = restoredDeletions
         restoredDeletions = []
-        for change in changes { submit(change, context: context) { _ in } }
+        for deletion in deletions {
+            for change in deletion.changes {
+                // submit appends synchronously, before its worker can take a turn.
+                let index = items.count
+                submit(change, context: context) { _ in }
+                items[index].restoredDeletion = deletion
+            }
+        }
     }
 
     private func retirementFolderMayExist(_ slug: String) -> Bool {
@@ -147,7 +183,7 @@ extension ManifestSaveModel {
         // Rename has already saved its moved row. Persist the intent move before its async queue
         // runs too, so quitting here cannot strand the durable intent under the previous name.
         let queued = items.compactMap { item -> RefusedCreateRecords.Held? in
-            guard item.id != excludingPublished, !item.wasHealed, let move = item.intentMove,
+            guard item.id != excludingPublished, !item.wasHealed, !item.wasCancelled, let move = item.intentMove,
                   let create = item.presentation.createdSkill else { return nil }
             return .init(slug: create.slug, createdAt: RefusedCreateRecords.writtenDate(create.createdAt), intentMove: move)
         }
@@ -171,7 +207,9 @@ extension ManifestSaveModel {
     }
 
     private func deletionRecords(excludingPublished: UUID?) -> [RefusedCreateRecords.Deletion] {
-        let pending = items.filter { $0.id != excludingPublished && !$0.wasHealed }.map(\.presentation)
+        let pending = items.filter {
+            $0.id != excludingPublished && !$0.wasHealed && !$0.wasCancelled
+        }.map(\.presentation)
         let records = (refused + pending).compactMap { edit -> RefusedCreateRecords.Deletion? in
             guard let record = edit.deletionRecord else { return nil }
             let localOnly = record.machineID != nil

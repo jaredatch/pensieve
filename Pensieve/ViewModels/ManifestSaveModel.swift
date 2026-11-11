@@ -48,16 +48,12 @@ final class ManifestSaveModel {
     @ObservationIgnored var stagedRefusals: [StagedRefusal] = []
     @ObservationIgnored var worker: Task<Void, Never>?
 
-    struct RestoredDeletion {
-        let slug: String
-        let changes: [ManifestChange]
-        let projectionIDs: Set<UUID>
-    }
-
     struct Item {
         let order: Int
         var id: UUID { presentation.id }
         var wasHealed = false
+        var wasCancelled = false
+        var restoredDeletion: RestoredDeletion?
         let change: ManifestChange
         let intentMove: ManifestLocalIntentMove?
         let categoryEdit: CategorySaveEdit?
@@ -139,7 +135,8 @@ final class ManifestSaveModel {
     private enum SaveOutcome { case finished(Bool), retry, paused }
 
     @MainActor
-    private func save(_ item: Item) async -> SaveOutcome {
+    private func save(_ queuedItem: Item) async -> SaveOutcome {
+        var item = queuedItem
         var disk: ManifestSnapshot?
         var heldLock: SyncLock?
         var outcome = SaveOutcome.finished(false)
@@ -147,6 +144,8 @@ final class ManifestSaveModel {
         var needsDamageRefresh = false
         do {
             heldLock = try await takeLock()
+            discardReappearedQueuedDeletions()
+            item = items.first { $0.id == item.id } ?? item
             let read = try await readCurrentManifest()
             let result = try await saveWithStableHead(item, disk: &disk, first: read)
             outcome = .finished(result.published)
@@ -190,6 +189,7 @@ final class ManifestSaveModel {
     /// Returns true only when this attempt read all requested values durably on disk.
     @MainActor
     private func retainUnsaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
+        if item.wasCancelled { return true }
         guard !item.wasHealed else { return false }
         defer { persistRefusedCreates() }
         if let durable {
@@ -215,7 +215,7 @@ final class ManifestSaveModel {
     @MainActor
     func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot,
                         local: ManifestSnapshot?, durable: ManifestSnapshot) throws {
-        for pending in items.dropFirst() where !pending.wasHealed
+        for pending in items.dropFirst() where !pending.wasHealed && !pending.wasCancelled
             && pending.categoryEdit?.wasRebuilt != true && pending.presentation.context === context
             && items.contains(where: { $0.id == pending.id }) {
             if case .createSkill = pending.change {

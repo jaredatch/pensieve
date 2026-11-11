@@ -288,7 +288,7 @@ final class CollisionCreateFixture {
         context = nil
     }
 
-    func relaunchThroughRuntime() async throws {
+    func relaunchThroughRuntime(launchReconcile: AppRuntime.LaunchReconcile? = nil) async throws {
         precondition(persistent)
         quit()
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: storeURL))
@@ -299,7 +299,7 @@ final class CollisionCreateFixture {
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
         let runtime = try AppRuntime(container: container,
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
-            defaults: defaults, launchBackfill: { _ in },
+            defaults: defaults, launchReconcile: launchReconcile, launchBackfill: { _ in },
             paths: paths, updateCheckOperation: { _ in RuntimeUpdateCheckResult(report: UpdateCheckReport(), skills: [:]) },
             gitUsabilityProbe: { .usable }, coordinatorConfigure: { coordinator in
                 await coordinator.configure(engine: RecoveredPresentationEngine(), git: paths.makeGitService(),
