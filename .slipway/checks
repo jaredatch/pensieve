@@ -1,0 +1,4 @@
+paths = Pensieve/Services/ManifestChange.swift Pensieve/Services/RefusedManifestProjection.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift PensieveTests/ServiceTests/CategorySaveUndoTests+Retirement.swift docs/ARCHITECTURE.md .slipway/changelog/241.md .slipway/mutations/rename_swap.patch
+risk = Pensieve/Services/ManifestChange.swift Pensieve/Services/RefusedManifestProjection.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift
+check.rename_swap = tests PensieveTests/CategorySaveUndoTests/testTwoQuickRenamesThatSwapANameKeepAFailedSkillDeletionOwed
+mutation.rename_swap = .slipway/mutations/rename_swap.patch
