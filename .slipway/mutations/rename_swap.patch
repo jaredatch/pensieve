@@ -1,0 +1,10 @@
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -274,7 +274,6 @@
+         var current = name
+         var resolved = snapshot.categories.contains { $0.name == current } ? current : nil
+         for rename in categoryRenames where rename.old == current {
+-            guard includingPending || rename.isSaved else { return (resolved, resolved == nil) }
+             current = rename.new
+             if snapshot.categories.contains(where: { $0.name == current }) { resolved = current }
+         }

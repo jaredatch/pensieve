@@ -250,6 +250,7 @@ struct RefusedManifestProjection {
     struct CategoryRename: Equatable {
         let old: String
         let new: String
+        var isSaved = false
     }
     enum Field {
         case change(ManifestChange)
@@ -266,15 +267,18 @@ struct RefusedManifestProjection {
         categoryRenames.reduce(name) { current, rename in current == rename.old ? rename.new : current }
     }
 
-    /// Prefer the furthest local rename present here, even if the original name has been reused.
-    func resolvedCategoryName(for name: String, in snapshot: ManifestSnapshot) -> String? {
+    /// Durable snapshots follow saved hops; the cached window includes every pending rename.
+    /// A vanished name is undecided while its next rename is still pending.
+    func resolveCategory(for name: String, in snapshot: ManifestSnapshot, includingPending: Bool = false)
+        -> (name: String?, isUndecided: Bool) {
         var current = name
         var resolved = snapshot.categories.contains { $0.name == current } ? current : nil
         for rename in categoryRenames where rename.old == current {
+            guard includingPending || rename.isSaved else { return (resolved, resolved == nil) }
             current = rename.new
             if snapshot.categories.contains(where: { $0.name == current }) { resolved = current }
         }
-        return resolved
+        return (resolved, false)
     }
 
     var createdSkills: [SkillOverlay] {
@@ -295,6 +299,8 @@ struct RefusedManifestProjection {
 
     func project(_ field: Field, onto snapshot: inout ManifestSnapshot, keepingLocalCreates: Bool = false) {
         if case .change(let change) = field {
+            if case .categorySkill(let name, _, _) = change,
+               resolveCategory(for: name, in: snapshot).isUndecided { return }
             if case .createSkill(let original) = change {
                 projectCreate(original, onto: &snapshot, keepingLocalCreates: keepingLocalCreates)
                 return
@@ -307,7 +313,7 @@ struct RefusedManifestProjection {
         } else {
             switch field {
             case .change(.categorySkill(let name, let slug, let member)):
-                ManifestChange.categorySkill(resolvedCategoryName(for: name, in: snapshot) ?? name, slug, member)
+                ManifestChange.categorySkill(resolveCategory(for: name, in: snapshot).name ?? name, slug, member)
                     .apply(to: &snapshot)
             case .change(let change): change.apply(to: &snapshot)
             case .intent(let intent): snapshot.deployIntents.removeAll { $0 == intent }
@@ -336,8 +342,8 @@ struct RefusedManifestProjection {
             } else { snapshot.deployIntents.removeAll { $0 == intent } }
         case .change(let change):
             if case .categorySkill(let name, let slug, _) = change {
-                let target = resolvedCategoryName(for: name, in: snapshot) ?? name
-                let windowName = resolvedCategoryName(for: name, in: local)
+                let target = resolveCategory(for: name, in: snapshot).name ?? name
+                let windowName = resolveCategory(for: name, in: local, includingPending: true).name
                 guard let record = local.categories.first(where: { $0.name == windowName }) else {
                     // A newly read retirement field can name a category the window has never seen.
                     if case .categorySkill(_, _, false) = change {
