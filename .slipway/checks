@@ -1,0 +1,6 @@
+paths = Pensieve/Utilities/GitConfigText.swift Pensieve/Utilities/GitHeadStamp.swift Pensieve/Services/ProjectIdentityService.swift PensieveTests/ServiceTests/ProjectIdentityTests.swift PensieveTests/ServiceTests/ProjectIdentityServiceTests+OriginKeys.swift PensieveTests/UtilitiesTests/GitConfigTextTests.swift Pensieve.xcodeproj/project.pbxproj docs/CONVENTIONS.md .slipway/changelog/180.md .slipway/mutations/
+risk = Pensieve/Services/ProjectIdentityService.swift Pensieve/Utilities/GitHeadStamp.swift Pensieve/Utilities/GitConfigText.swift
+check.origin_as_git = tests PensieveTests/ProjectIdentityTests/testParseOriginURLReadsTheOriginTheWayGitDoes
+mutation.origin_as_git = .slipway/mutations/origin_as_git.patch
+check.origin_keys_stay = tests PensieveTests/ProjectIdentityServiceTests/testProjectsKeyedByTheirOriginKeepTheirIdentityKey
+mutation.origin_keys_stay = .slipway/mutations/origin_keys_stay.patch
