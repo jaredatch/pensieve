@@ -139,25 +139,12 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
         return String(raw[raw.index(after: at)...])
     }
 
-    /// The `url = ...` of the `[remote "origin"]` section, or nil.
+    /// The first fetch URL as git reads it; an empty, bare or malformed config gives no origin.
     static func parseOriginURL(fromGitConfig text: String) -> String? {
-        var inOrigin = false
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") {
-                inOrigin = (line == "[remote \"origin\"]")
-                continue
-            }
-            guard inOrigin, let eq = line.firstIndex(of: "=") else { continue }
-            let key = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
-            guard key == "url" else { continue }
-            var value = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
-            if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") {
-                value = String(value.dropFirst().dropLast())
-            }
-            return value.isEmpty ? nil : value
-        }
-        return nil
+        guard let entries = try? GitConfigText.entries(text),
+              let value = entries.first(where: { $0.key == "remote.origin.url" })?.value,
+              !value.isEmpty else { return nil }
+        return value
     }
 
     /// The validated UUID from a `.pensieve-project` marker's `id = ...` line, or nil.

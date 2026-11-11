@@ -1,0 +1,11 @@
+--- a/Pensieve/Utilities/GitConfigText.swift
++++ b/Pensieve/Utilities/GitConfigText.swift
+@@ -36,7 +36,7 @@
+     /// Quoted subsections keep case and consume any backslash escape; dotted headers fold case.
+     private static func sectionName(_ header: String) -> String {
+         guard let quote = header.firstIndex(of: "\"") else { return header.lowercased() }
+-        let section = header[..<quote].trimmingCharacters(in: gitWhitespace).lowercased()
++        let section = header[..<quote].trimmingCharacters(in: gitWhitespace)
+         var subsection = "", escaped = false
+         for character in header[header.index(after: quote)...].dropLast() {
+             if escaped {

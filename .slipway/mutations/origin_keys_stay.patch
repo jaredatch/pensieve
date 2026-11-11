@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/ProjectIdentityService.swift
++++ b/Pensieve/Services/ProjectIdentityService.swift
+@@ -142,7 +142,7 @@
+     /// The first fetch URL as git reads it; an empty, bare or malformed config gives no origin.
+     static func parseOriginURL(fromGitConfig text: String) -> String? {
+         guard let entries = try? GitConfigText.entries(text),
+-              let value = entries.first(where: { $0.key == "remote.origin.url" })?.value,
++              let value = entries.last(where: { $0.key == "remote.origin.url" })?.value,
+               !value.isEmpty else { return nil }
+         return value
+     }
