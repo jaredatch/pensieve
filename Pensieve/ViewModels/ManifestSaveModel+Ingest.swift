@@ -47,7 +47,7 @@ extension ManifestSaveModel {
         // A fallback publishes this context's whole window. Capture its queue membership before
         // awaiting the write; another context or an edit submitted during the write is not healed.
         let healedItems = disk == nil ? Set(items.filter {
-            $0.presentation.context === item.presentation.context
+            $0.presentation.context === item.presentation.context && !$0.wasCancelled
         }.map(\.id)) : []
         let context = item.presentation.context
         let collisionDelete = try collisionDeletion(for: item)
@@ -167,6 +167,13 @@ extension ManifestSaveModel {
 
     @MainActor
     func saveWithStableHead(_ item: Item, disk: inout ManifestSnapshot?, first: ManifestRead) async throws -> SaveResult {
+        if item.wasCancelled {
+            disk = first.disk
+            refreshRefused(durable: disk)
+            let durable = try disk ?? item.fallback()
+            let error = await rebuild(item, durable: durable, published: false)
+            return SaveResult(published: false, error: error)
+        }
         let ingest = StoreIngestState.shared(for: item.presentation.context.container)
         var acceptedFinalAttempt = false
         for attempt in 0..<3 {

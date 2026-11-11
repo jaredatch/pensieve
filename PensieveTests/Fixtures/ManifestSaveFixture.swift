@@ -192,7 +192,6 @@ final class CollisionCreateFixture {
     var logs: [String] = []
     var recordPath: String { RuntimePaths(storeRoot: f.app, appSupportDir: support).refusedCreatesPath }
     var storeURL: URL { URL(fileURLWithPath: f.base + "/library.store") }
-
     static func writtenDate(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -276,6 +275,12 @@ final class CollisionCreateFixture {
     func quit() {
         runtime?.commandServer?.stop()
         library?.stopWatching()
+        // A stopped process cannot let its queued worker publish after relaunch.
+        saves?.worker?.cancel()
+        for item in saves?.items ?? [] {
+            StoreIngestState.shared(for: item.presentation.context.container).finish(item.id)
+        }
+        saves?.items.removeAll()
         runtime = nil
         skill = nil
         library = nil
@@ -283,7 +288,7 @@ final class CollisionCreateFixture {
         context = nil
     }
 
-    func relaunchThroughRuntime() async throws {
+    func relaunchThroughRuntime(launchReconcile: AppRuntime.LaunchReconcile? = nil) async throws {
         precondition(persistent)
         quit()
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: storeURL))
@@ -294,7 +299,7 @@ final class CollisionCreateFixture {
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
         let runtime = try AppRuntime(container: container,
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
-            defaults: defaults, launchBackfill: { _ in },
+            defaults: defaults, launchReconcile: launchReconcile, launchBackfill: { _ in },
             paths: paths, updateCheckOperation: { _ in RuntimeUpdateCheckResult(report: UpdateCheckReport(), skills: [:]) },
             gitUsabilityProbe: { .usable }, coordinatorConfigure: { coordinator in
                 await coordinator.configure(engine: RecoveredPresentationEngine(), git: paths.makeGitService(),

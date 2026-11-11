@@ -2,6 +2,13 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
+    struct RestoredDeletion {
+        let slug: String
+        let machineID: String?
+        let changes: [ManifestChange]
+        let projectionIDs: Set<UUID>
+    }
+
     func hasRefusedCreate(_ slug: String, context: ModelContext) -> Bool {
         refused.contains { $0.context === context && $0.createdSkill?.slug == slug }
     }
@@ -34,7 +41,8 @@ extension ManifestSaveModel {
             log("Couldn't read refused creates at \(refusedCreatesPath): \(error)")
             return
         }
-        guard !record.held.isEmpty || !record.preserved.isEmpty || !record.retirements.isEmpty else { return }
+        guard !record.held.isEmpty || !record.preserved.isEmpty
+            || !record.retirements.isEmpty || !record.deletions.isEmpty else { return }
         let durable = probeLibraryForRecordRestore()
         let state = StoreIngestState.shared(for: context.container)
         for slug in record.preserved where durable.map({ $0.skills.contains { $0.slug == slug } }) ?? true {
@@ -42,6 +50,7 @@ extension ManifestSaveModel {
             state.preservePeer(slug)
         }
         restoreRetirements(record.retirements, durable: durable, context: context)
+        restoreDeletions(record.deletions, context: context)
         let local: ManifestSnapshot
         do { local = try manifest.snapshot(from: context) } catch {
             log("Couldn't restore refused creates: " + error.localizedDescription)
@@ -89,6 +98,69 @@ extension ManifestSaveModel {
         }
     }
 
+    private func restoreDeletions(_ records: [RefusedCreateRecords.Deletion], context: ModelContext) {
+        for record in records where record.machineID != nil || !retirementFolderMayExist(record.slug) {
+            let changes: [ManifestChange] = record.machineID.map { [.retireLocalSkill(record.slug, $0)] }
+                ?? [.retireSkill(record.slug), .deleteSkill(record.slug)]
+            let edits = changes.map { ManifestRefusedEdit($0, context: context, order: -1) }
+            for edit in edits {
+                edit.retain()
+                refused.append(edit)
+            }
+            restoredDeletions.append(.init(slug: record.slug, machineID: record.machineID,
+                                          changes: changes, projectionIDs: Set(edits.map(\.id))))
+        }
+    }
+
+    /// A helper can pull a new creation while launch rebuilds. Withdraw both the replay and
+    /// its projections; the caller must rebuild again before exposing or publishing those rows.
+    func discardReappearedRestoredDeletions() -> Bool {
+        let reappeared = restoredDeletions.filter { $0.machineID == nil && retirementFolderMayExist($0.slug) }
+        guard !reappeared.isEmpty else { return false }
+        let slugs = Set(reappeared.map(\.slug))
+        let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
+        restoredDeletions.removeAll { slugs.contains($0.slug) }
+        refused.removeAll { projectionIDs.contains($0.id) }
+        persistRefusedCreates()
+        return true
+    }
+
+    /// The save worker holds sync.lock here, after any helper pull has finished and before
+    /// any edit reaches a scan, row acceptance or publication. Cancel each restored pair together.
+    func discardReappearedQueuedDeletions() {
+        let reappeared = items.compactMap(\.restoredDeletion).filter {
+            $0.machineID == nil && retirementFolderMayExist($0.slug)
+        }
+        guard !reappeared.isEmpty else { return }
+        let slugs = Set(reappeared.map(\.slug))
+        let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
+        refused.removeAll { projectionIDs.contains($0.id) }
+        for index in items.indices {
+            guard let deletion = items[index].restoredDeletion,
+                  deletion.machineID == nil, slugs.contains(deletion.slug) else { continue }
+            items[index].wasCancelled = true
+            let state = StoreIngestState.shared(for: items[index].presentation.context.container)
+            state.finish(items[index].id)
+            state.invalidate()
+        }
+        persistRefusedCreates()
+    }
+
+    /// Launch owns sync.lock while rebuilding. Replay only after its verdict, with projections
+    /// already registered so no stale membership or request reaches the window in between.
+    func replayRestoredDeletions(context: ModelContext) {
+        let deletions = restoredDeletions
+        restoredDeletions = []
+        for deletion in deletions {
+            for change in deletion.changes {
+                // submit appends synchronously, before its worker can take a turn.
+                let index = items.count
+                submit(change, context: context) { _ in }
+                items[index].restoredDeletion = deletion
+            }
+        }
+    }
+
     private func retirementFolderMayExist(_ slug: String) -> Bool {
         guard let folder = SkillStore.safeSkillDirectory(slug: slug, base: root + "/skills", fileService: files) else {
             return true // An unsafe or unreadable folder is not evidence of a completed deletion.
@@ -98,7 +170,7 @@ extension ManifestSaveModel {
 
     /// Mirror collision-held creates, renamed pending creates and peers kept after rename/delete.
     /// A renamed create also stays here after an ordinary write failure, carrying its intent move.
-    /// Refused per-field retirements persist while their folders remain. Other refused creates are omitted.
+    /// Retire/delete edits persist before folder removal; refused per-field retirements also keep their fields.
     /// Previously recorded creates stay until acknowledgement, even when their slug is temporarily absent on disk.
     func persistRefusedCreates(excludingPublished: UUID? = nil) {
         guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }
@@ -111,7 +183,7 @@ extension ManifestSaveModel {
         // Rename has already saved its moved row. Persist the intent move before its async queue
         // runs too, so quitting here cannot strand the durable intent under the previous name.
         let queued = items.compactMap { item -> RefusedCreateRecords.Held? in
-            guard item.id != excludingPublished, !item.wasHealed, let move = item.intentMove,
+            guard item.id != excludingPublished, !item.wasHealed, !item.wasCancelled, let move = item.intentMove,
                   let create = item.presentation.createdSkill else { return nil }
             return .init(slug: create.slug, createdAt: RefusedCreateRecords.writtenDate(create.createdAt), intentMove: move)
         }
@@ -124,12 +196,35 @@ extension ManifestSaveModel {
             }
             return record
         }
+        let deletions = deletionRecords(excludingPublished: excludingPublished)
         do {
             try RefusedCreateRecords(path: refusedCreatesPath, files: files)
-                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements))
+                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements, deletions: deletions))
         } catch {
             if case RefusedCreateRecords.ReadError.unsupportedSchema = error { recordsRequireNewerVersion = true }
             log("Couldn't write refused creates at \(refusedCreatesPath): \(error)")
         }
+    }
+
+    private func deletionRecords(excludingPublished: UUID?) -> [RefusedCreateRecords.Deletion] {
+        let pending = items.filter {
+            $0.id != excludingPublished && !$0.wasHealed && !$0.wasCancelled
+        }.map(\.presentation)
+        let records = (refused + pending).compactMap { edit -> RefusedCreateRecords.Deletion? in
+            guard let record = edit.deletionRecord else { return nil }
+            let localOnly = record.machineID != nil
+            let peer = edit.deletesSkillOverlay
+                && (hasCollision(record.slug, context: edit.context) || preservedPeerSlugs.contains(record.slug))
+            if localOnly || peer {
+                // A failed row save never queues deleteSkill. Protect its peer at retirement too.
+                preservedPeerSlugs.insert(record.slug)
+                StoreIngestState.shared(for: edit.context.container).preservePeer(record.slug)
+                if !localOnly { return nil }
+            }
+            return record
+        }
+        return Dictionary(records.map { ($0.slug, $0) }, uniquingKeysWith: { first, last in
+            first.machineID == nil ? first : last
+        }).values.sorted { $0.slug < $1.slug }
     }
 }

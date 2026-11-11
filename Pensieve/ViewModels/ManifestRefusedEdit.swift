@@ -70,6 +70,19 @@ final class ManifestRefusedEdit {
         }
     }
 
+    var deletesSkillOverlay: Bool {
+        if case .deleteSkill = original { return true }
+        return false
+    }
+
+    var deletionRecord: RefusedCreateRecords.Deletion? {
+        switch original {
+        case .retireSkill(let slug), .deleteSkill(let slug): return .init(slug: slug, machineID: nil)
+        case .retireLocalSkill(let slug, let machine): return .init(slug: slug, machineID: machine)
+        default: return nil
+        }
+    }
+
     /// The record stores only owed fields; the window snapshot is read afresh after launch.
     func retirementRecord() -> RefusedCreateRecords.Retirement? {
         guard case .retireSkill(let slug) = original else { return nil }
