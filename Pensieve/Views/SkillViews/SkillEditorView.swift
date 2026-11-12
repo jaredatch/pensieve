@@ -29,6 +29,8 @@ struct SkillEditorView: View {
         }
         .onAppear { loadBody() }
         .onChange(of: skill.id) { _, _ in loadBody() }
+        // A move carries the draft, including its rewritten name; load that draft even while dirty.
+        .onChange(of: skill.directoryName) { _, _ in loadBody() }
         // An accepted external change, a discard, a restore, or the app's own write: reload the file only
         // while nothing is unsaved — a dirty draft is the user's, and the view model has asked about it.
         .onChange(of: library.reloadToken) { _, _ in reloadIfClean() }

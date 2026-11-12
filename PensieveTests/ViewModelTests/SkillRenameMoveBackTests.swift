@@ -1,4 +1,7 @@
+import AppKit
 import SwiftData
+import SwiftUI
+import WebKit
 import XCTest
 @testable import Pensieve
 
@@ -15,6 +18,9 @@ final class SkillRenameMoveBackTests: XCTestCase {
         h.library.noteEditorChanged(h.skill, body: saved)
         XCTAssertTrue(h.library.saveDraft(h.skill))
         h.library.noteEditorChanged(h.skill, body: saved + "Typed while waiting.\n")
+        h.library.unsavedChangesPresenter = { _, _ in }
+        var allowedLeaving: Bool?
+        h.library.confirmLeaving(h.skill) { allowedLeaving = $0 }
         try h.arrivePeer()
         let before = try ManifestSaveFixture.manifestBytes(root: h.root, files: h.files)
         held.release()
@@ -28,6 +34,9 @@ final class SkillRenameMoveBackTests: XCTestCase {
         XCTAssertTrue(document.contains("Saved while waiting."))
         XCTAssertTrue(h.library.hasUnsavedChanges(for: h.skill))
         XCTAssertTrue(h.library.editorBody(for: h.skill).contains("Typed while waiting."))
+        XCTAssertEqual(h.library.pendingUnsavedChanges?.directoryName, "alpha")
+        h.library.resolveUnsavedChanges(.cancel)
+        XCTAssertEqual(allowedLeaving, false)
         XCTAssertTrue(h.library.saveDraft(h.skill), h.library.error ?? "")
         XCTAssertTrue(try h.files.readFile(at: h.store.baseDir + "/alpha/SKILL.md").contains("Typed while waiting."))
         let row = try XCTUnwrap(h.context.fetch(FetchDescriptor<Skill>()).first { $0.id == id })
@@ -35,20 +44,7 @@ final class SkillRenameMoveBackTests: XCTestCase {
         XCTAssertEqual(row.name, "Alpha")
         XCTAssertEqual(row.tags, ["own"])
         XCTAssertEqual(row.scope, .project)
-        let disk = try h.manifest.read(fromRoot: h.root)
-        let window = try h.manifest.snapshot(from: h.context)
-        XCTAssertEqual(window.categories.sorted { $0.name < $1.name }, disk.categories.sorted { $0.name < $1.name })
-        func intentKey(_ intent: DeployIntentRecord) -> String {
-            [intent.machineID, intent.skillSlug, intent.platformRaw, intent.projectKey ?? ""].joined(separator: "|")
-        }
-        XCTAssertEqual(window.deployIntents.sorted { intentKey($0) < intentKey($1) },
-            disk.deployIntents.sorted { intentKey($0) < intentKey($1) })
-        XCTAssertEqual(try h.files.symlinkTarget(at: h.projects[0].path + "/.claude/skills/alpha"), h.store.baseDir + "/alpha")
-        for project in h.projects {
-            for suffix in ["/.claude/skills/zulu", "/.cursor/rules/zulu.mdc"] {
-                XCTAssertFalse(try h.files.entryExistsWithoutFollowingLinks(at: project.path + suffix))
-            }
-        }
+        try assertWindowAssignmentsAndDeployments(h)
         XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: h.root, files: h.files), before)
         XCTAssertEqual(h.saves.pendingCount, 0)
     }
@@ -132,6 +128,53 @@ final class SkillRenameMoveBackTests: XCTestCase {
         await h.saves.waitUntilIdle()
         XCTAssertEqual(h.saves.pendingCount, 0)
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "zulu" }?.tags, ["own"])
+    }
+
+    func testAnOpenEditorFollowsTheDraftWhenARefusedRenameMovesBack() async throws {
+        let h = try SkillRenameTakeoverFixture(record: false, leftovers: false)
+        defer { h.cleanup() }
+        let suffix = "\nTyped in the open editor.\n"
+        let expected = h.library.editorBody(for: h.skill) + suffix
+        XCTAssertTrue(h.rename())
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { held.release() }
+        let typed = h.library.editorBody(for: h.skill) + suffix
+        h.library.noteEditorChanged(h.skill, body: typed)
+        let host = NSHostingView(rootView: SkillEditorView(skill: h.skill, library: h.library))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        let editor = try await TestWait.waitForEditor(in: host)
+        let initial = await TestWait.waitForEditorText(typed, in: editor,
+            timeout: .seconds(TestWait.hostedActionTimeoutSeconds))
+        XCTAssertEqual(initial, typed)
+        try h.arrivePeer()
+        held.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.library.error, h.takenMessage())
+        let moved = await TestWait.waitForEditorText(expected, in: editor,
+            timeout: .seconds(TestWait.hostedActionTimeoutSeconds))
+        XCTAssertEqual(moved, expected, "The mounted editor must show the draft's restored name and typed text")
+    }
+
+    private func assertWindowAssignmentsAndDeployments(_ h: SkillRenameTakeoverFixture) throws {
+        let disk = try h.manifest.read(fromRoot: h.root)
+        let window = try h.manifest.snapshot(from: h.context)
+        XCTAssertEqual(window.categories.sorted { $0.name < $1.name }, disk.categories.sorted { $0.name < $1.name })
+        func intentKey(_ intent: DeployIntentRecord) -> String {
+            [intent.machineID, intent.skillSlug, intent.platformRaw, intent.projectKey ?? ""].joined(separator: "|")
+        }
+        XCTAssertEqual(window.deployIntents.sorted { intentKey($0) < intentKey($1) },
+            disk.deployIntents.sorted { intentKey($0) < intentKey($1) })
+        XCTAssertEqual(try h.files.symlinkTarget(at: h.projects[0].path + "/.claude/skills/alpha"), h.store.baseDir + "/alpha")
+        for project in h.projects {
+            for suffix in ["/.claude/skills/zulu", "/.cursor/rules/zulu.mdc"] {
+                XCTAssertFalse(try h.files.entryExistsWithoutFollowingLinks(at: project.path + suffix))
+            }
+        }
     }
 
     private func assertEdits(_ h: SkillRenameTakeoverFixture, peer: Data, tags: [String], scope: SkillScope,
