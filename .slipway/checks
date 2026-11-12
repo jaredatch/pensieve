@@ -1,0 +1,10 @@
+paths = Pensieve/Services/ManifestChange.swift Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve.xcodeproj/project.pbxproj docs/ARCHITECTURE.md PensieveTests/ .slipway/mutations/
+risk = Pensieve/Services/ManifestChange.swift Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
+check.absorb = tests PensieveTests/SkillRenameAbsorbTests
+check.refresh = tests PensieveTests/SkillRenameRefreshTests
+check.taken = tests PensieveTests/SkillRenameTakenTests
+check.queued = tests PensieveTests/SkillRenameQueuedRefusalTests
+mutation.absorb = .slipway/mutations/absorb.patch
+mutation.refresh = .slipway/mutations/refresh.patch
+mutation.taken = .slipway/mutations/taken.patch
+mutation.queued = .slipway/mutations/queued.patch
