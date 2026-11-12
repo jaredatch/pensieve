@@ -12,6 +12,7 @@ final class PlatformViewModel {
     let deployStateStore: DeployStateStore
     let removalService: DeployRemovalServicing
     let waitingRemovalStore: WaitingRemovalStoring
+    let removedDeploymentNotice: RemovedDeploymentNotice
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
     /// Installed agents detected once at construction (install state doesn't change mid-session).
@@ -48,6 +49,8 @@ final class PlatformViewModel {
         self.removalService = DeployRemovalService(stateStore: stateStore)
         self.waitingRemovalStore = waitingRemovalStore ?? WaitingRemovalStore(fileService: stateStore.fileService,
             appSupportDir: stateStore.appSupportDir)
+        self.removedDeploymentNotice = RemovedDeploymentNotice(store: RemovedDeploymentNoticeStore(
+            fileService: stateStore.fileService, appSupportDir: stateStore.appSupportDir))
         self.now = now
         self.persist = persist
         self.installed = agentDetection.installedPlatforms()

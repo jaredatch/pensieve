@@ -8,6 +8,8 @@ import XCTest
 @MainActor
 final class RemoteRemovalFixture {
     static let agents: [PlatformTarget] = [.claudeCode, .codex, .cursor]
+    static let projectAgents: [PlatformTarget] = [.claudeCode, .codex, .cursor, .grok]
+    let installedAgents: [PlatformTarget]
     let root: String
     let paths: AppRuntimePaths
     let files = FileService()
@@ -21,9 +23,11 @@ final class RemoteRemovalFixture {
     var platform: PlatformViewModel { session!.platform }
     var convergence: PostSyncConvergence { session!.convergence }
 
-    init(skills: [String] = ["alpha"], persistent: Bool = false) throws {
+    init(skills: [String] = ["alpha"], persistent: Bool = false,
+         agents: [PlatformTarget] = RemoteRemovalFixture.agents) throws {
         root = TestTemporaryDirectory.path + "RemoteRemoval-" + UUID().uuidString
         paths = AppRuntimePaths(storeRoot: root + "/store", appSupportDir: root + "/support")
+        self.installedAgents = agents
         self.persistent = persistent
         manifest = ManifestService(fileService: files)
         store = SkillStore(fileService: files, baseDir: paths.skillsDir, storeRoot: paths.storeRoot)
@@ -41,7 +45,8 @@ final class RemoteRemovalFixture {
         session = nil
         let config = persistent ? ModelConfiguration(url: URL(fileURLWithPath: root + "/local.store"))
             : ModelConfiguration(isStoredInMemoryOnly: true)
-        session = try RemoteRemovalSession(paths: paths, configuration: config, files: files, store: store, state: state)
+        session = try RemoteRemovalSession(paths: paths, configuration: config, files: files,
+            store: store, state: state, agents: installedAgents)
     }
 
     func project(_ name: String, keyed: Bool = true) throws -> Project {
@@ -84,9 +89,9 @@ final class RemoteRemovalFixture {
         convergence.runAfterLaunchIngest()
     }
 
-    func direct(project: Project, agents: [PlatformTarget]) throws {
+    func direct(project: Project, agents: [PlatformTarget], slug: String = "alpha") throws {
         for agent in agents {
-            platform.deploy(skill: try skill(), platform: agent, target: .project(project), context: context)
+            platform.deploy(skill: try skill(slug), platform: agent, target: .project(project), context: context)
             XCTAssertNil(platform.error)
         }
     }
@@ -119,12 +124,12 @@ final class RemoteRemovalFixture {
         }
     }
 
-    func pull(rename: Bool = false) throws {
-        if rename { try store.renameSkill(directoryName: "alpha", to: "beta-two") } else {
-            try store.deleteSkill(directoryName: "alpha")
+    func pull(rename: Bool = false, slug: String = "alpha") throws {
+        if rename { try store.renameSkill(directoryName: slug, to: "beta-two") } else {
+            try store.deleteSkill(directoryName: slug)
         }
         var snapshot = try manifest.read(fromRoot: paths.storeRoot)
-        XCTAssertTrue((rename ? ManifestChange.renameSkill("alpha", "beta-two") : .retireSkill("alpha")).apply(to: &snapshot))
+        XCTAssertTrue((rename ? ManifestChange.renameSkill(slug, "beta-two") : .retireSkill(slug)).apply(to: &snapshot))
         try manifest.write(snapshot, toRoot: paths.storeRoot)
     }
 
@@ -199,13 +204,13 @@ private final class RemoteRemovalSession {
     let convergence: PostSyncConvergence
 
     init(paths: AppRuntimePaths, configuration: ModelConfiguration, files: FileService,
-         store: SkillStore, state: DeployStateStore) throws {
+         store: SkillStore, state: DeployStateStore, agents: [PlatformTarget]) throws {
         let container = try AppRuntime.makeContainer(configuration: configuration)
         context = ModelContext(container)
         platform = PlatformViewModel(fileService: files, linkService: LinkService(fileService: files, paths: paths.deployPaths),
             cursorCompiler: CursorCompiler(fileService: files, skillStore: store,
                 userRulesDirectory: paths.deployPaths.cursorUserRulesDirectory),
-            agentDetection: DeletionTestDetection(installed: RemoteRemovalFixture.agents),
+            agentDetection: DeletionTestDetection(installed: agents),
             deployStateStore: state, skillsDirectory: paths.skillsDir)
         let intent = AppRuntime.makeLaunchIntentReconciler(platformVM: platform, paths: paths)
         convergence = paths.makeConvergence(container: container, platformVM: platform, intentReconciler: intent)

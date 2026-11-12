@@ -21,7 +21,7 @@ extension AppRuntimePaths {
             auditLog: { SyncAudit(appSupport: appSupportDir).append(category: $0, detail: $1) },
             didConverge: { platformVM.noteDeployStateChanged() },
             removedSkillCleanup: RemovedSkillCleanup(fileService: platformVM.deployStateStore.fileService,
-                paths: deployPaths, stateStore: platformVM.deployStateStore)
+                paths: deployPaths, stateStore: platformVM.deployStateStore, notice: platformVM.removedDeploymentNotice)
         )
     }
 
