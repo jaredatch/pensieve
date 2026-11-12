@@ -1,0 +1,13 @@
+--- a/Pensieve/ViewModels/ConflictResolutionJob.swift
++++ b/Pensieve/ViewModels/ConflictResolutionJob.swift
+@@ -65,9 +65,7 @@
+             return try operation(authentication)
+         } catch {
+             if shouldRecord(error, resolvingChoices: resolvingChoices) {
+-                let token: String?
+-                if case let .httpsToken(_, value, _) = authentication.credential { token = value } else { token = nil }
+-                audit?.append(category: "failed", detail: SyncAudit.failureDetail(for: error, token: token))
++                audit?.append(category: "failed", detail: error.localizedDescription)
+             }
+             throw authentication.reporting(error, resolvingConflict: true)
+         }

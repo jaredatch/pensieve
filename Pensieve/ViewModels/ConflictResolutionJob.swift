@@ -9,6 +9,7 @@ struct ConflictResolutionJob {
     let credentials: CredentialStoreProtocol
     let root: String
     let headStamp: () -> String?
+    let audit: SyncAudit?
 
     struct InspectionResult {
         let inspection: ConflictInspection
@@ -18,40 +19,71 @@ struct ConflictResolutionJob {
 
     func inspect() throws -> InspectionResult {
         try GitCancellation.$isReadOnly.withValue(false) {
-            let context = ModelContext(container)
-            let previous = headStamp()
-            let authentication = try resolveAuthentication()
-            let inspection: ConflictInspection
-            do {
-                inspection = try engine.inspectConflicts(root: root, credential: authentication.credential, context: context)
-            } catch { throw authentication.reporting(error, resolvingConflict: true) }
-            let groups: [ConflictResolutionModel.ConflictGroup]
-            if case let .conflicts(set) = inspection {
-                groups = try self.groups(from: set, context: context)
-            } else { groups = [] }
-            return InspectionResult(inspection: inspection, groups: groups, previousHeadStamp: previous)
+            try auditingFailure(resolvingChoices: false) { authentication in
+                let context = ModelContext(container)
+                let previous = headStamp()
+                let inspection = try engine.inspectConflicts(root: root, credential: authentication.credential,
+                                                             context: context)
+                let groups: [ConflictResolutionModel.ConflictGroup]
+                if case let .conflicts(set) = inspection {
+                    groups = try self.groups(from: set, context: context)
+                } else { groups = [] }
+                return InspectionResult(inspection: inspection, groups: groups, previousHeadStamp: previous)
+            }
         }
     }
 
     func resolve(groups: [ConflictResolutionModel.ConflictGroup]) throws
         -> (outcome: SyncOutcome, previousHeadStamp: String?) {
         try GitCancellation.$isReadOnly.withValue(false) {
-            let context = ModelContext(container)
-            let previous = headStamp()
-            let picks = groups.reduce(into: [String: ResolutionPick]()) { partial, group in
-                guard let side = group.chosen else { return }
-                for item in group.items {
-                    partial[item.path] = ResolutionPick(side: side, expectedThis: item.thisMachine,
-                        expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
-                        expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
-                        expectedOtherMode: item.otherMode)
+            try auditingFailure(resolvingChoices: true) { authentication in
+                let context = ModelContext(container)
+                let previous = headStamp()
+                let picks = groups.reduce(into: [String: ResolutionPick]()) { partial, group in
+                    guard let side = group.chosen else { return }
+                    for item in group.items {
+                        partial[item.path] = ResolutionPick(side: side, expectedThis: item.thisMachine,
+                            expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                            expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+                            expectedOtherMode: item.otherMode)
+                    }
                 }
-            }
-            let authentication = try resolveAuthentication()
-            do {
                 return (try engine.resolveConflicts(root: root, picks: picks,
                     credential: authentication.credential, context: context), previous)
-            } catch { throw authentication.reporting(error, resolvingConflict: true) }
+            }
+        }
+    }
+
+    /// Record before sign-in advice replaces the error, even if its presentation was dismissed.
+    private func auditingFailure<Value>(
+        resolvingChoices: Bool,
+        _ operation: (SyncAuthentication) throws -> Value
+    ) throws -> Value {
+        var authentication = SyncAuthentication(remote: nil, credential: nil)
+        do {
+            authentication = try resolveAuthentication()
+            return try operation(authentication)
+        } catch {
+            if shouldRecord(error, resolvingChoices: resolvingChoices) {
+                let token: String?
+                if case let .httpsToken(_, value, _) = authentication.credential { token = value } else { token = nil }
+                audit?.append(category: "failed", detail: SyncAudit.failureDetail(for: error, token: token))
+            }
+            throw authentication.reporting(error, resolvingConflict: true)
+        }
+    }
+
+    private func shouldRecord(_ error: Error, resolvingChoices: Bool) -> Bool {
+        guard let error = error as? SyncError else { return true }
+        switch error {
+        case .syncInProgress:
+            return false
+        case .conflictsChanged, .conflictSideUnavailable, .conflictRequiresGitResolution,
+             .protectedGitlinkUnavailable, .conflictFolderMustMove, .localConflictFolderMustMove,
+             .incompatibleConflictPicks:
+            return !resolvingChoices
+        default:
+            return true
         }
     }
 

@@ -163,21 +163,7 @@ actor SyncCoordinator {
             audit.record(category: fields.category, detail: fields.detail)
             return
         }
-        let reason = auditDescription(error)
-        audit.record(category: fields.category, detail: DisplayTextSanitizer.scrubbingSecrets(reason, token: token))
-    }
-
-    private static func auditDescription(_ error: Error) -> String {
-        // Localized errors can carry private associated values (notably rejectedRemote's raw URL).
-        // Only their public description belongs in the audit; untyped errors also need their diagnosis.
-        if error is LocalizedError {
-            let description = error.localizedDescription
-            if case let SyncError.storeUnreadable(warnings) = error, !warnings.isEmpty {
-                return description + " " + warnings.joined(separator: " ")
-            }
-            return description
-        }
-        return "\(String(reflecting: type(of: error))): \(String(describing: error))"
+        audit.record(category: fields.category, detail: SyncAudit.failureDetail(for: error, token: token))
     }
 
     private func cycleResult(
@@ -242,5 +228,25 @@ actor SyncCoordinator {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return "Sync Pensieve skills — " + formatter.string(from: date)
+    }
+}
+
+// App-only descriptions live here because SyncError depends on SwiftData; the CLI audit does not.
+extension SyncAudit {
+    static func failureDetail(for error: Error, token: String?) -> String {
+        DisplayTextSanitizer.scrubbingSecrets(auditDescription(error), token: token)
+    }
+
+    private static func auditDescription(_ error: Error) -> String {
+        // Localized errors can carry private associated values (notably rejectedRemote's raw URL).
+        // Only their public description belongs in the audit; untyped errors also need their diagnosis.
+        if error is LocalizedError {
+            let description = error.localizedDescription
+            if case let SyncError.storeUnreadable(warnings) = error, !warnings.isEmpty {
+                return description + " " + warnings.joined(separator: " ")
+            }
+            return description
+        }
+        return "\(String(reflecting: type(of: error))): \(String(describing: error))"
     }
 }

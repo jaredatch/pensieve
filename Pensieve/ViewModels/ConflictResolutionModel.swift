@@ -37,6 +37,7 @@ final class ConflictResolutionModel {
     private let git: GitServiceProtocol
     private let credentials: CredentialStoreProtocol
     private let root: String
+    private let audit: SyncAudit?
     private let headStamp: () -> String?
     private let now: () -> Date
     private let onResolutionStarted: () throws -> (SyncCycleResult) -> Void
@@ -45,6 +46,7 @@ final class ConflictResolutionModel {
          git: GitServiceProtocol,
          credentials: CredentialStoreProtocol,
          root: String,
+         audit: SyncAudit? = nil,
          headStamp: (() -> String?)? = nil,
          now: @escaping () -> Date = Date.init,
          steps: SyncStepModel,
@@ -54,6 +56,7 @@ final class ConflictResolutionModel {
         self.git = git
         self.credentials = credentials
         self.root = root
+        self.audit = audit
         self.headStamp = headStamp ?? { GitHeadStamp().read(root: root) }
         self.now = now
         self.onResolutionStarted = onResolutionStarted
@@ -162,7 +165,7 @@ final class ConflictResolutionModel {
 
     private func makeJob(container: ModelContainer) -> ConflictResolutionJob {
         ConflictResolutionJob(container: container, engine: engine, git: git,
-                              credentials: credentials, root: root, headStamp: headStamp)
+                              credentials: credentials, root: root, headStamp: headStamp, audit: audit)
     }
 
     private func cycleResult(from outcome: SyncOutcome, previousHeadStamp: String?) -> SyncCycleResult {
