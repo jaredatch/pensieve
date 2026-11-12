@@ -1,0 +1,8 @@
+paths = Pensieve/Services/SyncFailureCause.swift Pensieve/Services/SyncAudit.swift Pensieve/Services/SyncCoordinator.swift Pensieve/ViewModels/ConflictResolutionModel.swift Pensieve/ViewModels/ConflictResolutionJob.swift Pensieve/AppRuntime+Construction.swift Pensieve.xcodeproj/project.pbxproj docs/ARCHITECTURE.md PensieveTests/ServiceTests/SyncLogPointerTests.swift PensieveTests/ViewModelTests/ConflictWindowAuditTests.swift PensieveTests/Fixtures/SyncFailureAuditFixture.swift PensieveTests/ViewModelTests/ConflictResolutionModelTests+Async.swift
+risk = Pensieve/Services/SyncAudit.swift Pensieve/Services/SyncCoordinator.swift Pensieve/ViewModels/ConflictResolutionModel.swift Pensieve/ViewModels/ConflictResolutionJob.swift
+check.pointer = tests PensieveTests/SyncLogPointerTests
+check.windowlog = tests PensieveTests/ConflictWindowAuditTests
+check.scrub = tests PensieveTests/ConflictWindowAuditScrubTests
+mutation.pointer = .slipway/mutations/pointer.patch
+mutation.windowlog = .slipway/mutations/windowlog.patch
+mutation.scrub = .slipway/mutations/scrub.patch
