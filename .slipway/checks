@@ -1,0 +1,4 @@
+paths = Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/SkillDeletionFlow.swift Pensieve/ViewModels/SkillLibraryViewModel.swift PensieveTests/ServiceTests/SkillDeletionPeerArrivalTests.swift PensieveTests/Fixtures/ManifestSaveFixture.swift Pensieve.xcodeproj/project.pbxproj docs/ARCHITECTURE.md .slipway/mutations/peer.patch .slipway/changelog/250.md
+risk = Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/SkillDeletionFlow.swift Pensieve/ViewModels/SkillLibraryViewModel.swift
+check.peer = tests PensieveTests/SkillDeletionPeerArrivalTests
+mutation.peer = .slipway/mutations/peer.patch
