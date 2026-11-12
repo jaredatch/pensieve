@@ -4,8 +4,89 @@ import XCTest
 
 @MainActor
 final class SkillDeletionPeerArrivalTests: XCTestCase {
+    func testDeletingThenCreatingTheSameNameWhileSyncWaitsPublishesTheNewSkillWithoutOldAssignments() async throws {
+        let h = try ManifestSaveFixture(persistent: true)
+        defer { h.cleanup() }
+        _ = try seedRetirement(in: h)
+        let before = try h.manifestBytes()
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { held.release() }
+        delete(in: h)
+        let replacement = try XCTUnwrap(h.library.createSkill(name: "Alpha", description: "replacement",
+            body: "new body", tags: ["new"], context: h.context))
+        XCTAssertEqual(replacement.directoryName, "alpha")
+        let expected = try XCTUnwrap(h.manifest.snapshot(from: h.context).skills.first { $0.slug == "alpha" })
+        await h.assertWaitingBehindHeldLock(pending: 3, before: before)
+        XCTAssertEqual(try deletionSlugs(in: h), ["alpha"])
+        held.release()
+        await h.saves.waitUntilIdle()
+        let durable = try h.manifest.read(fromRoot: h.root)
+        assertRetired(durable)
+        let saved = try XCTUnwrap(durable.skills.first { $0.slug == "alpha" })
+        let shown = try XCTUnwrap(h.manifest.snapshot(from: h.context).skills.first { $0.slug == "alpha" })
+        for current in [saved, shown] {
+            XCTAssertEqual(current.tags, ["new"])
+            XCTAssertEqual(current.scope, .user)
+            XCTAssertEqual(RefusedCreateRecords.writtenDate(current.createdAt),
+                           RefusedCreateRecords.writtenDate(expected.createdAt))
+        }
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        XCTAssertNil(h.library.error)
+        XCTAssertEqual(try deletionSlugs(in: h), [])
+        try publishWindow(in: h)
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root), durable)
+    }
+
     func testDeletingWhileSyncWaitsKeepsTheArrivingPeersSkillAndClearsItsReminder() async throws {
         try await assertArrivalWhileWaiting(failRowSave: false)
+    }
+
+    func testDeletingThenRenamingAnotherSkillIntoItsNamePublishesTheRenameWithoutOldAssignments() async throws {
+        let h = try ManifestSaveFixture(persistent: true)
+        defer { h.cleanup() }
+        h.beta.tags = ["renamed"]
+        h.beta.createdAt = Date(timeIntervalSince1970: 1_600_000_000)
+        _ = try seedRetirement(in: h)
+        var expected = try XCTUnwrap(h.manifest.snapshot(from: h.context).skills.first { $0.slug == "beta" })
+        expected.slug = "alpha"
+        delete(in: h)
+        // Both actions finish in one main-actor turn, before the save worker takes sync.lock.
+        XCTAssertTrue(SkillRenameFlow.rename(skill: h.beta, to: "Alpha", library: h.library, platformVM: h.platform,
+                                             projects: [], context: h.context))
+        XCTAssertEqual(h.saves.pendingCount, 3)
+        await h.saves.waitUntilIdle()
+        let durable = try h.manifest.read(fromRoot: h.root)
+        assertRetired(durable)
+        XCTAssertEqual(durable.skills, [expected])
+        XCTAssertEqual(try h.manifest.snapshot(from: h.context).skills, [expected])
+        XCTAssertTrue(h.saves.refused.isEmpty)
+        XCTAssertNil(h.library.error)
+        XCTAssertEqual(try deletionSlugs(in: h), [])
+        try publishWindow(in: h)
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root), durable)
+    }
+
+    func testDeletingThenCreatingTheSameNameDoesNotEraseAPeerArrivingWhileSyncWaits() async throws {
+        let h = try ManifestSaveFixture(persistent: true)
+        defer { h.cleanup() }
+        let peer = try seedRetirement(in: h)
+        let before = try h.manifestBytes()
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { held.release() }
+        delete(in: h)
+        let replacement = try XCTUnwrap(h.library.createSkill(name: "Alpha", description: "replacement",
+            body: "new body", tags: ["new"], context: h.context))
+        XCTAssertEqual(replacement.directoryName, "alpha")
+        await h.assertWaitingBehindHeldLock(pending: 3, before: before)
+        try deliver(peer, in: h)
+        held.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root), peer)
+        XCTAssertEqual(h.saves.refused.count, 1, "The local replacement meets the peer as a name clash")
+        XCTAssertEqual(h.library.error, ManifestSaveError.createCollision("alpha").localizedDescription)
+        XCTAssertEqual(try deletionSlugs(in: h), [])
+        try publishWindow(in: h)
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root), peer)
     }
 
     func testDeletingWithAFailedRowSaveLetsTheArrivingPeersSkillOpenNormally() async throws {
@@ -157,6 +238,9 @@ final class SkillDeletionPeerArrivalTests: XCTestCase {
         }
     }
 
+}
+
+extension SkillDeletionPeerArrivalTests {
     private func seedRetirement(in h: ManifestSaveFixture) throws -> ManifestSnapshot {
         h.local.skillSlugs = ["alpha"]
         for machine in [ProjectIntentHarness.localID, ProjectIntentHarness.remoteID] {

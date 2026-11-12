@@ -159,7 +159,7 @@ extension ManifestSaveModel {
                 StoreIngestState.shared(for: item.presentation.context.container)
                     .accept(observation.ingest, result: RebuildResult())
             }
-            if item.wasCancelled { item.cancelledRemovedSkillDeletion?() }
+            if item.wasCancelled { item.removedSkillDeletion?.didCancel() }
             return nil
         } catch {
             return rebuildFailure(error, item: item, manifestSaved: published)
