@@ -82,9 +82,11 @@ final class SyncFailureAuditFixture {
 
 final class AuditFailureEngine: SyncEngineProtocol {
     var failure: Error = SyncError.ingestIncomplete
+    var inspection: ConflictInspection?
     func sync(root: String, message: String, credential: GitCredential?, context: ModelContext,
               prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome { throw failure }
     func inspectConflicts(root: String, credential: GitCredential?, context: ModelContext) throws -> ConflictInspection {
+        if let inspection { return inspection }
         throw failure
     }
     func resolveConflicts(root: String, picks: [String: ResolutionPick], credential: GitCredential?,
@@ -95,4 +97,37 @@ enum UnlocalizedAuditFailure: Error { case broken(String) }
 struct LiteralAuditFailure: LocalizedError {
     let text: String
     var errorDescription: String? { text }
+}
+
+@MainActor
+extension SyncFailureAuditFixture {
+    func window(engine: SyncEngineProtocol, git: GitServiceProtocol? = nil,
+                steps: SyncStepModel? = nil) -> ConflictResolutionModel {
+        ConflictResolutionModel(engine: engine, git: git ?? disk.paths.makeGitService(),
+                                credentials: credentials, root: disk.root, audit: audit, steps: steps ?? SyncStepModel())
+    }
+
+    func staleLockFailure() -> GitError {
+        .commandFailed(args: ["-C", disk.root, "rebase", "--abort"], exitCode: 128,
+                       stderr: "fatal: Unable to create '\(disk.root)/.git/index.lock': File exists.")
+    }
+
+    func seedCycle() async throws -> String {
+        _ = await run(LiteralAuditFailure(text: "earlier cycle"))
+        return try disk.files.readFile(at: disk.support + "/daemon-status.json")
+    }
+
+    func assertWindowLine(after earlier: String, status: String, fragments: [String],
+                          file: StaticString = #filePath, line: UInt = #line) throws {
+        let log = (try? self.log()) ?? ""
+        XCTAssertTrue(log.hasPrefix(earlier), file: file, line: line)
+        let added = String(log.dropFirst(earlier.count)).split(separator: "\n").map(String.init)
+        XCTAssertEqual(added.count, 1, log, file: file, line: line)
+        XCTAssertTrue(added.first?.contains(" failed ") == true, log, file: file, line: line)
+        for fragment in fragments {
+            XCTAssertTrue(added.first?.contains(fragment) == true, log, file: file, line: line)
+        }
+        XCTAssertEqual(try disk.files.readFile(at: disk.support + "/daemon-status.json"), status,
+                       file: file, line: line)
+    }
 }

@@ -245,7 +245,7 @@ extension ConflictResolutionModelTests {
     }
 }
 
-private final class HeldConflictEngine: SyncEngineProtocol {
+final class HeldConflictEngine: SyncEngineProtocol {
     let engine: SyncEngineProtocol
     let block: GitBlockingFixture
     let holdLoad: Bool

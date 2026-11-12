@@ -11,7 +11,7 @@ protocol SyncAuditWriting {
     func record(category: String, detail: String)
 }
 
-/// Writes the CLI-compatible status snapshot and bounded cycle log through the FileService boundary.
+/// Writes the CLI-compatible cycle status and bounded log through the FileService boundary.
 struct SyncAudit: SyncAuditWriting {
     static let logRotateThreshold = 256 * 1024
 
