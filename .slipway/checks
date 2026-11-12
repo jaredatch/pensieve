@@ -1,0 +1,10 @@
+paths = Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/SkillRenameUndo.swift Pensieve/ViewModels/SkillDeletionFlow.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift Pensieve/Services/ManifestChange.swift Pensieve/Services/ManifestSkillRename.swift Pensieve/Services/StoreIngestState.swift PensieveTests/ViewModelTests/SkillRenameMoveBackTests.swift PensieveTests/ServiceTests/SyncCoordinatorTests+RenameCollision.swift PensieveTests/ViewModelTests/SkillRenameQueuedRefusalTests.swift PensieveTests/ViewModelTests/SkillRenameTakenTests.swift PensieveTests/Fixtures/SkillRenameTakeoverFixture.swift docs/ARCHITECTURE.md Pensieve.xcodeproj/project.pbxproj
+risk = Pensieve/ViewModels/SkillRenameFlow.swift Pensieve/ViewModels/SkillRenameUndo.swift Pensieve/ViewModels/SkillDeletionFlow.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift Pensieve/ViewModels/SkillLibraryViewModel+Rename.swift Pensieve/Services/ManifestChange.swift Pensieve/Services/ManifestSkillRename.swift Pensieve/Services/StoreIngestState.swift
+check.back = tests PensieveTests/SkillRenameMoveBackTests/testARefusedRenameLeavesTheSkillUnderItsOldName
+check.edits = tests PensieveTests/SkillRenameMoveBackTests/testChangesAfterARefusedRenameStayOnThisMacsSkill
+check.history = tests PensieveTests/SkillRenameMoveBackTests/testARenameTheLibraryCantAccountForIsRefusedAndKeepsThisMacsTagsAndScope
+check.wait = tests PensieveTests/SkillRenameMoveBackTests/testASkillWhoseRenameIsStillSavingCantBeRenamedOrDeleted
+mutation.back = .slipway/mutations/back.patch
+mutation.edits = .slipway/mutations/edits.patch
+mutation.history = .slipway/mutations/history.patch
+mutation.wait = .slipway/mutations/wait.patch
