@@ -144,7 +144,7 @@ final class SkillRenameFlowTests: XCTestCase {
         XCTAssertFalse(try f.context.fetch(FetchDescriptor<SkillProjectAssignment>()).filter { $0.skillID == id }.isEmpty)
         let items = try XCTUnwrap(f.library.manifestSaves).items
         XCTAssertEqual(items.count, 1)
-        if case .renameSkill("alpha", "beta-two") = items.first?.change {} else { XCTFail("Expected one rename") }
+        if case .renameSkill("alpha", "beta-two", _) = items.first?.change {} else { XCTFail("Expected one rename") }
         XCTAssertEqual(f.library.lastWrittenBody["beta-two"], written)
         let token = f.library.reloadToken
         f.watcher.emit("alpha"); f.watcher.emit("beta-two")

@@ -225,6 +225,8 @@ final class ManifestSaveModel {
                 continue
             }
             do { try pending.change.validate(in: snapshot) } catch {
+                // Its own turn reports a taken skill name once; an earlier save still publishes.
+                if case ManifestSaveError.renameTaken = error { continue }
                 guard pending.categoryEdit != nil else { throw error }
                 // Reject before accepting two same-named records, which would make name-based
                 // rebuild matching associate our UUID with the peer's rule. This head's snapshot

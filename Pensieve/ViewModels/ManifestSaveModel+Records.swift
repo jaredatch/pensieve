@@ -166,7 +166,7 @@ extension ManifestSaveModel {
                         !candidate.wasCancelled else { return false }
                   switch candidate.change {
                   case .createSkill(let skill): return skill.slug == slug
-                  case .renameSkill(_, let target): return target == slug
+                  case .renameSkill(_, let target, _): return target == slug
                   default: return false
                   }
               }) else { return false }
