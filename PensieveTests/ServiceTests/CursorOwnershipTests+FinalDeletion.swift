@@ -11,6 +11,13 @@ extension CursorOwnershipTests {
         let sibling = Project(name: "Second", path: root + "/second")
         skill.directoryName = "~invalid"
         try harness.context.save()
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: AbsentCleanupCompiler(path: artifactPath(.cursor, project: project.path)),
+            agentDetection: DeployStubDetection(installed: [.cursor]),
+            deployStateStore: harness.state, skillsDirectory: TestPaths.skillsDir
+        )
         var probes: [String] = []
         mapped.beforeEntryTypeProbe = { probes.append($0) }
         mapped.beforeDeployStateRead = { probes.append($0) }
@@ -28,13 +35,6 @@ extension CursorOwnershipTests {
         XCTAssertTrue(probes.isEmpty, "Invalid slugs must not reach artifact metadata: \(probes)")
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), 1)
         // Validation must surface even when an injected compiler owns no other artifacts.
-        let vm = PlatformViewModel(
-            fileService: mapped,
-            linkService: TestPaths.linkService(fileService: mapped),
-            cursorCompiler: AbsentCleanupCompiler(path: artifactPath(.cursor, project: project.path)),
-            agentDetection: DeployStubDetection(installed: [.cursor]),
-            deployStateStore: harness.state, skillsDirectory: TestPaths.skillsDir
-        )
         let injectedLibrary = deletionLibrary()
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: injectedLibrary, platformVM: vm,
             projects: [project], context: harness.context))
