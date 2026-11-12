@@ -1,0 +1,8 @@
+paths = Pensieve/Services/RemovedSkillCleanup.swift Pensieve/Services/RemovedDeploymentNoticeStore.swift Pensieve/ViewModels/RemovedDeploymentNotice.swift Pensieve/ViewModels/PlatformViewModel.swift Pensieve/Views/MainWindow/RemovedDeploymentAlert.swift Pensieve/Views/MainWindow/ContentView.swift Pensieve/AppRuntime+Construction.swift Pensieve.xcodeproj/project.pbxproj docs/SPEC.md docs/ARCHITECTURE.md .slipway/changelog/219.md PensieveTests/ServiceTests/RemovedDeploymentNoticeTests.swift PensieveTests/ServiceTests/RemovedDeploymentNoticeRestartTests.swift PensieveTests/ViewTests/RemovedDeploymentAlertTests.swift PensieveTests/ServiceTests/RemoteSkillRemovalTestSupport.swift
+risk = Pensieve/Services/RemovedSkillCleanup.swift Pensieve/Services/RemovedDeploymentNoticeStore.swift Pensieve/ViewModels/PlatformViewModel.swift
+check.told = tests PensieveTests/RemovedDeploymentNoticeTests
+check.kept = tests PensieveTests/RemovedDeploymentNoticeRestartTests
+check.shown = tests PensieveTests/RemovedDeploymentAlertTests
+mutation.told = .slipway/mutations/told.patch
+mutation.kept = .slipway/mutations/kept.patch
+mutation.shown = .slipway/mutations/shown.patch
