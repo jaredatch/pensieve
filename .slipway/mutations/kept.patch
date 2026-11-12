@@ -1,0 +1,10 @@
+--- a/Pensieve/Services/RemovedDeploymentNoticeStore.swift
++++ b/Pensieve/Services/RemovedDeploymentNoticeStore.swift
+@@ -48,6 +48,6 @@
+         encoder.keyEncodingStrategy = .convertToSnakeCase
+         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+         let data = try encoder.encode(State(entries: entries))
+-        try fileService.writeData(at: path, data: data)
++        _ = data
+     }
+ }

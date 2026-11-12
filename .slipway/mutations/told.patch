@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/RemovedSkillCleanup.swift
++++ b/Pensieve/Services/RemovedSkillCleanup.swift
+@@ -84,7 +84,7 @@
+         for (item, outcome) in zip(pending, removal.outcomes) {
+             let row = item.row
+             if outcome.removed, let project = item.project {
+-                let hasSharedIdentity = project.identityKey.map(ManifestService.isAdmittedProjectKey) == true
++                let hasSharedIdentity = true
+                 if !hasSharedIdentity {
+                     notice.add(RemovedDeploymentNoticeEntry(slug: item.candidate.key.slug,
+                         projectName: project.name, projectPath: project.path, platform: row.platform))

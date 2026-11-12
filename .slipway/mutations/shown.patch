@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/MainWindow/ContentView.swift
++++ b/Pensieve/Views/MainWindow/ContentView.swift
+@@ -240,7 +240,6 @@
+             Text(library.manifestSaves?.categoryNotice?.message ?? "")
+         }
+         .modifier(ManifestRepairAlerts(saves: library.manifestSaves))
+-        .modifier(RemovedDeploymentAlert(notice: platformVM.removedDeploymentNotice, blocked: removalNoticeBlocked))
+         .focusedSceneValue(\.addSkillFromGitHub, presentGitHubInstall)
+     }
+ }

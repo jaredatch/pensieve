@@ -240,10 +240,20 @@ struct ContentView: View {
             Text(library.manifestSaves?.categoryNotice?.message ?? "")
         }
         .modifier(ManifestRepairAlerts(saves: library.manifestSaves))
+        .modifier(RemovedDeploymentAlert(notice: platformVM.removedDeploymentNotice, blocked: removalNoticeBlocked))
         .focusedSceneValue(\.addSkillFromGitHub, presentGitHubInstall)
     }
 }
 private extension ContentView {
+    var removalNoticeBlocked: Bool {
+        let library = runtime.library, saves = library.manifestSaves
+        return !runtime.launchWorkCompleted || library.showCreateSheet || showImportWizard || showFolderImport
+            || showGitHubInstall || updatesVM.isPresented || showBulkDeploy || addSheet != nil || showConflictResolution
+            || folderImportNotice != nil || runtime.updateCheckAlertError != nil || library.deletionNotice != nil
+            || saves?.categoryNotice != nil || saves?.showsDamageAlert == true || saves?.showsRepairConfirmation == true
+            || saves?.repairError != nil
+    }
+
     /// Arrays keep the render-pass key cheap. The change handler builds sets only when inputs change.
     private struct EntityKeys: Equatable {
         let projectIDs: [UUID], categoryIDs: [UUID]

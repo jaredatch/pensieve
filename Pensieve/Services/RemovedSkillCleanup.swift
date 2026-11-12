@@ -14,6 +14,13 @@ struct RemovedSkillCleanup: RemovedSkillCleaning {
     let fileService: FileServiceProtocol
     let paths: DeployPaths
     let stateStore: DeployStateStore
+    let notice: RemovedDeploymentNotice
+
+    private struct Pending {
+        let row: DeployRecord
+        let candidate: DeployRemovalCandidate
+        let project: Project?
+    }
 
     func reconcile(context: ModelContext) -> BatchResult {
         var result = BatchResult()
@@ -25,7 +32,7 @@ struct RemovedSkillCleanup: RemovedSkillCleaning {
             let history = try context.fetch(FetchDescriptor<DeployRecord>()).filter { !liveIDs.contains($0.skillID) }
             let folders = ProjectFolderProbe(fileService: fileService)
             var settled: [DeployRecord] = []
-            var pending: [(DeployRecord, DeployRemovalCandidate)] = []
+            var pending: [Pending] = []
             for row in history {
                 do {
                     let project = row.projectID.flatMap { byID[$0] }
@@ -49,7 +56,8 @@ struct RemovedSkillCleanup: RemovedSkillCleaning {
                         continue
                     }
                     if let project { try folders.require(project.path) }
-                    pending.append((row, candidate(row: row, slug: slug, projectPath: project?.path)))
+                    pending.append(Pending(row: row,
+                        candidate: candidate(row: row, slug: slug, projectPath: project?.path), project: project))
                 } catch ProjectFolderError.missing {
                     // The persisted history row, rather than a waiting removal, keeps this work alive.
                     continue
@@ -67,13 +75,21 @@ struct RemovedSkillCleanup: RemovedSkillCleaning {
         return result
     }
 
-    private func settle(_ pending: [(DeployRecord, DeployRemovalCandidate)],
+    private func settle(_ pending: [Pending],
                         settled: inout [DeployRecord], result: inout BatchResult) {
         guard !pending.isEmpty else { return }
-        let removal = DeployRemovalService(stateStore: stateStore).remove(pending.map { $0.1 })
+        let removal = DeployRemovalService(stateStore: stateStore).remove(pending.map(\.candidate))
         result.didRemoveArtifacts = removal.didRemoveArtifacts
         if let error = removal.stateWriteFailure { result.recordReadFailure("removed skill deploy state", error: error) }
-        for ((row, _), outcome) in zip(pending, removal.outcomes) {
+        for (item, outcome) in zip(pending, removal.outcomes) {
+            let row = item.row
+            if outcome.removed, let project = item.project {
+                let hasSharedIdentity = project.identityKey.map(ManifestService.isAdmittedProjectKey) == true
+                if !hasSharedIdentity {
+                    notice.add(RemovedDeploymentNoticeEntry(slug: item.candidate.key.slug,
+                        projectName: project.name, projectPath: project.path, platform: row.platform))
+                }
+            }
             if let error = outcome.failure { result.recordReadFailure(row.targetPath, error: error) }
             // A failed derived-state write keeps the original evidence for a later pass, even if
             // unlinking already succeeded. An absent or foreign occupant otherwise settles it once.
