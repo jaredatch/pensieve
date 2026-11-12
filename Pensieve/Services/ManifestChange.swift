@@ -12,7 +12,7 @@ enum ManifestChange {
     case deleteSkill(String)
     case retireSkill(String)
     case retireLocalSkill(String, String)
-    case renameSkill(String, String)
+    case renameSkill(String, String, details: ManifestSkillRename? = nil)
 
     var isDeletion: Bool {
         switch self {
@@ -22,20 +22,21 @@ enum ManifestChange {
     }
 
     /// Validate before durable publication and before projecting pending edits into the window.
-    /// A conflicting pending rename is refused and undone before its projection is accepted.
+    /// A conflicting skill rename is skipped in projections and refused on its own save turn.
     func validate(in snapshot: ManifestSnapshot) throws {
         if case .createSkill(let local) = self,
            let durable = snapshot.skills.first(where: { $0.slug == local.slug }),
            !ManifestService.sameCreation(local, durable) {
             throw ManifestSaveError.createCollision(local.slug)
         }
-        if case .renameSkill(let old, let new) = self {
+        if case .renameSkill(let old, let new, let details) = self {
             guard SkillStore.isPathSafeSlug(new), ManifestService.isAdmittedIntentComponent(new) else {
                 throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
             }
             if snapshot.skills.contains(where: { $0.slug == old }),
-               snapshot.skills.contains(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }) {
-                throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
+               let target = snapshot.skills.first(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }),
+               details?.matchesLeftover(target) != true {
+                throw ManifestSaveError.renameTaken(new)
             }
             return
         }
@@ -87,8 +88,8 @@ enum ManifestChange {
             let count = snapshot.skills.count
             snapshot.skills.removeAll { $0.slug == slug }
             return snapshot.skills.count != count
-        case .renameSkill(let old, let new):
-            return renameSkill(old, to: new, in: &snapshot)
+        case .renameSkill(let old, let new, let details):
+            return renameSkill(old, to: new, details: details, in: &snapshot)
         case .retireLocalSkill(let slug, let machine):
             snapshot.deployIntents.removeAll { $0.skillSlug == slug && $0.machineID == machine }
         case .retireSkill(let slug):
@@ -99,11 +100,25 @@ enum ManifestChange {
         return true
     }
 
-    private func renameSkill(_ old: String, to new: String, in snapshot: inout ManifestSnapshot) -> Bool {
-        guard let index = snapshot.skills.firstIndex(where: { $0.slug == old }) else {
-            return snapshot.skills.contains { $0.slug == new }
+    private func renameSkill(_ old: String, to new: String, details: ManifestSkillRename?,
+                             in snapshot: inout ManifestSnapshot) -> Bool {
+        let hasOld = snapshot.skills.contains { $0.slug == old }
+        let target = snapshot.skills.first { $0.slug != old && $0.slug.lowercased() == new.lowercased() }
+        if !hasOld {
+            // A scan after the folder move may have put the leftover overlay on our row.
+            // A whole-row write of our own creation, however, has already completed the rename.
+            guard let target, let details, details.matchesLeftover(target) else {
+                return snapshot.skills.contains { $0.slug == new }
+            }
+            clearRenameTarget(new, in: &snapshot)
+            var renamed = details.original
+            renamed.slug = new
+            snapshot.skills.append(renamed)
+        } else {
+            if details?.takesLeftovers == true { clearRenameTarget(new, in: &snapshot) }
+            guard let index = snapshot.skills.firstIndex(where: { $0.slug == old }) else { return false }
+            snapshot.skills[index].slug = new
         }
-        snapshot.skills[index].slug = new
         for index in snapshot.deployIntents.indices where snapshot.deployIntents[index].skillSlug == old {
             snapshot.deployIntents[index].skillSlug = new
         }
@@ -111,6 +126,15 @@ enum ManifestChange {
             snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map { $0 == old ? new : $0 }
         }
         return true
+    }
+
+    private func clearRenameTarget(_ slug: String, in snapshot: inout ManifestSnapshot) {
+        let folded = slug.lowercased()
+        snapshot.skills.removeAll { $0.slug.lowercased() == folded }
+        snapshot.deployIntents.removeAll { $0.skillSlug.lowercased() == folded }
+        for index in snapshot.categories.indices {
+            snapshot.categories[index].skillSlugs.removeAll { $0.lowercased() == folded }
+        }
     }
 
     private func updateMetadata(_ slug: String, tags: [String]?, scope: SkillScope?,

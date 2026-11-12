@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/SkillRenameFlow.swift
++++ b/Pensieve/ViewModels/SkillRenameFlow.swift
+@@ -199,7 +199,7 @@
+         skill.updatedAt = Date()
+         guard oldSlug != newSlug else { return }
+         skill.directoryName = newSlug
+-        if renameDetails?.takesLeftovers == true {
++        if renameDetails?.takesLeftovers == false {
+             for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>())
+                 where intent.skillSlug.lowercased() == newSlug.lowercased() { context.delete(intent) }
+             for category in try context.fetch(FetchDescriptor<Category>()) {

@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel.swift
+@@ -226,7 +226,7 @@
+             }
+             do { try pending.change.validate(in: snapshot) } catch {
+                 // Its own turn reports a taken skill name once; an earlier save still publishes.
+-                if case ManifestSaveError.renameTaken = error { continue }
++                // Let a pending rename refusal propagate into the earlier save.
+                 guard pending.categoryEdit != nil else { throw error }
+                 // Reject before accepting two same-named records, which would make name-based
+                 // rebuild matching associate our UUID with the peer's rule. This head's snapshot

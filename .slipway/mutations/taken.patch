@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -35,7 +35,7 @@
+             }
+             if snapshot.skills.contains(where: { $0.slug == old }),
+                let target = snapshot.skills.first(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }),
+-               details?.matchesLeftover(target) != true {
++               details?.takesLeftovers != true {
+                 throw ManifestSaveError.renameTaken(new)
+             }
+             return

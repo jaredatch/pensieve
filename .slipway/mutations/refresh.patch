@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -111,7 +111,7 @@
+                 return snapshot.skills.contains { $0.slug == new }
+             }
+             clearRenameTarget(new, in: &snapshot)
+-            var renamed = details.original
++            var renamed = target
+             renamed.slug = new
+             snapshot.skills.append(renamed)
+         } else {

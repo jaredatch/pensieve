@@ -290,9 +290,10 @@ enum ManifestSaveError: LocalizedError {
     case rebuildFailed(String, manifestSaved: Bool)
     case unsavedTarget
     case createCollision(String)
+    case renameTaken(String)
     var showsDirectly: Bool {
         switch self {
-        case .rebuildFailed, .createCollision: true
+        case .rebuildFailed, .createCollision, .renameTaken: true
         case .unsavedTarget: false
         }
     }
@@ -302,6 +303,8 @@ enum ManifestSaveError: LocalizedError {
             (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
                 : "Rebuilding the local store failed: ") + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
+        case .renameTaken(let slug):
+            "The name “\(slug)” is taken by a skill on another Mac, so this rename wasn't saved to the synced library."
         case .createCollision(let slug):
             "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope; "
                 + "they aren't saved until you do."
