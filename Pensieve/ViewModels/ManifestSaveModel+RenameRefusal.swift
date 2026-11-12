@@ -31,12 +31,14 @@ extension ManifestSaveModel {
         }
     }
 
-    func keepPendingRenameLocal(_ item: Item, in snapshot: inout ManifestSnapshot) {
+    @discardableResult
+    func keepPendingRenameLocal(_ item: Item, in snapshot: inout ManifestSnapshot) -> Bool {
         guard case .renameSkill(_, let new, let details) = item.change, let details,
               let local = try? item.fallback().skills.first(where: { $0.slug == new }),
-              ManifestService.sameCreation(local, details.original) else { return }
+              ManifestService.sameCreation(local, details.original) else { return false }
         snapshot.skills.removeAll { $0.slug == new }
         snapshot.skills.append(local)
+        return true
     }
 
     private func errorMessage(_ error: Error, new: String) -> String {
@@ -50,11 +52,14 @@ extension ManifestSaveModel {
         for index in items.indices where items[index].order > item.order && items[index].presentation.context === context {
             items[index].change = items[index].change.retargetingSkill(from: old, to: new)
             items[index].categoryEdit?.retargetSkill(from: old, to: new)
+            items[index].presentation.retargetSkill(from: old, to: new)
             ids.insert(items[index].id)
         }
         StoreIngestState.shared(for: context.container).retargetSkill(from: old, to: new, ids: ids)
-        for edit in refused + items.map(\.presentation) where edit.context === context {
-            edit.retargetSkill(from: old, to: new)
+        // Older held edits keep their owed targets. Only their cached window observed
+        // the forward rename, so reverse that observation without changing original or fields.
+        for edit in refused where edit.context === context {
+            edit.observe(.renameSkill(old, new))
         }
     }
 }

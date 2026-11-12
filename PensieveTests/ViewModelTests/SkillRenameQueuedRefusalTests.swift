@@ -32,4 +32,28 @@ final class SkillRenameQueuedRefusalTests: XCTestCase {
         XCTAssertEqual(try h.files.readData(at: h.root + "/manifest/skills/zulu.yaml"), peerBytes)
         XCTAssertEqual(h.saves.pendingCount, 0)
     }
+
+    func testMoveBackDoesNotRetargetARetirementAlreadyHeldUnderTheTakenName() async throws {
+        let h = try SkillRenameTakeoverFixture(record: false, leftovers: false)
+        defer { h.cleanup() }
+        // An earlier deletion can still owe its retirement after its folder has gone.
+        let retirement = ManifestRefusedEdit(.retireSkill("zulu"), context: h.context, order: -1)
+        retirement.cache(local: try h.manifest.snapshot(from: h.context))
+        retirement.retain()
+        h.saves.refused.append(retirement)
+        XCTAssertTrue(h.rename())
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { held.release() }
+        try h.arrivePeer()
+        held.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.library.error, h.takenMessage())
+        XCTAssertEqual(h.skill.directoryName, "alpha")
+        let owed = try XCTUnwrap(h.saves.refused.first { $0.id == retirement.id })
+        let record = try XCTUnwrap(owed.retirementRecord())
+        XCTAssertEqual(record.slug, "zulu", "A move back must never aim an older retirement at this Mac's skill")
+        XCTAssertFalse(try XCTUnwrap(record.fields).intents.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(record.fields).intents.allSatisfy { $0.skillSlug == "zulu" })
+    }
+
 }

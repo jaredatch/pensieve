@@ -90,6 +90,13 @@ final class SkillRenameMoveBackTests: XCTestCase {
         let held = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
         defer { held.release() }
         try h.arrivePeer(removingOld: true)
+        var pulled = try h.manifest.read(fromRoot: h.root)
+        let otherIndex = try XCTUnwrap(pulled.skills.firstIndex { $0.slug == "other" })
+        pulled.skills[otherIndex].tags = ["pulled"]
+        pulled.skills[otherIndex].scope = .project
+        pulled.categories.removeAll { $0.name == "Own" }
+        pulled.categories.append(CategoryRecord(name: "Remote", projectKeys: [], skillSlugs: ["other"]))
+        try h.manifest.write(pulled, toRoot: h.root)
         try h.moveHead()
         let peer = try h.files.readData(at: h.root + "/manifest/skills/zulu.yaml")
         held.release()
@@ -101,6 +108,19 @@ final class SkillRenameMoveBackTests: XCTestCase {
         XCTAssertEqual(h.skill.tags, ["own"])
         XCTAssertEqual(h.skill.scope, .project)
         XCTAssertEqual(try h.files.readData(at: h.root + "/manifest/skills/zulu.yaml"), peer)
+        XCTAssertEqual(h.other.tags, ["pulled"])
+        XCTAssertEqual(h.other.scope, .project)
+        // Use sync's rebuild admission and publication boundary. An unapplied HEAD must not
+        // let this window overwrite pulled skills or resurrect a removed category.
+        try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(fileService: h.files),
+            root: h.root, context: h.context, files: h.files)
+        let publication = try StoreIngestState.snapshotForPublication(using: h.manifest, context: h.context, root: h.root)
+        try h.manifest.write(publication, toRoot: h.root)
+        let afterSync = try h.manifest.read(fromRoot: h.root)
+        XCTAssertEqual(afterSync.skills.first { $0.slug == "other" }?.tags, ["pulled"])
+        XCTAssertEqual(afterSync.skills.first { $0.slug == "other" }?.scope, .project)
+        XCTAssertEqual(afterSync.categories.first { $0.name == "Remote" }?.skillSlugs, ["other"])
+        XCTAssertFalse(afterSync.categories.contains { $0.name == "Own" })
     }
 
     func testASkillWhoseRenameIsStillSavingCantBeRenamedOrDeleted() async throws {

@@ -275,9 +275,14 @@ extension ManifestSaveModel {
                     item.change.apply(to: &displayed)
                 }
             } catch {
-                if case ManifestSaveError.renameTaken = error { return .refused(error) }
-                // Restore identity before name-based acceptance; report and reconcile afterwards.
-                stageCategoryRefusal(item, durable: snapshot, error: error)
+                if case ManifestSaveError.renameTaken = error {
+                    // Accept the pulled library while keeping this Mac's overlay on its row.
+                    // The caller may record this HEAD only after item.accept has applied it.
+                    guard keepPendingRenameLocal(item, in: &displayed) else { throw error }
+                } else {
+                    // Restore identity before name-based acceptance; report and reconcile afterwards.
+                    stageCategoryRefusal(item, durable: snapshot, error: error)
+                }
                 verdict = .refused(error)
             }
         }
