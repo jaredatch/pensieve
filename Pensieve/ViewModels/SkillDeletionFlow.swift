@@ -57,10 +57,23 @@ enum SkillDeletionFlow {
             return false
         }
 
+        let deletedID = skill.id, deletedSlug = skill.directoryName, deletedCreation = skill.createdAt
         let outcome = library.deleteSkillEntry(skill, context: context, presentation: presentation, persist: persist)
         deletionOutcome = outcome
+        recheckDeletion(outcome, id: deletedID, slug: deletedSlug, createdAt: deletedCreation, library: library, context: context)
         let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, presentation: presentation)
+    }
+
+    private static func recheckDeletion(_ outcome: SkillLibraryViewModel.SkillDeletionResult, id: UUID, slug: String,
+                                        createdAt: Date, library: SkillLibraryViewModel, context: ModelContext) {
+        switch outcome {
+        case .deleted, .directoryDeletedRowRetained:
+            library.manifestSaves?.recheckRemovedSkillDeletion(slug, createdAt: createdAt, context: context) { [weak library] in
+                library?.liftReturnedSkillQuarantine(id: id, slug: slug)
+            }
+        case .retainedDirectoryDeleteFailed: break
+        }
     }
 
     private static func canDelete(_ skill: Skill, library: SkillLibraryViewModel,

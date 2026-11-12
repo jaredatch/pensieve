@@ -2,6 +2,11 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
+    struct RemovedSkillDeletion {
+        let createdAt: String
+        let didCancel: () -> Void
+    }
+
     struct RestoredDeletion {
         let slug: String
         let machineID: String?
@@ -125,19 +130,64 @@ extension ManifestSaveModel {
         return true
     }
 
-    /// The save worker holds sync.lock here, after any helper pull has finished and before
-    /// any edit reaches a scan, row acceptance or publication. Cancel each restored pair together.
-    func discardReappearedQueuedDeletions() {
-        let reappeared = items.compactMap(\.restoredDeletion).filter {
-            $0.machineID == nil && retirementFolderMayExist($0.slug)
+    /// The deletion flow calls this synchronously after removing files, before the worker's first turn.
+    /// A kept skill's retirement must still publish, even though its folder is present.
+    func recheckRemovedSkillDeletion(_ slug: String, createdAt: Date, context: ModelContext,
+                                     onCancellation: @escaping () -> Void) {
+        guard !hasCollision(slug, context: context), let index = items.lastIndex(where: {
+            guard case .retireSkill(let target) = $0.change else { return false }
+            return target == slug && $0.presentation.context === context
+        }) else { return }
+        let deletion = RemovedSkillDeletion(createdAt: RefusedCreateRecords.writtenDate(createdAt), didCancel: onCancellation)
+        for target in items.indices.dropFirst(index) where items[target].presentation.context === context {
+            switch items[target].change {
+            case .retireSkill(let name), .deleteSkill(let name):
+                if name == slug { items[target].removedSkillDeletion = deletion }
+            default: break
+            }
         }
-        guard !reappeared.isEmpty else { return }
-        let slugs = Set(reappeared.map(\.slug))
-        let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
+    }
+
+    private func checkedDeletionSlug(_ item: Item) -> String? {
+        if let restored = item.restoredDeletion { return restored.machineID == nil ? restored.slug : nil }
+        switch item.change {
+        case .retireSkill(let slug) where item.removedSkillDeletion != nil: return slug
+        case .deleteSkill(let slug) where !hasCollision(slug, context: item.presentation.context): return slug
+        default: return nil
+        }
+    }
+
+    /// A local create or rename can reuse the freed folder before either deletion edit saves. It owns
+    /// that return only while disk still names the deleted creation (or no creation at all).
+    private func hasQueuedLocalReplacement(for item: Item, slug: String, durable: ManifestSnapshot?) -> Bool {
+        guard let deletion = item.removedSkillDeletion, let durable,
+              items.contains(where: { candidate in
+                  guard candidate.order > item.order, candidate.presentation.context === item.presentation.context,
+                        !candidate.wasCancelled else { return false }
+                  switch candidate.change {
+                  case .createSkill(let skill): return skill.slug == slug
+                  case .renameSkill(_, let target): return target == slug
+                  default: return false
+                  }
+              }) else { return false }
+        guard let disk = durable.skills.first(where: { $0.slug == slug }) else { return true }
+        return RefusedCreateRecords.writtenDate(disk.createdAt) == deletion.createdAt
+    }
+
+    /// The save worker holds sync.lock here, after any helper pull has finished and before
+    /// any edit reaches a scan, row acceptance or publication. Cancel each eligible pair together.
+    func discardReappearedQueuedDeletions(durable: ManifestSnapshot?) {
+        let reappeared = items.filter { item in
+            guard let slug = checkedDeletionSlug(item) else { return false }
+            return !hasQueuedLocalReplacement(for: item, slug: slug, durable: durable) && retirementFolderMayExist(slug)
+        }
+        let slugs = Set(reappeared.compactMap { checkedDeletionSlug($0) })
+        guard !slugs.isEmpty else { return }
+        let projectionIDs = Set(items.compactMap(\.restoredDeletion)
+            .filter { $0.machineID == nil && slugs.contains($0.slug) }.flatMap(\.projectionIDs))
         refused.removeAll { projectionIDs.contains($0.id) }
         for index in items.indices {
-            guard let deletion = items[index].restoredDeletion,
-                  deletion.machineID == nil, slugs.contains(deletion.slug) else { continue }
+            guard reappeared.contains(where: { $0.id == items[index].id }) else { continue }
             items[index].wasCancelled = true
             let state = StoreIngestState.shared(for: items[index].presentation.context.container)
             state.finish(items[index].id)

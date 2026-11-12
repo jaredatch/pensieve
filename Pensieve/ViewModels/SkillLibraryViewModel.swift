@@ -6,12 +6,11 @@ import SwiftUI
 final class SkillLibraryViewModel {
     enum SkillDeletionResult: Equatable {
         case deleted
-        /// `skillStore.deleteSkill` threw; the directory and the row are both still there. The pending
-        /// edit was already cancelled.
+        /// The directory couldn't be removed; keep the row and publish its retirement.
         case retainedDirectoryDeleteFailed(String)
         /// The directory is gone but the row save threw: the context was rolled back and the row is quarantined in
         /// `pendingRowCleanup` (no write path recreates its files; the detail column shows a placeholder) until a
-        /// retry from the list or the launch rebuild drops it. Never left as a pending unsaved deletion.
+        /// retry, a returned readable skill or the launch rebuild resolves it. Never left as an unsaved deletion.
         case directoryDeletedRowRetained(String)
     }
 
@@ -190,7 +189,6 @@ final class SkillLibraryViewModel {
             return nil
         }
     }
-
 }
 
 extension SkillLibraryViewModel {
@@ -283,7 +281,6 @@ extension SkillLibraryViewModel {
         }
         return .deleted
     }
-
 }
 
 extension SkillLibraryViewModel {
@@ -318,6 +315,10 @@ extension SkillLibraryViewModel {
     /// C7-safe presence: true only when the slug's SKILL.md is a readable regular file.
     func hasReadableSkillFile(_ directoryName: String) -> Bool {
         (try? skillStore.readBody(directoryName: directoryName)) != nil
+    }
+
+    func liftReturnedSkillQuarantine(id: UUID, slug: String) {
+        if hasReadableSkillFile(slug) { pendingRowCleanup.remove(id) }
     }
 
     /// Recompute the quarantine from disk with the C7-safe probe. A fetch that throws flips
@@ -396,5 +397,4 @@ extension SkillLibraryViewModel {
             self.appWriteRevision &+= 1
         }
     }
-
 }

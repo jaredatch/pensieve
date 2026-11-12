@@ -54,6 +54,7 @@ final class ManifestSaveModel {
         var wasHealed = false
         var wasCancelled = false
         var restoredDeletion: RestoredDeletion?
+        var removedSkillDeletion: RemovedSkillDeletion?
         let change: ManifestChange
         let intentMove: ManifestLocalIntentMove?
         let categoryEdit: CategorySaveEdit?
@@ -144,9 +145,9 @@ final class ManifestSaveModel {
         var needsDamageRefresh = false
         do {
             heldLock = try await takeLock()
-            discardReappearedQueuedDeletions()
-            item = items.first { $0.id == item.id } ?? item
             let read = try await readCurrentManifest()
+            discardReappearedQueuedDeletions(durable: read.disk)
+            item = items.first { $0.id == item.id } ?? item
             let result = try await saveWithStableHead(item, disk: &disk, first: read)
             outcome = .finished(result.published)
             report = { item.report(result.error) }
