@@ -54,6 +54,7 @@ final class ManifestSaveModel {
         var wasHealed = false
         var wasCancelled = false
         var restoredDeletion: RestoredDeletion?
+        var cancelledRemovedSkillDeletion: (() -> Void)?
         let change: ManifestChange
         let intentMove: ManifestLocalIntentMove?
         let categoryEdit: CategorySaveEdit?

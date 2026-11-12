@@ -240,7 +240,7 @@ Restore ignores global deletion reminders whose folders remain; refused retireme
 
 After the launch job's verdict, launch checks the global deletion folders again. If one has appeared, launch drops that reminder and its projections, then rebuilds the rows from disk before completing. The queue replays the remaining edits to publish the manifest cleanup.
 
-Immediately after the worker acquires `sync.lock`, it checks global deletion folders again. A folder arriving during a helper pull cancels the queued retirement and deletion together, removes their restored projections, and rebuilds the rows from the durable manifest without publishing those cancelled edits. Publication acknowledges the restored projections and clears the reminders.
+Immediately after the worker acquires `sync.lock`, it checks queued global deletions against their folders, including deletions made during the current session. A retirement gets this check only after its deletion removed the files; a kept skill's retirement still publishes. Collision-held overlay deletions keep their existing peer protection and finish normally. A returned folder cancels eligible retirement and deletion edits together, removes any restored projections and clears their reminders. The queue rebuilds the rows from the durable manifest without publishing the cancelled edits. For a retained row, it probes that skill's `SKILL.md` again and lifts its quarantine only if the file is readable and regular.
 
 Preserved slugs register before the rebuild and remain until a readable launch probe finds their overlays gone. Restore adds no window notice; the next refused edit shows the rename message.
 

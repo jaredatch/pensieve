@@ -1,0 +1,13 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Records.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Records.swift
+@@ -138,8 +138,4 @@
+     private func checkedDeletionSlug(_ item: Item) -> String? {
+-        if let restored = item.restoredDeletion { return restored.machineID == nil ? restored.slug : nil }
+-        switch item.change {
+-        case .retireSkill(let slug) where item.cancelledRemovedSkillDeletion != nil: return slug
+-        case .deleteSkill(let slug) where !hasCollision(slug, context: item.presentation.context): return slug
+-        default: return nil
+-        }
++        guard let restored = item.restoredDeletion else { return nil }
++        return restored.machineID == nil ? restored.slug : nil
+     }

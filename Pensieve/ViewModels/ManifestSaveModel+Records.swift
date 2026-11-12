@@ -125,19 +125,35 @@ extension ManifestSaveModel {
         return true
     }
 
-    /// The save worker holds sync.lock here, after any helper pull has finished and before
-    /// any edit reaches a scan, row acceptance or publication. Cancel each restored pair together.
-    func discardReappearedQueuedDeletions() {
-        let reappeared = items.compactMap(\.restoredDeletion).filter {
-            $0.machineID == nil && retirementFolderMayExist($0.slug)
+    /// The deletion flow calls this synchronously after removing files, before the worker's first turn.
+    /// A kept skill's retirement must still publish, even though its folder is present.
+    func recheckRemovedSkillDeletion(_ slug: String, context: ModelContext, onCancellation: @escaping () -> Void) {
+        guard let index = items.lastIndex(where: {
+            guard case .retireSkill(let target) = $0.change else { return false }
+            return target == slug && $0.presentation.context === context
+        }) else { return }
+        items[index].cancelledRemovedSkillDeletion = onCancellation
+    }
+
+    private func checkedDeletionSlug(_ item: Item) -> String? {
+        if let restored = item.restoredDeletion { return restored.machineID == nil ? restored.slug : nil }
+        switch item.change {
+        case .retireSkill(let slug) where item.cancelledRemovedSkillDeletion != nil: return slug
+        case .deleteSkill(let slug) where !hasCollision(slug, context: item.presentation.context): return slug
+        default: return nil
         }
-        guard !reappeared.isEmpty else { return }
-        let slugs = Set(reappeared.map(\.slug))
-        let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
+    }
+
+    /// The save worker holds sync.lock here, after any helper pull has finished and before
+    /// any edit reaches a scan, row acceptance or publication. Cancel each eligible pair together.
+    func discardReappearedQueuedDeletions() {
+        let slugs = Set(items.compactMap { checkedDeletionSlug($0) }.filter { retirementFolderMayExist($0) })
+        guard !slugs.isEmpty else { return }
+        let projectionIDs = Set(items.compactMap(\.restoredDeletion)
+            .filter { $0.machineID == nil && slugs.contains($0.slug) }.flatMap(\.projectionIDs))
         refused.removeAll { projectionIDs.contains($0.id) }
         for index in items.indices {
-            guard let deletion = items[index].restoredDeletion,
-                  deletion.machineID == nil, slugs.contains(deletion.slug) else { continue }
+            guard let slug = checkedDeletionSlug(items[index]), slugs.contains(slug) else { continue }
             items[index].wasCancelled = true
             let state = StoreIngestState.shared(for: items[index].presentation.context.container)
             state.finish(items[index].id)
