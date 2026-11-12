@@ -33,9 +33,8 @@ enum ManifestChange {
             guard SkillStore.isPathSafeSlug(new), ManifestService.isAdmittedIntentComponent(new) else {
                 throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
             }
-            if snapshot.skills.contains(where: { $0.slug == old }),
-               let target = snapshot.skills.first(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }),
-               details?.matchesLeftover(target) != true {
+            if let target = snapshot.skills.first(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }),
+               renameTargetIsTaken(target, old: old, details: details, in: snapshot) {
                 throw ManifestSaveError.renameTaken(new)
             }
             return
@@ -107,9 +106,10 @@ enum ManifestChange {
         if !hasOld {
             // A scan after the folder move may have put the leftover overlay on our row.
             // A whole-row write of our own creation, however, has already completed the rename.
-            guard let target, let details, details.matchesLeftover(target) else {
-                return snapshot.skills.contains { $0.slug == new }
-            }
+            guard let target else { return false }
+            guard let details else { return snapshot.skills.contains { $0.slug == new } }
+            if ManifestService.sameCreation(details.original, target) { return true }
+            guard details.matchesLeftover(target) else { return false }
             clearRenameTarget(new, in: &snapshot)
             var renamed = details.original
             renamed.slug = new

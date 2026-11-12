@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift
+@@ -48,7 +48,7 @@
+         let context = item.presentation.context
+         var ids: Set<UUID> = []
+         for index in items.indices where items[index].order > item.order && items[index].presentation.context === context {
+-            items[index].change = items[index].change.retargetingSkill(from: old, to: new)
++            // Regression: leave the queued publication aimed at the peer slug.
+             items[index].categoryEdit?.retargetSkill(from: old, to: new)
+             ids.insert(items[index].id)
+         }

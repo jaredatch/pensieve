@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel.swift
+@@ -150,7 +150,7 @@
+                 outcome = .paused
+                 needsDamageRefresh = true
+             } else if case ManifestSaveError.renameTaken = error {
+-                let failure = restoreRefusedRename(item, durable: disk, error: error)
++                let failure = error
+                 report = { item.report(failure) }
+             } else if item.categoryEdit != nil {
+                 stageCategoryRefusal(item, durable: disk, error: error)

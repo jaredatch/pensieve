@@ -1,0 +1,22 @@
+--- a/Pensieve/Services/ManifestSkillRename.swift
++++ b/Pensieve/Services/ManifestSkillRename.swift
+@@ -22,7 +22,7 @@
+         if details?.matchesLeftover(target) == true { return false }
+         if snapshot.skills.contains(where: { $0.slug == old }) { return true }
+         guard let details else { return false }
+-        return !ManifestService.sameCreation(details.original, target)
++        return false
+     }
+ 
+     /// Follow the local skill when a refused rename restores its previous folder.
+--- a/Pensieve/Services/ManifestChange.swift
++++ b/Pensieve/Services/ManifestChange.swift
+@@ -109,7 +109,7 @@
+             guard let target else { return false }
+             guard let details else { return snapshot.skills.contains { $0.slug == new } }
+             if ManifestService.sameCreation(details.original, target) { return true }
+-            guard details.matchesLeftover(target) else { return false }
++            guard details.matchesLeftover(target) else { return snapshot.skills.contains { $0.slug == new } }
+             clearRenameTarget(new, in: &snapshot)
+             var renamed = details.original
+             renamed.slug = new

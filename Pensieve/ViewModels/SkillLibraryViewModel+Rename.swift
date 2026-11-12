@@ -50,7 +50,8 @@ extension SkillLibraryViewModel {
     }
 
     /// Record both sides of a folder move as app writes before any queued watcher callback runs.
-    func acceptRename(from old: String, to new: String, document: String) {
+    func acceptRename(from old: String, to new: String, document: String, carryingDraft: Bool = false) {
+        let carried = carryingDraft ? drafts[old] : nil
         withFingerprintLock {
             if old != new {
                 lastWrittenBody[old] = ""
@@ -70,6 +71,11 @@ extension SkillLibraryViewModel {
             textEditRevisions[slug] = nil
             externalChangeQuestions[slug] = nil
             drafts[slug] = nil
+        }
+        if var draft = carried {
+            draft.body = (try? SkillRenameUndo.restoringName(in: draft.body, to: draft.skill.name)) ?? draft.body
+            draft.baseline = draft.baseline.flatMap { try? SkillRenameUndo.restoringName(in: $0, to: draft.skill.name) }
+            drafts[new] = draft
         }
         publishAppWriteRevision()
     }

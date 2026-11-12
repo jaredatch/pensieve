@@ -101,6 +101,23 @@ final class SkillRenameTakeoverFixture {
             projects: projects, context: context, persist: persist)
     }
 
+    func arrivePeer(removingOld: Bool = false) throws {
+        var disk = try manifest.read(fromRoot: root)
+        disk.skills.removeAll { $0.slug == "zulu" || (removingOld && $0.slug == "alpha") }
+        var arrived = leftover
+        arrived.createdAt = Date(timeIntervalSince1970: 1_650_000_000)
+        disk.skills.append(arrived)
+        if let index = disk.categories.firstIndex(where: { $0.name == "Gone" }) {
+            disk.categories[index].skillSlugs = ["zulu"]
+        }
+        disk.deployIntents.removeAll { $0.skillSlug == "zulu" }
+        disk.deployIntents += [local, peer].map {
+            DeployIntentRecord(machineID: $0, skillSlug: "zulu", platformRaw: PlatformTarget.claudeCode.rawValue,
+                projectKey: "github.com/owner/gone")
+        }
+        try manifest.write(disk, toRoot: root)
+    }
+
     func moveHead() throws {
         let root = root
         try NativeTestWork.run {

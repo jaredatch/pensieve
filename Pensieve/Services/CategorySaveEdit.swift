@@ -6,10 +6,22 @@ import SwiftData
 struct CategorySaveEdit {
     let id: UUID
     let createdAt: Date
-    let before: CategoryRecord?
-    let after: CategoryRecord?
-    let change: ManifestChange
+    private(set) var before: CategoryRecord?
+    private(set) var after: CategoryRecord?
+    private(set) var change: ManifestChange
     private let window: CategorySaveWindow
+
+    mutating func retargetSkill(from old: String, to new: String) {
+        change = change.retargetingSkill(from: old, to: new)
+        if var record = before {
+            record.skillSlugs = record.skillSlugs.map { $0 == old ? new : $0 }
+            before = record
+        }
+        if var record = after {
+            record.skillSlugs = record.skillSlugs.map { $0 == old ? new : $0 }
+            after = record
+        }
+    }
 
     var wasRebuilt: Bool { window.wasRebuilt }
     var windowID: UUID { window.id }

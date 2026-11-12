@@ -26,7 +26,7 @@ final class ManifestRefusedEdit {
     }
     let context: ModelContext
     private let order: Int
-    private let original: ManifestChange
+    private var original: ManifestChange
     private(set) var collision: SkillOverlay?
     private var collisionProbePending = false
     var isCollisionHeld: Bool { collision != nil || collisionProbePending }
@@ -115,6 +115,23 @@ final class ManifestRefusedEdit {
 
     func cache(local: ManifestSnapshot?) {
         if let local { cachedLocal = local }
+        updateRegistration()
+    }
+
+    func retargetSkill(from old: String, to new: String) {
+        original = original.retargetingSkill(from: old, to: new)
+        fields = fields?.map { field in
+            switch field {
+            case .change(let change): return .change(change.retargetingSkill(from: old, to: new))
+            case .intent(var intent):
+                if intent.skillSlug == old { intent.skillSlug = new }
+                return .intent(intent)
+            }
+        }
+        if var local = cachedLocal {
+            ManifestChange.renameSkill(old, new).apply(to: &local)
+            cachedLocal = local
+        }
         updateRegistration()
     }
 

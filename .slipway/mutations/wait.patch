@@ -1,0 +1,24 @@
+--- a/Pensieve/ViewModels/SkillRenameFlow.swift
++++ b/Pensieve/ViewModels/SkillRenameFlow.swift
+@@ -12,10 +12,6 @@
+         if name == skill.name && SkillStore.slugify(name) == skill.directoryName.lowercased() { return true }
+         guard !library.addsFenced, !library.isWriteFenced(skill) else {
+             library.error = library.addFenceReason ?? "This skill's file can't be read. Relaunch and try again."
+-            return false
+-        }
+-        guard library.manifestSaves?.hasPendingRename(skill.directoryName, context: context) != true else {
+-            library.error = "Pensieve is still saving this skill's rename. Try again in a moment."
+             return false
+         }
+         guard !library.hasUnsavedChanges(for: skill) else {
+--- a/Pensieve/ViewModels/SkillDeletionFlow.swift
++++ b/Pensieve/ViewModels/SkillDeletionFlow.swift
+@@ -87,7 +87,7 @@
+             guard item.presentation.context === skill.modelContext else { return false }
+             switch item.change {
+             case .createSkill(let overlay): return overlay.slug == skill.directoryName
+-            case .renameSkill(_, let new, _): return new == skill.directoryName
++            case .renameSkill: return false
+             default: return false
+             }
+         }) != true else {
