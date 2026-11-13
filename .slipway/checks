@@ -1,0 +1,6 @@
+paths = Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel.swift PensieveTests/ViewModelTests/SkillRenameWindowReadFailureTests.swift PensieveTests/Fixtures/SkillRenameTakeoverFixture.swift docs/ARCHITECTURE.md Pensieve.xcodeproj/project.pbxproj
+risk = Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift Pensieve/ViewModels/ManifestSaveModel+Ingest.swift Pensieve/ViewModels/ManifestSaveModel.swift
+check.ownturn = tests PensieveTests/SkillRenameWindowReadFailureTests/testARefusedRenameMovesBackWhenTheQueuesWindowReadFails
+check.earlier = tests PensieveTests/SkillRenameWindowReadFailureTests/testAnEarlierSaveKeepsThisMacsRecordWhenTheQueuesWindowReadFails
+mutation.ownturn = .slipway/mutations/ownturn.patch
+mutation.earlier = .slipway/mutations/earlier.patch
