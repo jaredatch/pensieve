@@ -1,0 +1,9 @@
+paths = Pensieve/Views/MainWindow/DetailView.swift Pensieve/Views/MainWindow/SkillListView.swift Pensieve/Views/MainWindow/ContentView.swift Pensieve/Views/ImportViews/ImportWizardView.swift Pensieve/Views/ImportViews/FolderImportPresentation.swift Pensieve/Views/CategoryViews/CategoryDetailView.swift Pensieve/Views/SettingsViews/PlatformSettingsView.swift PensieveTests/ViewTests/ PensieveTests/Fixtures/ docs/GLOSSARY.md CHANGELOG.md
+check.alert = tests PensieveTests/DetectedAgentMentionTests/testDeleteAlertNamesCursorOnlyWhenCursorIsDetected
+check.import = tests PensieveTests/DetectedAgentMentionTests/testImportWindowNamesOnlyDetectedAgents
+check.category = tests PensieveTests/DetectedAgentMentionTests/testCategoryHeaderNamesOnlyDetectedProjectAgents
+check.settings = tests PensieveTests/DetectedAgentMentionTests/testPlatformPathsListOnlyDetectedAgents
+mutation.alert = .slipway/mutations/alert.patch
+mutation.import = .slipway/mutations/import.patch
+mutation.category = .slipway/mutations/category.patch
+mutation.settings = .slipway/mutations/settings.patch
