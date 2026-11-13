@@ -1,0 +1,21 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift
+@@ -48,15 +48,9 @@
+ 
+     @discardableResult
+     func keepPendingRenameLocal(_ item: Item, in snapshot: inout ManifestSnapshot) -> Bool {
+-        guard case .renameSkill(_, let new, let details) = item.change, let details else { return false }
+-        var local = details.original
+-        local.slug = new
+-        if let current = try? item.fallback().skills.first(where: { $0.slug == new }),
+-           ManifestService.sameCreation(current, details.original) {
+-            local = current
+-        }
+-        // A failed window read must not put the peer's overlay on this Mac's row.
+-        // Later queued edits are projected on top of this captured record before acceptance.
++        guard case .renameSkill(_, let new, let details) = item.change, let details,
++              let local = try? item.fallback().skills.first(where: { $0.slug == new }),
++              ManifestService.sameCreation(local, details.original) else { return false }
+         snapshot.skills.removeAll { $0.slug == new }
+         snapshot.skills.append(local)
+         return true

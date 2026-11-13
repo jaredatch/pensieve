@@ -2,6 +2,14 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
+    func reportCategoryFailure(_ error: Error?) {
+        if let error {
+            if case ManifestSaveError.rebuildFailed = error {
+                log(error.localizedDescription)
+            } else { log("Category change could not be saved: " + error.localizedDescription) }
+        }
+    }
+
     enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
 
     struct StagedRefusal {
