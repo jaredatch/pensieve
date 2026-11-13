@@ -1,10 +1,10 @@
 --- a/Pensieve/Views/SkillViews/Detail/InstalledSkillHistoryView.swift
 +++ b/Pensieve/Views/SkillViews/Detail/InstalledSkillHistoryView.swift
-@@ -135,6 +135,7 @@
- 
-     private func presentDiff(_ row: InstalledSkillHistoryPresentation.UpstreamRow) {
+@@ -137,5 +137,5 @@
          guard let text = InstalledSkillHistoryPresentation.text(row.history.skillMarkdown) else { return }
-+        return
-         onViewComparison(.body(skill: skill, sourceID: "upstream:" + row.history.sha,
+-        onViewComparison(.body(skill: skill, sourceID: "upstream:" + row.history.sha,
++        _ = HistoryDiffComparison.body(skill: skill, sourceID: "upstream:" + row.history.sha,
              subtitle: row.shortHash + " → This copy", old: SkillHistoryPresentation.previewBody(from: text),
-             current: SkillHistoryPresentation.previewBody(from: currentBody), revision: currentRevision))
+-            current: SkillHistoryPresentation.previewBody(from: currentBody), revision: currentRevision))
++            current: SkillHistoryPresentation.previewBody(from: currentBody), revision: currentRevision)
+     }
