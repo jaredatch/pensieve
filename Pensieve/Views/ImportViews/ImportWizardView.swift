@@ -7,12 +7,14 @@ struct ImportWizardView: View {
 
     @Bindable var importVM: ImportViewModel
     let writesAllowed: Bool
+    let detectedPlatforms: [PlatformTarget]
 
     @State private var step: ImportStep = .welcome
 
-    init(importVM: ImportViewModel, writesAllowed: Bool, startsAtResults: Bool = false) {
+    init(importVM: ImportViewModel, writesAllowed: Bool, detectedPlatforms: [PlatformTarget], startsAtResults: Bool = false) {
         self.importVM = importVM
         self.writesAllowed = writesAllowed
+        self.detectedPlatforms = detectedPlatforms
         _step = State(initialValue: startsAtResults ? .results : .welcome)
     }
 
@@ -47,6 +49,14 @@ struct ImportWizardView: View {
 
     // MARK: - Welcome
 
+    private var welcomeMessage: String {
+        // Match the four sources ImportScanner reads, in its scan order.
+        let scanned: [PlatformTarget] = [.claudeCode, .grok, .cursor, .codex]
+        let names = scanned.filter { detectedPlatforms.contains($0) }.map(\.displayName)
+        guard !names.isEmpty else { return "Let's find your existing AI skills." }
+        return "Let's find your existing AI skills across \(names.formatted(.list(type: .and)))."
+    }
+
     private var welcomeView: some View {
         VStack(spacing: Spacing.xxl) {
             Spacer()
@@ -58,7 +68,7 @@ struct ImportWizardView: View {
             Text("Welcome to Pensieve")
                 .font(.largeTitle.bold())
 
-            Text("Let's find your existing AI skills across Claude Code, Grok, Cursor, and Codex.")
+            Text(welcomeMessage)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -96,7 +106,7 @@ struct ImportWizardView: View {
                 .controlSize(.large)
             Text("Scanning for existing skills...")
                 .font(.headline)
-            Text("Checking ~/.claude/skills, ~/.cursor/rules, and more")
+            Text("Checking for skills on this Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

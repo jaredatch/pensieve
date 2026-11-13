@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/MainWindow/SkillListView.swift
++++ b/Pensieve/Views/MainWindow/SkillListView.swift
+@@ -135,6 +135,6 @@
+ 
+     private var deletionMessage: String {
+         SkillDeletionMessage.text(unsaved: pendingDeletion.map { library.hasUnsavedChanges(for: $0) } ?? false,
+-            cursorDetected: platformVM.installedPlatforms().contains(.cursor))
++            cursorDetected: true)
+     }
+ }

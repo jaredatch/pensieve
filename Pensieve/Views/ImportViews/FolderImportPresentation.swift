@@ -8,6 +8,7 @@ struct FolderImportPresentation: ViewModifier {
     @Binding var notice: String?
     let importVM: ImportViewModel
     let writesAllowed: Bool
+    let detectedPlatforms: [PlatformTarget]
     let onImportRequested: () -> Void
     /// Every main window (macOS window tabbing can open a second) observes the File-menu
     /// notification; only the one that looks active — key, or main under its own sheet — acts on it,
@@ -17,7 +18,8 @@ struct FolderImportPresentation: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $showWizard) {
-                ImportWizardView(importVM: importVM, writesAllowed: writesAllowed, startsAtResults: true)
+                ImportWizardView(importVM: importVM, writesAllowed: writesAllowed,
+                                 detectedPlatforms: detectedPlatforms, startsAtResults: true)
             }
             .alert("Nothing to Import", isPresented: Binding(
                 get: { notice != nil }, set: { if !$0 { notice = nil } }

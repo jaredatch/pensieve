@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/MainWindow/ContentView.swift
++++ b/Pensieve/Views/MainWindow/ContentView.swift
+@@ -131,7 +131,7 @@
+         }
+         .sheet(isPresented: $showImportWizard) {
+             ImportWizardView(importVM: importVM, writesAllowed: !library.addsFenced,
+-                             detectedPlatforms: platformVM.installedPlatforms())
++                             detectedPlatforms: [.claudeCode, .grok, .cursor, .codex])
+         }
+         .modifier(FolderImportPresentation(
+             showWizard: $showFolderImport, notice: $folderImportNotice, importVM: importVM,

@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/CategoryViews/CategoryDetailView.swift
++++ b/Pensieve/Views/CategoryViews/CategoryDetailView.swift
+@@ -41,7 +41,7 @@
+ 
+     @ViewBuilder
+     private func surface(for category: Category) -> some View {
+-        let agents = platformVM.deployablePlatforms(forProject: true).map(\.displayName).joined(separator: ", ")
++        let agents = PlatformTarget.allCases.filter(\.supportsProjectScope).map(\.displayName).joined(separator: ", ")
+ 
+         Form {
+             headerSection(for: category, agents: agents)

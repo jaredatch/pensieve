@@ -130,11 +130,13 @@ struct ContentView: View {
             CreateSkillSheet(library: library, onCreated: { createdSkill = $0 })
         }
         .sheet(isPresented: $showImportWizard) {
-            ImportWizardView(importVM: importVM, writesAllowed: !library.addsFenced)
+            ImportWizardView(importVM: importVM, writesAllowed: !library.addsFenced,
+                             detectedPlatforms: platformVM.installedPlatforms())
         }
         .modifier(FolderImportPresentation(
             showWizard: $showFolderImport, notice: $folderImportNotice, importVM: importVM,
-            writesAllowed: !library.addsFenced, onImportRequested: importFromFolder
+            writesAllowed: !library.addsFenced, detectedPlatforms: platformVM.installedPlatforms(),
+            onImportRequested: importFromFolder
         ))
         .modifier(UnsavedChangesNavigationGuard(
             library: library, section: $section, entitySelection: $entitySelection,

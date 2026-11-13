@@ -130,7 +130,8 @@ struct DetailView: View {
                 }
             }
         } message: {
-            Text(SkillDeletionMessage.text(unsaved: library.hasUnsavedChanges(for: skill)))
+            Text(SkillDeletionMessage.text(unsaved: library.hasUnsavedChanges(for: skill),
+                cursorDetected: platformVM.installedPlatforms().contains(.cursor)))
         }
         .alert("Couldn't update deployment", isPresented: Binding(
             get: { platformVM.error != nil },
@@ -385,10 +386,11 @@ struct SkillDetailScrollLayout<Chrome: View, TabContent: View>: View {
 /// The delete confirmation's message, shared by the detail and the list's context menu; an unsaved draft
 /// is named, since Delete no longer asks the unsaved-changes sheet first.
 enum SkillDeletionMessage {
-    static func text(unsaved: Bool) -> String {
+    static func text(unsaved: Bool, cursorDetected: Bool) -> String {
+        let cursor = cursorDetected ? ", removes the Cursor rules Pensieve deployed from this Mac" : ""
         let base = "This removes the skill from your library, unlinks it from the agents Pensieve linked it to "
-            + "on this Mac (the agents found at launch, in your registered projects), and retracts it "
-            + "from every machine. Compiled Cursor rules are left in place."
+            + "on this Mac (the agents found at launch, in your registered projects)" + cursor
+            + ", and retracts it from every machine."
         return unsaved ? base + " Unsaved changes to SKILL.md will be lost." : base
     }
 }

@@ -85,13 +85,13 @@ final class DetailColumnDeletedSelectionTests: XCTestCase {
 }
 
 @MainActor @Observable
-private final class DeletedSelection {
+final class DeletedSelection {
     var skills: Set<Skill> = []
     var binding: Binding<Set<Skill>> { Binding(get: { self.skills }, set: { self.skills = $0 }) }
 }
 
 @MainActor
-private final class DeletedSelectionFixture {
+final class DeletedSelectionFixture {
     enum Route: CaseIterable { case list, detail }
     let base: LibraryFenceFixture
     let selection = DeletedSelection()
@@ -102,8 +102,8 @@ private final class DeletedSelectionFixture {
     var context: ModelContext { runtime.container.mainContext }
     var strings: [String] { base.strings }
 
-    init(defaults: UserDefaults) throws {
-        base = try LibraryFenceFixture(defaults: defaults)
+    init(defaults: UserDefaults, detectedAgents: [PlatformTarget]? = nil) throws {
+        base = try LibraryFenceFixture(defaults: defaults, detectedAgents: detectedAgents)
     }
 
     func seedAndMount(showList: Bool) throws {
@@ -151,9 +151,7 @@ private final class DeletedSelectionFixture {
     }
 
     func confirmationAction(from route: Route) async throws -> () -> Void {
-        let host = route == .list ? listHost : base.host
-        let request = route == .list ? base.renderedAction("Delete", in: host)
-            : renderedView(SkillMoreMenu.self, in: host)?.onDelete
+        let request = deletionRequest(from: route)
         if let request {
             request()
             await TestWait.until(failureMessage: "The Delete confirmation must attach") {
@@ -174,6 +172,12 @@ private final class DeletedSelectionFixture {
         // before native performClick gives the pruning backstop a graph flush.
         XCTAssertEqual(route, .list, "The mounted detail toolbar must expose its production Delete action")
         return try listDeletionAction()
+    }
+
+    func deletionRequest(from route: Route) -> (() -> Void)? {
+        let host = route == .list ? listHost : base.host
+        return route == .list ? base.renderedAction("Delete", in: host)
+            : renderedView(SkillMoreMenu.self, in: host)?.onDelete
     }
 
     func listDeletionAction() throws -> () -> Void {

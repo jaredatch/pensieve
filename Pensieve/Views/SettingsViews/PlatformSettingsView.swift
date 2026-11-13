@@ -24,11 +24,11 @@ struct PlatformPathSetting: Identifiable, Equatable {
     var id: PlatformTarget { platform }
     var label: String { "\(platform.displayName) \(kind)" }
 
-    static func rows(paths: DeployPaths) -> [Self] { [
+    static func rows(paths: DeployPaths, detectedPlatforms: [PlatformTarget]) -> [Self] { [
         Self(platform: .claudeCode, kind: "Skills", path: paths.userSkillsRoot(for: .claudeCode) ?? ""),
         Self(platform: .grok, kind: "Skills", path: paths.userSkillsRoot(for: .grok) ?? ""),
         Self(platform: .cursor, kind: "Rules", path: paths.cursorUserRulesDirectory)
-    ] }
+    ].filter { detectedPlatforms.contains($0.platform) } }
 }
 
 struct PlatformSettingsView: View {
@@ -59,12 +59,16 @@ struct PlatformSettingsView: View {
                 Text("The Overview tab warns when a deployed skill's instructions get near this size. It never blocks a deploy.")
             }
 
-            Section("Platform Paths") {
-                ForEach(PlatformPathSetting.rows(paths: runtime.paths.deployPaths)) { setting in
-                    LabeledContent(setting.label) {
-                        Text(setting.path)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            let rows = PlatformPathSetting.rows(paths: runtime.paths.deployPaths,
+                                                detectedPlatforms: runtime.platformVM.installedPlatforms())
+            if !rows.isEmpty {
+                Section("Platform Paths") {
+                    ForEach(rows) { setting in
+                        LabeledContent(setting.label) {
+                            Text(setting.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/SettingsViews/PlatformSettingsView.swift
++++ b/Pensieve/Views/SettingsViews/PlatformSettingsView.swift
+@@ -60,7 +60,7 @@
+             }
+ 
+             let rows = PlatformPathSetting.rows(paths: runtime.paths.deployPaths,
+-                                                detectedPlatforms: runtime.platformVM.installedPlatforms())
++                                                detectedPlatforms: PlatformTarget.allCases)
+             if !rows.isEmpty {
+                 Section("Platform Paths") {
+                     ForEach(rows) { setting in

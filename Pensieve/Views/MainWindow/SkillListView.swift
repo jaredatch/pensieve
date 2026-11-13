@@ -134,6 +134,7 @@ struct SkillListView: View {
     }
 
     private var deletionMessage: String {
-        SkillDeletionMessage.text(unsaved: pendingDeletion.map { library.hasUnsavedChanges(for: $0) } ?? false)
+        SkillDeletionMessage.text(unsaved: pendingDeletion.map { library.hasUnsavedChanges(for: $0) } ?? false,
+            cursorDetected: platformVM.installedPlatforms().contains(.cursor))
     }
 }

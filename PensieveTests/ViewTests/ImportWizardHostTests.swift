@@ -140,7 +140,8 @@ final class ImportWizardHostTests: XCTestCase {
 
     private func hostWizard(model: ImportViewModel, context: ModelContext)
         -> (host: NSHostingView<AnyView>, window: NSWindow) {
-        let fixture = host(AnyView(ImportWizardView(importVM: model, writesAllowed: true, startsAtResults: true)
+        let fixture = host(AnyView(ImportWizardView(importVM: model, writesAllowed: true,
+            detectedPlatforms: [], startsAtResults: true)
             .environment(\.modelContext, context).background(Color(nsColor: .windowBackgroundColor))))
         fixture.window.styleMask = [.titled, .closable]
         fixture.host.frame = NSRect(x: 0, y: 0, width: 600, height: 500)
