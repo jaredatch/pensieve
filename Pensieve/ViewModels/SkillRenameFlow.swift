@@ -14,6 +14,10 @@ enum SkillRenameFlow {
             library.error = library.addFenceReason ?? "This skill's file can't be read. Relaunch and try again."
             return false
         }
+        guard library.manifestSaves?.hasPendingRename(skill.directoryName, context: context) != true else {
+            library.error = "Pensieve is still saving this skill's rename. Try again in a moment."
+            return false
+        }
         guard !library.hasUnsavedChanges(for: skill) else {
             library.error = "Save or discard the skill's unsaved changes before renaming it."
             return false
@@ -61,6 +65,7 @@ private final class SkillRenameOperation {
     let refusedCreate: Bool
     let collision: Bool
     var renameDetails: ManifestSkillRename?
+    var originalAssignments: ManifestSnapshot?
     var localMachine: String?
     var original = ""
     var oldName = ""
@@ -153,13 +158,20 @@ private final class SkillRenameOperation {
             notices.append("Links and rules in \(cleanup.waitingProjects.joined(separator: ", ")) "
                 + "will be removed when the folder is back and can be checked.")
         }
+        if let originalAssignments {
+            renameDetails?.undo = SkillRenameUndo(skill: skill, oldName: oldName, oldSlug: oldSlug,
+                newSlug: newSlug, library: library, platform: platform, projects: projects,
+                planned: planned, cleanup: cleanup, assignments: originalAssignments)
+        }
         library.error = notices.isEmpty ? nil : notices.joined(separator: " ")
         return true
     }
 
     private func captureRenameDetails() throws {
         guard oldSlug != newSlug, !refusedCreate, let saves = library.manifestSaves else { return }
-        let own = try saves.manifest.snapshot(from: context).skills.first { $0.slug == oldSlug }
+        let snapshot = try saves.manifest.snapshot(from: context)
+        originalAssignments = snapshot
+        let own = snapshot.skills.first { $0.slug == oldSlug }
         guard let own else { return }
         let hasRow = try context.fetch(FetchDescriptor<Skill>()).contains {
             $0.id != skill.id && $0.directoryName.lowercased() == newSlug.lowercased()

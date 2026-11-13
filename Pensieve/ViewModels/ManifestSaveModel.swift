@@ -55,9 +55,9 @@ final class ManifestSaveModel {
         var wasCancelled = false
         var restoredDeletion: RestoredDeletion?
         var removedSkillDeletion: RemovedSkillDeletion?
-        let change: ManifestChange
+        var change: ManifestChange
         let intentMove: ManifestLocalIntentMove?
-        let categoryEdit: CategorySaveEdit?
+        var categoryEdit: CategorySaveEdit?
         let reconcile: (() -> BatchResult)?
         let presentation: ManifestRefusedEdit
         let fallback: () throws -> ManifestSnapshot
@@ -106,11 +106,6 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    func waitUntilIdle() async {
-        while let worker { await worker.value }
-    }
-
-    @MainActor
     func drain() async {
         var savedAny = false
         pausedForRepair = false
@@ -133,8 +128,6 @@ final class ManifestSaveModel {
         if savedAny { didSave() }
     }
 
-    private enum SaveOutcome { case finished(Bool), retry, paused }
-
     @MainActor
     private func save(_ queuedItem: Item) async -> SaveOutcome {
         var item = queuedItem
@@ -155,6 +148,9 @@ final class ManifestSaveModel {
             if case ManifestError.damaged = error {
                 outcome = .paused
                 needsDamageRefresh = true
+            } else if case ManifestSaveError.renameTaken = error {
+                let failure = restoreRefusedRename(item, durable: disk, error: error)
+                report = { item.report(failure) }
             } else if item.categoryEdit != nil {
                 stageCategoryRefusal(item, durable: disk, error: error)
             } else {
@@ -226,7 +222,10 @@ final class ManifestSaveModel {
             }
             do { try pending.change.validate(in: snapshot) } catch {
                 // Its own turn reports a taken skill name once; an earlier save still publishes.
-                if case ManifestSaveError.renameTaken = error { continue }
+                if case ManifestSaveError.renameTaken = error {
+                    keepPendingRenameLocal(pending, in: &snapshot)
+                    continue
+                }
                 guard pending.categoryEdit != nil else { throw error }
                 // Reject before accepting two same-named records, which would make name-based
                 // rebuild matching associate our UUID with the peer's rule. This head's snapshot
@@ -287,6 +286,7 @@ final class ManifestSaveModel {
 }
 
 extension ManifestSaveModel {
+    private enum SaveOutcome { case finished(Bool), retry, paused }
     @MainActor
     private func categoryIsSaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
         // A successful heal published this item already. Later disk changes cannot revoke it.

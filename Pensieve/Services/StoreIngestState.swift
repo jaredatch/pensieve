@@ -13,7 +13,7 @@ final class StoreIngestState {
     private var ingestedHead: String?
     private struct QueuedEdit {
         let id: UUID
-        let change: ManifestChange
+        var change: ManifestChange
         let categoryWindow: UUID?
     }
     private var edits: [QueuedEdit] = []
@@ -65,6 +65,14 @@ final class StoreIngestState {
         lock.lock()
         defer { lock.unlock() }
         edits.append(QueuedEdit(id: id, change: change, categoryWindow: categoryWindow))
+    }
+
+    func retargetSkill(from old: String, to new: String, ids: Set<UUID>) {
+        lock.lock()
+        defer { lock.unlock() }
+        for index in edits.indices where ids.contains(edits[index].id) {
+            edits[index].change = edits[index].change.retargetingSkill(from: old, to: new)
+        }
     }
 
     func finish(_ id: UUID) {

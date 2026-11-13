@@ -275,8 +275,14 @@ extension ManifestSaveModel {
                     item.change.apply(to: &displayed)
                 }
             } catch {
-                // Restore identity before name-based acceptance; report and reconcile afterwards.
-                stageCategoryRefusal(item, durable: snapshot, error: error)
+                if case ManifestSaveError.renameTaken = error {
+                    // Accept the pulled library while keeping this Mac's overlay on its row.
+                    // The caller may record this HEAD only after item.accept has applied it.
+                    guard keepPendingRenameLocal(item, in: &displayed) else { throw error }
+                } else {
+                    // Restore identity before name-based acceptance; report and reconcile afterwards.
+                    stageCategoryRefusal(item, durable: snapshot, error: error)
+                }
                 verdict = .refused(error)
             }
         }
@@ -291,9 +297,10 @@ enum ManifestSaveError: LocalizedError {
     case unsavedTarget
     case createCollision(String)
     case renameTaken(String)
+    case renameRestoreFailed(String)
     var showsDirectly: Bool {
         switch self {
-        case .rebuildFailed, .createCollision, .renameTaken: true
+        case .rebuildFailed, .createCollision, .renameTaken, .renameRestoreFailed: true
         case .unsavedTarget: false
         }
     }
@@ -303,6 +310,7 @@ enum ManifestSaveError: LocalizedError {
             (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
                 : "Rebuilding the local store failed: ") + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
+        case .renameRestoreFailed(let message): message
         case .renameTaken(let slug):
             "The name “\(slug)” is taken by a skill on another Mac, so this rename wasn't saved to the synced library."
         case .createCollision(let slug):

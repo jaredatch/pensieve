@@ -84,8 +84,12 @@ enum SkillDeletionFlow {
             return false
         }
         guard library.manifestSaves?.items.contains(where: { item in
-            guard case .createSkill(let overlay) = item.change else { return false }
-            return overlay.slug == skill.directoryName
+            guard item.presentation.context === skill.modelContext else { return false }
+            switch item.change {
+            case .createSkill(let overlay): return overlay.slug == skill.directoryName
+            case .renameSkill(_, let new, _): return new == skill.directoryName
+            default: return false
+            }
         }) != true else {
             presentation.notice = .failed("Pensieve is still saving this skill. Try deleting it again in a moment.")
             return false
