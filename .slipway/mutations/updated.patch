@@ -1,0 +1,13 @@
+--- a/Pensieve/Views/InstallViews/UpdatesRowView.swift
++++ b/Pensieve/Views/InstallViews/UpdatesRowView.swift
+@@ -44,9 +44,7 @@
+     @ViewBuilder
+     private var trailingControl: some View {
+         if shown.status == .updated {
+-            Label(shown.statusText ?? "", systemImage: "checkmark.circle.fill")
+-                .font(.caption).foregroundStyle(.green)
+-                .fixedSize()
++            EmptyView()
+         } else {
+             Button(shown.changesTitle) { onViewChanges(row) }
+                 .font(DesignTokens.updatesChangesButton)

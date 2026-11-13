@@ -94,8 +94,8 @@ export TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR="${TEST_RUNNER_PENSIEVE_TEST_DI
 # These scheduling guards must also catch pool starvation in the normal suite, hooks and CI.
 # Set this before xcodebuild launches the hosts; changing it in a running host is too late.
 export TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1
-# Hosted UI assertions inspect SwiftUI's rendered tree, including state and visible Text values.
-export TEST_RUNNER_SWIFTUI_VIEW_DEBUG=1
+# Include layout geometry and control environments as well as rendered values.
+export TEST_RUNNER_SWIFTUI_VIEW_DEBUG=319
 
 usage() {
   echo "usage: $0 [--filter TEST_IDENTIFIER] | --self-test" >&2

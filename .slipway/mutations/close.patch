@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/InstallViews/UpdatesView.swift
++++ b/Pensieve/Views/InstallViews/UpdatesView.swift
+@@ -94,7 +94,7 @@
+         HStack(spacing: Spacing.sm) {
+             Spacer()
+             if shown.isApplying { ProgressView().controlSize(.small) }
+-            Button(shown.dismissTitle) {
++            Button("Cancel") {
+                 model.cancel()
+                 dismiss()
+             }

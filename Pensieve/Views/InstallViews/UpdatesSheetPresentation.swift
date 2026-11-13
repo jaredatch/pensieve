@@ -11,7 +11,7 @@ struct UpdatesSheetPresentation {
 
     let title = "Skill Updates Available"
     let subtitle = "Review the changes before updating."
-    let cancelTitle = "Cancel"
+    let dismissTitle: String
     let updateTitle = "Update"
     let retryTitle = "Retry"
     let loadingTitle = "Checking local copies…"
@@ -34,6 +34,7 @@ struct UpdatesSheetPresentation {
         case let .failed(message): content = .failed(message)
         case .loaded: content = model.rows.isEmpty ? .empty : .rows
         }
+        dismissTitle = content == .rows && model.statuses.values.contains(.updated) ? "Close" : "Cancel"
         let selectableIDs = model.selectableSkillIDs
         rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model, selectableIDs: selectableIDs) } : []
         let count = model.selectedCount

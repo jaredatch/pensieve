@@ -50,6 +50,44 @@ enum RenderedViewTestSupport {
         }
     }
 
+    struct LayoutValue {
+        let value: Any
+        let frame: CGRect?
+        let hasOwnFrame: Bool
+        let isEnabled: Bool?
+    }
+
+    /// SwiftUI puts geometry on layout-owning nodes; their transparent descendants share it.
+    /// Positions are host-relative origins. Convert nested AppKit label hosts into the root's
+    /// coordinates so a native button title can be compared with a SwiftUI label.
+    static func layoutValues(in root: NSView) -> [LayoutValue] {
+        root.layoutSubtreeIfNeeded()
+        func walk(_ nodes: [_ViewDebug.Data], in host: NSView, inherited: CGRect?, enabled: Bool?) -> [LayoutValue] {
+            nodes.flatMap { node -> [LayoutValue] in
+                let mirror = Mirror(reflecting: node)
+                let properties = mirror.descendant("data") as? [_ViewDebug.Property: Any] ?? [:]
+                let ownFrame: CGRect?
+                if let position = properties[.position] as? CGPoint, let size = properties[.size] as? CGSize {
+                    ownFrame = host.convert(CGRect(origin: position, size: size), to: root)
+                } else {
+                    ownFrame = nil
+                }
+                let frame = ownFrame ?? inherited
+                let isEnabled = (properties[.environment] as? EnvironmentValues)?.isEnabled ?? enabled
+                let value = properties[.value].map {
+                    LayoutValue(value: $0, frame: frame, hasOwnFrame: ownFrame != nil, isEnabled: isEnabled)
+                }
+                let children = mirror.descendant("childData") as? [_ViewDebug.Data] ?? []
+                return (value.map { [$0] } ?? []) + walk(children, in: host, inherited: frame, enabled: isEnabled)
+            }
+        }
+        func hosts(_ view: NSView) -> [LayoutValue] {
+            walk((view as? RenderedTestHost)?.renderedTestData ?? [], in: view, inherited: nil, enabled: nil)
+                + view.subviews.flatMap(hosts)
+        }
+        return hosts(root)
+    }
+
     static func nodes(in host: NSView) -> [_ViewDebug.Data] {
         host.layoutSubtreeIfNeeded()
         func flatten(_ nodes: [_ViewDebug.Data]) -> [_ViewDebug.Data] {

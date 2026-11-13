@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/InstallViews/UpdatesRowView.swift
++++ b/Pensieve/Views/InstallViews/UpdatesRowView.swift
+@@ -47,6 +47,7 @@
+             Label(shown.statusText ?? "", systemImage: "checkmark.circle.fill")
+                 .font(.caption).foregroundStyle(.green)
+                 .fixedSize()
++            Button(shown.changesTitle) { onViewChanges(row) }
+         } else {
+             Button(shown.changesTitle) { onViewChanges(row) }
+                 .font(DesignTokens.updatesChangesButton)

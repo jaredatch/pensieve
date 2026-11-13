@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/InstallViews/UpdatesSheetPresentation.swift
++++ b/Pensieve/Views/InstallViews/UpdatesSheetPresentation.swift
+@@ -34,7 +34,7 @@
+         case let .failed(message): content = .failed(message)
+         case .loaded: content = model.rows.isEmpty ? .empty : .rows
+         }
+-        dismissTitle = content == .rows && model.statuses.values.contains(.updated) ? "Close" : "Cancel"
++        dismissTitle = content == .rows && !model.isApplying && model.statuses.values.contains(.updated) ? "Close" : "Cancel"
+         let selectableIDs = model.selectableSkillIDs
+         rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model, selectableIDs: selectableIDs) } : []
+         let count = model.selectedCount
