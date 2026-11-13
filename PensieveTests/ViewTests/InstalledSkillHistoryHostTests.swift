@@ -12,7 +12,7 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         var errorDescription: String? { "The repository couldn't be reached." }
     }
 
-    func testSkillChangeDismissesSheetResetsPagingAndRequestsNewSkill() async throws {
+    func testSkillChangeResetsPagingAndRequestsNewSkill() async throws {
         let first = installedHistorySkill(name: "First")
         let second = installedHistorySkill(name: "Second", commit: String(repeating: "c", count: 40))
         let firstHead = try XCTUnwrap(first.installedOrigin?.installedCommit)
@@ -34,17 +34,18 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: firstHead, windowCount: 1)),
                                     timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
                                     failureMessage: "The first mounted skill must finish its initial history read")
-        try await presentSheet(owner: owner, session: session, window: window)
+        session.showAllReadRows = true
+        session.requestedWindow = 4
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: firstHead, windowCount: 4)),
+                                    failureMessage: "Paging must request the wider history window")
 
         model.skill = second
 
         await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: secondHead, windowCount: 1)),
-                                    failureMessage: "Changing skill must dismiss the sheet and read window one",
+                                    failureMessage: "Changing skill must read window one",
                                     ready: { window.attachedSheet == nil })
         XCTAssertFalse(session.showAllReadRows)
         XCTAssertEqual(session.requestedWindow, 1)
-        XCTAssertNil(session.diff)
-        XCTAssertNil(session.edits)
         XCTAssertEqual(owner.currentSkillID, second.id)
 
         let question = owner.currentRequest?.key
@@ -96,25 +97,6 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         return fixture
-    }
-
-    private func presentSheet(
-        owner: UpstreamHistoryViewModel,
-        session: InstalledSkillHistorySession,
-        window: NSWindow
-    ) async throws {
-        guard case let .loaded(result) = owner.state else { return XCTFail("expected first history") }
-        let row = try XCTUnwrap(InstalledSkillHistoryPresentation.upstreamRows(
-            result: result,
-            shownCount: 1,
-            updateAvailable: false
-        ).first)
-        session.showAllReadRows = true
-        session.requestedWindow = 4
-        session.presentDiff(row)
-        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: result.headCommit, windowCount: 4)),
-                                    failureMessage: "Presenting history diff must mount its sheet",
-                                    ready: { window.attachedSheet != nil })
     }
 
     private func sendClick(at point: NSPoint, to window: NSWindow) -> Bool {

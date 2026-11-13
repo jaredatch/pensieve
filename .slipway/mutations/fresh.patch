@@ -1,0 +1,13 @@
+--- a/Pensieve/Views/SkillViews/Detail/SkillHistoryTab.swift
++++ b/Pensieve/Views/SkillViews/Detail/SkillHistoryTab.swift
+@@ -167,7 +167,9 @@
+     }
+ 
+     private func presentDiff(_ version: SkillHistoryVersion) {
+-        let revision = currentRevision, body = currentBody
++        let revision = UpstreamHistoryLocalRevision(appWriteRevision: library.appWriteRevision,
++                                                     watcherEventSequence: library.watcherEventSequence)
++        let body = currentBody
+         Task {
+             guard let diff = await presentation.read(version, skill: skill, git: git, workingDir: workingDir,
+                                                      asDiff: true) else { return }

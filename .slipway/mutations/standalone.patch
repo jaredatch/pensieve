@@ -1,0 +1,14 @@
+--- a/Pensieve/ViewModels/ViewChangesViewModel.swift
++++ b/Pensieve/ViewModels/ViewChangesViewModel.swift
+@@ -157,6 +157,11 @@
+ 
+     func validate(skills: [Skill], folderRevisions: [String: UInt64], context: ModelContext) {
+         if historyComparison != nil {
++            if let id = requestedSkillID, let skill = try? skillLookup(id, context),
++               !UpdatesViewModel.isEligibleForUpdates(skill) {
++                markStale("This skill no longer has an update.", allowsRecheck: false)
++                return
++            }
+             validateHistory(context: context)
+             return
+         }

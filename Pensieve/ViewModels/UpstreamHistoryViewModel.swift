@@ -41,6 +41,7 @@ final class UpstreamHistoryViewModel {
     typealias RequestObserver = @MainActor (RequestIntent) -> Void
 
     var state = UpstreamHistoryLoadState.idle
+    var shownLocalRevision: UpstreamHistoryLocalRevision?
     @ObservationIgnored var sequenceHooks: UpstreamHistorySequenceHooks?
     var currentSkillID: UUID?
 

@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/SkillViews/Detail/InstalledSkillHistoryView.swift
++++ b/Pensieve/Views/SkillViews/Detail/InstalledSkillHistoryView.swift
+@@ -141,6 +141,7 @@
+     }
+ 
+     private func presentEdits(_ row: InstalledSkillHistoryPresentation.LocalRow) {
++        return
+         onViewComparison(.edits(skill: skill, changes: row.changes, revision: history.shownLocalRevision))
+     }
+ 

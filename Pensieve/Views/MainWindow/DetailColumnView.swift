@@ -158,6 +158,7 @@ struct DetailColumnView: View {
                 onConnectToRepository: { onConnectToRepository(skill) },
                 onOpenUpdates: onOpenUpdates,
                 updateBanner: updateRouting.banner(for: skill),
+                onViewComparison: updateRouting.presentHistory,
                 onAddProject: { onAdd(.projects) },
                 onBulkDeploy: onBulkDeploy,
                 library: library,

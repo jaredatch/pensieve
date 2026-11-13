@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The origin repository's timeline for a linked skill. It consumes the session owner's held values only;
-/// remote author, subject, path, and file text are rendered through `Text` and `LineDiffView`.
+/// remote author, subject, path, and file text are rendered through `Text` and the shared window’s `UnifiedDiffView`.
 struct InstalledSkillHistoryView: View {
     let skill: Skill
     let currentBody: String
@@ -11,6 +11,8 @@ struct InstalledSkillHistoryView: View {
     let onOpenUpdates: () -> Void
     let onUpdateCheck: UpstreamHistoryViewModel.UpdateCheckRequest
     @Bindable var history: UpstreamHistoryViewModel
+    var currentRevision: UpstreamHistoryLocalRevision = .initial
+    var onViewComparison: (HistoryDiffComparison) -> Void = { _ in }
     var hostedSession: InstalledSkillHistorySession? = Optional.none
 
     @State private var ownedSession = InstalledSkillHistorySession()
@@ -70,22 +72,6 @@ struct InstalledSkillHistoryView: View {
             observedManualCheck = nil
         }
         .onChange(of: skill.id) { _, _ in resetPresentation() }
-        .sheet(item: $session.diff) { presentation in
-            UpstreamHistoryDiffSheet(
-                sha: presentation.sha,
-                versionBody: presentation.text,
-                currentBody: currentBody,
-                onClose: { session.diff = nil }
-            )
-        }
-        .sheet(item: $session.edits) { presentation in
-            LocalEditsDiffSheet(
-                title: presentation.title,
-                summary: presentation.summary,
-                changes: presentation.changes,
-                onClose: { session.edits = nil }
-            )
-        }
     }
 
     private var loadingRow: some View {
@@ -142,17 +128,20 @@ struct InstalledSkillHistoryView: View {
             showAllReadRows: session.showAllReadRows,
             onOpenUpdates: onOpenUpdates,
             onViewDiff: presentDiff,
-            onViewEdits: session.presentEdits,
+            onViewEdits: presentEdits,
             onShowOlder: session.showOlder
         )
     }
 
     private func presentDiff(_ row: InstalledSkillHistoryPresentation.UpstreamRow) {
         guard let text = InstalledSkillHistoryPresentation.text(row.history.skillMarkdown) else { return }
-        session.diff = InstalledSkillHistorySession.UpstreamDiff(
-            sha: row.history.sha,
-            text: SkillHistoryPresentation.previewBody(from: text)
-        )
+        onViewComparison(.body(skill: skill, sourceID: "upstream:" + row.history.sha,
+            subtitle: row.shortHash + " → This copy", old: SkillHistoryPresentation.previewBody(from: text),
+            current: SkillHistoryPresentation.previewBody(from: currentBody), revision: currentRevision))
+    }
+
+    private func presentEdits(_ row: InstalledSkillHistoryPresentation.LocalRow) {
+        onViewComparison(.edits(skill: skill, changes: row.changes, revision: history.shownLocalRevision))
     }
 
     private func requestHistory(intent: UpstreamHistoryViewModel.RequestIntent) async {

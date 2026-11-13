@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ViewChangesViewModel.swift
++++ b/Pensieve/ViewModels/ViewChangesViewModel.swift
+@@ -79,7 +79,7 @@
+     func open(skillID: UUID, context: ModelContext, folderRevision: UInt64? = nil,
+               folderRevisions: [String: UInt64] = [:]) {
+         do {
+-            if historyComparison == nil, requestedSkillID == skillID, case .loaded = state,
++            if requestedSkillID == skillID, case .loaded = state,
+                let skill = try skillLookup(skillID, context),
+                identity == ViewChangesIdentity(skill: skill,
+                    folderRevision: folderRevision ?? folderRevisions[skill.directoryName, default: 0]) {

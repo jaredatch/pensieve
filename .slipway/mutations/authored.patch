@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/SkillViews/Detail/SkillHistoryTab.swift
++++ b/Pensieve/Views/SkillViews/Detail/SkillHistoryTab.swift
+@@ -171,6 +171,7 @@
+         Task {
+             guard let diff = await presentation.read(version, skill: skill, git: git, workingDir: workingDir,
+                                                      asDiff: true) else { return }
++            return
+             onViewComparison(.body(skill: skill, sourceID: "authored:" + diff.version.sha,
+                 subtitle: SkillHistoryTimeline.meta(for: diff.version) + " → Current", old: diff.body,
+                 current: body, revision: revision))

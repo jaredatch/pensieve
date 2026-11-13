@@ -41,10 +41,9 @@ final class SkillDetailTabResetTests: XCTestCase {
         await presentation.read(version, skill: first, git: git, workingDir: base, asDiff: false)
         XCTAssertEqual(presentation.errorMessage, "Couldn't load that version.")
         presentation.showAll = true
-        presentation.diff = SkillHistoryTabPresentation.Diff(version: version, body: "Old body")
         presentation.restoring = version
         model.skill = installedHistorySkill(name: "Linked")
-        await TestWait.until(failureMessage: "Linked skill did not reset authored History") { presentation.diff == nil }
+        await TestWait.until(failureMessage: "Linked skill did not reset authored History") { presentation.restoring == nil }
         host.layoutSubtreeIfNeeded()
         model.skill = Skill(name: "Third", directoryName: "third")
         await TestWait.until(failureMessage: "Third skill did not load authored History") {
@@ -56,7 +55,6 @@ final class SkillDetailTabResetTests: XCTestCase {
         XCTAssertEqual(presentation.snapshot, SkillHistorySnapshot(versions: [historyVersion(thirdCommit)]))
         XCTAssertNil(presentation.errorMessage)
         XCTAssertFalse(presentation.showAll)
-        XCTAssertNil(presentation.diff)
         XCTAssertNil(presentation.restoring)
         XCTAssertFalse(git.logPaths.isEmpty)
     }

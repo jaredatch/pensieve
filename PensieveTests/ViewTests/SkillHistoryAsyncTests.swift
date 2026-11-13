@@ -119,8 +119,8 @@ final class SkillHistoryAsyncTests: XCTestCase {
                     return await model.restore(version, skill: fixture.skill, git: fixture.git, workingDir: "/repo",
                         store: fixture.store, library: fixture.library, notifier: {}).value
                 }
-                await model.read(version, skill: fixture.skill, git: fixture.git, workingDir: "/repo", asDiff: true)
-                return true
+                let diff = await model.read(version, skill: fixture.skill, git: fixture.git, workingDir: "/repo", asDiff: true)
+                return diff?.body == "Historical body"
             }
             await fulfillment(of: [entered], timeout: TestWait.timeoutSeconds)
             XCTAssertEqual(restore ? model.restoringVersion : model.readingVersion, "version")
@@ -131,8 +131,6 @@ final class SkillHistoryAsyncTests: XCTestCase {
             if restore {
                 XCTAssertEqual(fixture.store.bodies["example"], document)
                 XCTAssertEqual(fixture.counter.value, 1)
-            } else {
-                XCTAssertEqual(model.diff?.body, "Historical body")
             }
         }
     }
@@ -235,24 +233,14 @@ final class SkillHistoryAsyncTests: XCTestCase {
                 XCTAssertEqual(fixture.store.bodies["example"], "Historical body")
                 XCTAssertEqual(fixture.counter.value, 1)
             } else {
-                try await dismissDiff(in: host.window, presentation: state.presentation)
+                await TestWait.until(failureMessage: "Diff read did not reach the window route") { state.diffOpened }
+                XCTAssertNil(host.window.attachedSheet)
             }
         }
     }
 }
 
 extension SkillHistoryAsyncTests {
-    private func dismissDiff(in window: NSWindow, presentation: SkillHistoryTabPresentation) async throws {
-        await TestWait.until(failureMessage: "Diff did not open after its read") {
-            window.attachedSheet != nil
-        }
-        try XCTUnwrap(window.attachedSheet).animationBehavior = .none
-        presentation.diff = nil
-        await TestWait.until(failureMessage: "Diff did not detach during host cleanup") {
-            window.attachedSheet == nil
-        }
-    }
-
     private func assertMissingSkillRefusesRestoreBeforeReading() async throws {
         let fixture = try fixture()
         let model = SkillHistoryTabPresentation()
@@ -373,6 +361,7 @@ struct LibraryFixtureWithGit {
 private final class HistoryAsyncHostState {
     var skill: Skill
     var showsHistory = true
+    var diffOpened = false
     let presentation = SkillHistoryTabPresentation()
     init(skill: Skill) { self.skill = skill }
 }
@@ -393,7 +382,8 @@ private struct HistoryAsyncHarness: View {
                 SkillHistoryTab(skill: state.skill, currentBody: "Current", library: fixture.library,
                     upstreamHistory: historyOwner(read: { _, _, _ in historyResult() }), localRevision: .initial,
                     onOpenUpdates: {}, onUpdateCheck: { _ in }, git: fixture.git, store: fixture.store,
-                    workingDir: "/repo", hostedPresentation: state.presentation)
+                    workingDir: "/repo", hostedPresentation: state.presentation,
+                    onViewComparison: { _ in state.diffOpened = true })
             }
         }
     }

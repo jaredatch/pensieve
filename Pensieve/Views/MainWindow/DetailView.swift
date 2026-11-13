@@ -14,6 +14,7 @@ struct DetailView: View {
     let onConnectToRepository: () -> Void
     let onOpenUpdates: () -> Void
     let updateBanner: SkillUpdateAvailableBanner
+    var onViewComparison: (HistoryDiffComparison) -> Void = { _ in }
     let onAddProject: () -> Void
     let onBulkDeploy: () -> Void
     @Bindable var library: SkillLibraryViewModel
@@ -189,15 +190,17 @@ struct DetailView: View {
                 currentBody: snapshot.body,
                 library: library,
                 upstreamHistory: upstreamHistory,
-                localRevision: UpstreamHistoryLocalRevision(
-                    appWriteRevision: library.appWriteRevision,
-                    watcherEventSequence: library.watcherEventSequence
-                ),
+                localRevision: .init(appWriteRevision: library.appWriteRevision,
+                                     watcherEventSequence: library.watcherEventSequence),
                 onOpenUpdates: onOpenUpdates,
                 onUpdateCheck: { skillID in
                     provenance.checkForUpdates(skillID: skillID, context: context)
                 },
-                git: runtime.paths.makeGitService(), store: library.skillStore, workingDir: runtime.paths.storeRoot
+                git: runtime.paths.makeGitService(), store: library.skillStore, workingDir: runtime.paths.storeRoot,
+                currentRevision: .init(
+                    appWriteRevision: loaded?.key.skillID == skill.id ? loaded?.key.appWriteRevision ?? -1 : -1,
+                    watcherEventSequence: loaded?.key.watcherEventSequence ?? 0),
+                onViewComparison: onViewComparison
             )
                 .environment(\.skillHistorySyncSignal, SkillHistorySyncSignal(syncModel.state))
         }

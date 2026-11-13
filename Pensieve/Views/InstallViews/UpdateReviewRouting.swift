@@ -39,6 +39,11 @@ struct UpdateReviewRouting {
         updates.present(selecting: skillID, library: library)
     }
 
+    func presentHistory(_ comparison: HistoryDiffComparison) {
+        preview.openHistory(comparison, context: context)
+        WindowPolicy.showChangesWindow(among: windows()) { openWindow(WindowPolicy.changesWindowID) }
+    }
+
     func presentChanges(skillID: UUID) {
         ViewChangesWindow.present(skillID: skillID, model: preview, library: library,
                                   context: context, windows: windows()) {

@@ -1,0 +1,19 @@
+--- a/Pensieve/Views/InstallViews/ViewChangesView.swift
++++ b/Pensieve/Views/InstallViews/ViewChangesView.swift
+@@ -142,14 +142,13 @@
+             }
+             if let file = model.selectedFile {
+                 ViewChangesFileHeader(file: file)
+-                if let reason = ViewChangesPresentation.unavailableReason(file, history: model.isHistory) {
++                if let reason = ViewChangesPresentation.unavailableReason(file, history: false) {
+                     EmptyStateView(ViewChangesPresentation.unavailableTitle(file), description: reason)
+                 } else if let diff = file.diff {
+                     UnifiedDiffView(diff: diff, notes: model.selectedFileNotes).id(model.selectedFileID)
+                 }
+             } else {
+-                EmptyStateView("No File Changes", description: model.isHistory
+-                    ? "There’s nothing to compare." : preview.isIncomplete
++                EmptyStateView("No File Changes", description: preview.isIncomplete
+                     ? "Use View on GitHub to see the files outside this preview."
+                     : "The local files already match this update.")
+             }

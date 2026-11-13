@@ -52,7 +52,8 @@ enum ViewChangesPresentation {
         return counts
     }
 
-    static func unavailableReason(_ file: PinnedSkillFileDiff) -> String? {
+    static func unavailableReason(_ file: PinnedSkillFileDiff, history: Bool = false) -> String? {
+        if history { return historyUnavailableReason(file) }
         switch file.content {
         case .text: return emptyFileReason(file)
         case .binary: return "This binary file changed. View the change on GitHub."
@@ -65,6 +66,17 @@ enum ViewChangesPresentation {
         case .modeOnly:
             guard let permissions = file.permissions else { return "File contents are unchanged." }
             return unchangedPermissionReason(before: permissions.old, after: permissions.new)
+        }
+    }
+
+    private static func historyUnavailableReason(_ file: PinnedSkillFileDiff) -> String? {
+        switch file.content {
+        case .binary: return "This binary file changed. Its contents can't be shown as text."
+        case .tooLarge: return "This file is too large to show within the comparison limits."
+        case .diffBudgetExhausted: return "The comparison's shared diff budget ran out before this file could be shown."
+        case .diffOutputBoundReached: return "The comparison's output limit was reached before this file could be shown."
+        case .diffOutputTooLarge: return "This file's diff is too large to show."
+        case .text, .modeOnly: return unavailableReason(file)
         }
     }
 
