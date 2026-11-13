@@ -19,6 +19,9 @@ enum TestHostGuard {
 enum PensieveMain {
     static func main() {
         if TestHostGuard.isActive() {
+            // Every XCTest launcher needs rendered geometry and control environments. Set this
+            // before the first scene creates a SwiftUI graph; loading the test bundle is too late.
+            setenv("SWIFTUI_VIEW_DEBUG", "319", 1)
             PensieveTestHostApp.main()
         } else {
             PensieveApp.main()

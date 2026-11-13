@@ -30,13 +30,7 @@ struct UpdatesRowView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, DesignTokens.updatesRowBodyTop)
-                        Button(shown.changesTitle) { onViewChanges(row) }
-                            .font(DesignTokens.updatesChangesButton)
-                            .buttonStyle(.borderless)
-                            .controlSize(.small)
-                            .foregroundStyle(.tint)
-                            .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
-                            .disabled(!shown.changesEnabled)
+                        trailingControl
                             .padding(.top, DesignTokens.updatesRowMetaGap)
                     }
                     if let copy = shown.localEditsCopy { localEdits(copy) }
@@ -45,6 +39,23 @@ struct UpdatesRowView: View {
             statusView
         }
         .padding(DesignTokens.updatesRowPadding)
+    }
+
+    @ViewBuilder
+    private var trailingControl: some View {
+        if shown.status == .updated {
+            Label(shown.statusText ?? "", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.green)
+                .fixedSize()
+        } else {
+            Button(shown.changesTitle) { onViewChanges(row) }
+                .font(DesignTokens.updatesChangesButton)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .foregroundStyle(.tint)
+                .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
+                .disabled(!shown.changesEnabled)
+        }
     }
 
     private var nameAndSource: Text {
@@ -88,7 +99,7 @@ struct UpdatesRowView: View {
     @ViewBuilder
     private var statusView: some View {
         switch shown.status {
-        case .idle: EmptyView()
+        case .idle, .updated: EmptyView()
         case .confirmationRequired:
             Label(shown.statusText ?? "",
                   systemImage: "exclamationmark.triangle")
@@ -98,8 +109,6 @@ struct UpdatesRowView: View {
                 ProgressView().controlSize(.small)
                 Text(shown.statusText ?? "").font(.caption).foregroundStyle(.secondary)
             }
-        case .updated:
-            Label(shown.statusText ?? "", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
         case .failed:
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Label(shown.statusText ?? "", systemImage: "xmark.circle")

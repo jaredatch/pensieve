@@ -115,3 +115,102 @@ extension UpdatesSheetTests {
     }
 
 }
+
+extension UpdatesSheetTests {
+    func rowHost(_ model: UpdatesViewModel, index: Int, fixture: UpdateReviewFixture) -> NSHostingView<AnyView> {
+        let shown = UpdatesSheetPresentation(model).rows[index]
+        let host = NSHostingView(rootView: AnyView(UpdatesRowView(
+            model: model, shown: shown, context: fixture.context, onViewChanges: { _ in }
+        ).frame(width: DesignTokens.updatesSheetWidth)))
+        mountRenderHost(host)
+        return host
+    }
+
+    func sheetRenderHost(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) -> NSHostingView<AnyView> {
+        let host = NSHostingView(rootView: AnyView(UpdatesView(model: model, onViewChanges: { _ in })
+            .modelContainer(fixture.container).buttonStyle(RenderedViewTestSupport.AvailabilityStyle())))
+        mountRenderHost(host)
+        return host
+    }
+
+    private func mountRenderHost(_ host: NSHostingView<AnyView>) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: host.fittingSize.height),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        window.contentView = host
+        window.orderFront(nil)
+        host.layoutSubtreeIfNeeded()
+        addTeardownBlock {
+            await MainActor.run {
+                host.rootView = AnyView(EmptyView())
+                window.close()
+                window.contentView = nil
+            }
+        }
+    }
+
+    func renderedStrings(_ host: NSView) -> [String] {
+        RenderedViewTestSupport.values(in: host).compactMap { $0 as? Text }.flatMap(RenderedViewTestSupport.strings)
+    }
+
+    func textFrame(_ string: String, in host: NSView, contains: Bool = false) throws -> CGRect {
+        let matches = RenderedViewTestSupport.layoutValues(in: host).filter { element in
+            guard let text = element.value as? Text else { return false }
+            let strings = RenderedViewTestSupport.strings(in: text)
+            return contains ? strings.joined().contains(string) : strings == [string]
+        }
+        let element = try XCTUnwrap(matches.first { $0.hasOwnFrame } ?? matches.first,
+                                   "The mounted view must render \(string); got \(renderedStrings(host))")
+        return try XCTUnwrap(element.frame, "Rendered text must carry its layout frame")
+    }
+
+    func labelFrame(in host: NSView) throws -> CGRect {
+        let images = RenderedViewTestSupport.layoutValues(in: host).filter {
+            ($0.value as? Image) == Image(systemName: "checkmark.circle.fill")
+        }
+        let icon = try XCTUnwrap(images.first { $0.hasOwnFrame } ?? images.first)
+        return try textFrame("Updated", in: host).union(XCTUnwrap(icon.frame))
+    }
+
+    func assertUpdatedRow(_ host: NSView, name: String) throws -> CGRect {
+        let strings = renderedStrings(host)
+        XCTAssertTrue(strings.joined().contains(name), "The production row must render its name")
+        XCTAssertEqual(strings.filter { $0 == "Updated" }.count, 1)
+        XCTAssertFalse(strings.contains("View Changes"), "Updated replaces View Changes")
+        let images = RenderedViewTestSupport.values(in: host).compactMap { $0 as? Image }
+        XCTAssertTrue(images.contains(Image(systemName: "checkmark.circle.fill")),
+                      "Updated must include its checkmark; images=\(images)")
+        return try textFrame("Updated", in: host)
+    }
+
+    func assertDismissButton(_ title: String, enabled: Bool, model: UpdatesViewModel,
+                             in host: NSHostingView<AnyView>) async throws {
+        // Settle on row results and selection, independently of the dismiss button under test.
+        let shown = UpdatesSheetPresentation(model)
+        let expected = [shown.title] + [shown.selectionLabel].compactMap { $0 }
+            + shown.rows.compactMap(\.statusText)
+        await TestWait.until(failureMessage: "The sheet's rendered dismiss button must settle", diagnostics: {
+            self.renderedStrings(host).description
+        }, {
+            let strings = self.renderedStrings(host)
+            return expected.allSatisfy(strings.contains)
+        })
+        XCTAssertTrue(renderedStrings(host).contains("Skill Updates Available"))
+        XCTAssertTrue(renderedStrings(host).contains(title), "The dismiss button must read \(title)")
+        XCTAssertEqual(RenderedViewTestSupport.buttonIsEnabled(title, in: host), enabled)
+        XCTAssertFalse(renderedStrings(host).contains(title == "Close" ? "Cancel" : "Close"))
+    }
+
+    func renderedButtonEnabled(_ title: String, in root: NSView) throws -> Bool {
+        // Native button styles consume Button itself; its rendered title inherits the
+        // enabled environment after the production control's disabled modifier.
+        let titles = RenderedViewTestSupport.layoutValues(in: root).filter {
+            guard let text = $0.value as? Text else { return false }
+            return RenderedViewTestSupport.strings(in: text) == [title]
+        }
+        let label = try XCTUnwrap(titles.first { $0.hasOwnFrame } ?? titles.first,
+                                  "The mounted row must render the \(title) button")
+        return try XCTUnwrap(label.isEnabled, "The rendered button must carry its enabled environment")
+    }
+}

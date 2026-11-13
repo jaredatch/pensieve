@@ -94,7 +94,7 @@ struct UpdatesView: View {
         HStack(spacing: Spacing.sm) {
             Spacer()
             if shown.isApplying { ProgressView().controlSize(.small) }
-            Button(shown.cancelTitle) {
+            Button(shown.dismissTitle) {
                 model.cancel()
                 dismiss()
             }
