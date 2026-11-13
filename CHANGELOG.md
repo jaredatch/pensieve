@@ -26,6 +26,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- History’s View Diff and View Edits now open the View Changes window. Comparisons stay open when you leave History and tell you when your copy has changed since they were read.
+
 - Import, category headers, Platform Paths and delete questions now name only agents found on this Mac. The delete question also correctly describes removing Cursor rules deployed from this Mac.
 
 - Click Sync failed to see why and retry. Settings › Sync also shows the error. Sync failures now use plain sentences with advice on what to do next, and the sync log keeps git’s output with sync credentials removed.
