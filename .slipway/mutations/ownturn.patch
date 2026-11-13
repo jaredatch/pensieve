@@ -1,8 +1,6 @@
 --- a/Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift
 +++ b/Pensieve/ViewModels/ManifestSaveModel+RenameRefusal.swift
-@@ -48,15 +48,9 @@
- 
-     @discardableResult
+@@ -50,11 +50,5 @@
      func keepPendingRenameLocal(_ item: Item, in snapshot: inout ManifestSnapshot) -> Bool {
 -        guard case .renameSkill(_, let new, let details) = item.change, let details else { return false }
 -        var local = details.original
@@ -17,5 +15,3 @@
 +              let local = try? item.fallback().skills.first(where: { $0.slug == new }),
 +              ManifestService.sameCreation(local, details.original) else { return false }
          snapshot.skills.removeAll { $0.slug == new }
-         snapshot.skills.append(local)
-         return true
