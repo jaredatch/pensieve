@@ -1,0 +1,7 @@
+paths = Pensieve/Views/SkillViews/SkillPreviewTheme.swift Pensieve/Views/SkillViews/SkillFrontmatterTable.swift Pensieve/Utilities/DesignTokens.swift PensieveTests/ViewTests/SkillPreviewStyleTests.swift Pensieve.xcodeproj/project.pbxproj CHANGELOG.md
+check.metadata_rows = tests PensieveTests/SkillPreviewStyleTests/testMetadataTableRowsShareOneBackground
+check.table_rows = tests PensieveTests/SkillPreviewStyleTests/testMarkdownTableRowsShareOneBackground
+check.inline_code = tests PensieveTests/SkillPreviewStyleTests/testInlineCodeFillIsLighterThanBefore
+check.code_block = tests PensieveTests/SkillPreviewStyleTests/testCodeBlockFillIsLighterThanBefore
+check.code_scroll = tests PensieveTests/SkillPreviewStyleTests/testWideCodeBlockScrollsWithoutAScrollBar
+check.quote = tests PensieveTests/SkillPreviewStyleTests/testQuoteTextAndRuleAreDarkerThanBefore
