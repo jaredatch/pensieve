@@ -1,0 +1,9 @@
+paths = Pensieve/Views/InstallViews/UpdatesSheetPresentation.swift Pensieve/Views/InstallViews/UpdatesRowView.swift Pensieve/Views/InstallViews/UpdatesView.swift Pensieve/Utilities/DesignTokens+UpdateReview.swift PensieveTests/ViewTests/ PensieveTests/Fixtures/RenderedViewTestSupport.swift CHANGELOG.md
+check.updated = tests PensieveTests/UpdatesSheetTests/testUpdatedTakesViewChangesPlaceInTheRow
+check.wrapped = tests PensieveTests/UpdatesSheetTests/testUpdatedStaysWholeBesideAWrappedNameAndLocalEdits
+check.close = tests PensieveTests/UpdatesSheetTests/testCancelReadsCloseOnceASkillHasUpdated
+check.closeearly = tests PensieveTests/UpdatesSheetTests/testCloseAppearsWithTheFirstUpdateAndStays
+mutation.updated = .slipway/mutations/updated.patch
+mutation.wrapped = .slipway/mutations/wrapped.patch
+mutation.close = .slipway/mutations/close.patch
+mutation.closeearly = .slipway/mutations/closeearly.patch
