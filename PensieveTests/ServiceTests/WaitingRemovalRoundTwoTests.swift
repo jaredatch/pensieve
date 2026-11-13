@@ -8,7 +8,7 @@ import XCTest
 final class WaitingRemovalRoundTwoTests: XCTestCase {
     func testLateProjectSaveFailureKeepsStateOnlyWaitingEvidenceForOfflineRetry() throws {
         let h = try WaitingRemovalHarness(persistent: true)
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.base.files.createDirectory(at: h.base.project.path)
         try TestPaths.linkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex,
             projectPath: h.base.project.path)
@@ -43,7 +43,7 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
 
     func testLateFailureKeptEntrySettlesWhileProjectStaysRegistered() throws {
         let h = try WaitingRemovalHarness(persistent: true)
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.base.files.createDirectory(at: h.base.project.path)
         try TestPaths.linkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex,
             projectPath: h.base.project.path)
@@ -78,7 +78,7 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
     func testWaitingPromiseDriftRefusesConfirmedProjectRemoval() throws {
         for addingEvidence in [false, true] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             let row = DeployStateRecord(slug: h.base.skill.directoryName, platform: "codex", scope: "project",
                 projectIdentityKey: h.base.project.identityKey, artifactPath: h.base.artifact(.codex), recordedAt: "original")
             if !addingEvidence { try h.base.deployState.upsert(row) }

@@ -4,11 +4,12 @@ import XCTest
 @testable import Pensieve
 
 @MainActor
-struct WaitingRemovalHarness {
+final class WaitingRemovalHarness {
     let base: ProjectFolderCallerHarness
     let mapped: LinkServiceCanonicalDirectoryFileService
     let vm: PlatformViewModel
     let library: SkillLibraryViewModel
+    private var additionalSaveQueues: [(name: String, saves: ManifestSaveModel)] = []
 
     init(platforms: [PlatformTarget] = [.codex], persistent: Bool = false) throws {
         let base = try ProjectFolderCallerHarness(installed: platforms, persistent: persistent)
@@ -38,6 +39,63 @@ struct WaitingRemovalHarness {
 
     var storePath: String { base.root + "/support/waiting-removals.json" }
     var offlinePath: String { base.root + "/offline" }
+
+    func trackSaveQueue(_ saves: ManifestSaveModel, named name: String) {
+        guard saves !== library.manifestSaves,
+              !additionalSaveQueues.contains(where: { $0.saves === saves }) else { return }
+        additionalSaveQueues.append((name, saves))
+    }
+
+    func tearDown(after owner: XCTestCase, file: StaticString = #filePath, line: UInt = #line) {
+        // Called from defer: disarm before returning the main actor to the queued save.
+        clearHooks(on: mapped)
+        clearHooks(on: base.mapped)
+        let testName = owner.name
+        owner.addTeardownBlock { @MainActor in
+            await self.tearDown(testName: testName, file: file, line: line)
+        }
+    }
+
+    /// Disarm both doubles before giving save workers a turn. Join the shared queue and every
+    /// registered queue before removing their sandbox. A bounded failure names its owner and
+    /// leaves the sandbox intact: saves cannot be stopped once they are waiting in flock.
+    @discardableResult
+    func tearDown(testName: String, timeout: Duration = .seconds(TestWait.timeoutSeconds),
+                  file: StaticString = #filePath, line: UInt = #line) async -> Bool {
+        clearHooks(on: mapped)
+        clearHooks(on: base.mapped)
+        let queues = (library.manifestSaves.map { [(name: "library.manifestSaves", saves: $0)] } ?? [])
+            + additionalSaveQueues
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while queues.contains(where: { $0.saves.pendingCount > 0 }), clock.now < deadline, !Task.isCancelled {
+            do { try await Task.sleep(for: .milliseconds(10)) } catch { break }
+        }
+        let unfinished = queues.filter { $0.saves.pendingCount > 0 }
+        guard unfinished.isEmpty else {
+            for queue in unfinished {
+                XCTFail("Unfinished manifest save: \(queue.name) in \(testName); "
+                    + "pending=\(queue.saves.pendingCount), lock=\(queue.saves.lockPath)", file: file, line: line)
+            }
+            return false
+        }
+        base.cleanup()
+        return true
+    }
+
+    private func clearHooks(on double: LinkServiceCanonicalDirectoryFileService) {
+        double.beforeDirectoryCreation = nil
+        double.beforeArtifactCreation = nil
+        double.beforeArtifactDeletion = nil
+        double.beforeProjectProbe = nil
+        double.beforeRuleRead = nil
+        double.beforeEntryTypeProbe = nil
+        double.beforeDeployStateRead = nil
+        double.beforeDeployStateWrite = nil
+        double.beforeFileWrite = nil
+        double.beforeSymlinkRead = nil
+        double.beforePathResolution = nil
+    }
 
     func deploy(_ platforms: [PlatformTarget]) throws {
         try base.files.createDirectory(at: base.project.path)

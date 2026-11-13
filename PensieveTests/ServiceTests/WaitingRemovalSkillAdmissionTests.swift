@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalSkillAdmissionTests: XCTestCase {
     func testNeverDeployedMissingProjectDoesNotQueueOrAppearInNotice() throws {
         let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex, .cursor])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         var probes: [String] = []
         h.mapped.beforeProjectProbe = { probes.append($0) }
         XCTAssertTrue(h.deleteSkill())
@@ -21,7 +21,7 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
         for content in ["broken", #"{"schema_version":999,"records":[]}"#] {
             for missing in [true, false] {
                 let h = try WaitingRemovalHarness()
-                defer { h.base.cleanup() }
+                defer { h.tearDown(after: self) }
                 try h.base.files.createDirectory(at: h.base.project.path)
                 try h.vm.deploy(skill: h.base.skill, platform: .codex, target: .project(h.base.project), context: h.base.context)
                 XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
@@ -42,7 +42,7 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
                 XCTAssertTrue(h.base.files.isSymlink(at: folder + "/agents/" + h.base.skill.directoryName + ".md"))
             }
             let available = try WaitingRemovalHarness()
-            defer { available.base.cleanup() }
+            defer { available.tearDown(after: self) }
             try available.base.files.createDirectory(at: available.base.project.path)
             try available.base.files.writeFile(at: available.base.root + "/support/deploy-state.json", content: content)
             XCTAssertTrue(available.deleteSkill(), "All available, no owned artifacts")
@@ -53,7 +53,7 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
         for source in ["category", "intent", "local request", "state", "history", "remote request"] {
             for platform in [PlatformTarget.claudeCode, .codex, .cursor] where source != "history" || platform == .cursor {
                 let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex, .cursor])
-                defer { h.base.cleanup() }
+                defer { h.tearDown(after: self) }
                 let path = h.vm.artifactPath(skill: h.base.skill, platform: platform, target: .project(h.base.project))
                 switch source {
                 case "category": h.base.context.insert(SkillProjectAssignment(
@@ -86,7 +86,7 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
     func testAvailableRemovalFailureKeepsUnavailableRecordsAndOnlyPreexistingWaitingEntries() throws {
         for preexisting in [false, true] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             try h.base.addIntent(platform: .codex, project: h.base.otherProject)
             XCTAssertFalse(h.base.intent.reconcile(context: h.base.context).hasFailures)
