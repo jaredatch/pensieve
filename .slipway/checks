@@ -1,0 +1,17 @@
+paths = Pensieve/Views/InstallViews/ViewChangesView.swift Pensieve/Views/InstallViews/ViewChangesFileRow.swift Pensieve/Views/InstallViews/UnifiedDiffView.swift Pensieve/Views/InstallViews/ViewChangesPresentation.swift Pensieve/Utilities/DesignTokens+UpdateReview.swift PensieveTests/ViewTests/ViewChangesPolishTests.swift PensieveTests/ViewTests/ViewChangesSceneTests.swift PensieveTests/ViewTests/ViewChangesSceneTests+C11.swift PensieveTests/Fixtures/RenderedViewTestSupport.swift CHANGELOG.md
+check.sidebar = tests PensieveTests/ViewChangesPolishTests/testSidebarStartsClosedForOneChangedFileAndOpenForSeveral
+mutation.sidebar = .slipway/mutations/sidebar.patch
+check.choice = tests PensieveTests/ViewChangesPolishTests/testSidebarKeepsYourChoiceUntilNewChangesLoad
+mutation.choice = .slipway/mutations/choice.patch
+check.rows = tests PensieveTests/ViewChangesPolishTests/testSidebarFileRowsSitCloseToTheEdgesAndStayCompact
+mutation.rows = .slipway/mutations/rows.patch
+check.title = tests PensieveTests/ViewChangesPolishTests/testTitleLinesUpWithTheFilePathClearOfTheSidebar
+mutation.title = .slipway/mutations/title.patch
+check.gap = tests PensieveTests/ViewChangesPolishTests/testFirstChangeStartsRightUnderTheFileHeader
+mutation.gap = .slipway/mutations/gap.patch
+check.gutter = tests PensieveTests/ViewChangesPolishTests/testLineNumberGutterIsAsNarrowAsTheEditors
+mutation.gutter = .slipway/mutations/gutter.patch
+check.longnumbers = tests PensieveTests/ViewChangesPolishTests/testLongLineNumbersDrawWholeAndKeepTextAligned
+mutation.longnumbers = .slipway/mutations/longnumbers.patch
+check.buttons = tests PensieveTests/ViewChangesPolishTests/testToolbarButtonsUseTheRegularControlSize
+mutation.buttons = .slipway/mutations/buttons.patch
