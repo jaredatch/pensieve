@@ -23,7 +23,6 @@ struct SkillFrontmatterTable: View {
     private func decoratedCell(_ value: String, row: Int, isKey: Bool = false, isCollection: Bool = false) -> some View {
         cell(value, isKey: isKey, isCollection: isCollection)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(row.isMultiple(of: 2) ? Color.clear : DesignTokens.markdownCodeFill)
             .overlay(alignment: .bottom) {
                 if row < rows.count - 1 {
                     DesignTokens.markdownSeparator.frame(height: DesignTokens.frontmatterTableRuleThickness)
