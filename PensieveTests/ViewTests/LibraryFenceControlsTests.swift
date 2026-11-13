@@ -176,16 +176,23 @@ final class LibraryFenceFixture {
     let host = NSHostingView(rootView: AnyView(EmptyView()))
     let window: NSWindow
 
-    init(defaults: UserDefaults, launchReconcile: @escaping AppRuntime.LaunchReconcile = { _, _ in
+    init(defaults: UserDefaults, detectedAgents: [PlatformTarget]? = nil,
+         launchReconcile: @escaping AppRuntime.LaunchReconcile = { _, _ in
         LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false)
     }) throws {
         // Temporary runtime paths select inert deployment services; launch work is driven by the test.
+        let paths = try AppRuntimePaths.temporary(named: "LibraryFenceControlsTests")
+        let platform = detectedAgents.map {
+            PlatformViewModel(linkService: DeletionTestLinkService(), cursorCompiler: DeletionTestCursorCompiler(),
+                agentDetection: DeletionTestDetection(installed: $0), deployStateStore: .memoryBacked,
+                skillsDirectory: paths.skillsDir)
+        }
         runtime = try AppRuntime(
             container: AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)),
-            defaults: defaults,
+            platformVM: platform, defaults: defaults,
             launchReconcile: launchReconcile,
             launchBackfill: { _ in }, hasRemoteConfigured: { false },
-            paths: AppRuntimePaths.temporary(named: "LibraryFenceControlsTests"), gitUsabilityProbe: { .usable })
+            paths: paths, gitUsabilityProbe: { .usable })
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 850),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

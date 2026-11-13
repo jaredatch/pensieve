@@ -26,6 +26,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- Import, category headers, Platform Paths and delete questions now name only agents found on this Mac. The delete question also correctly describes removing Cursor rules deployed from this Mac.
+
 - Click Sync failed to see why and retry. Settings › Sync also shows the error. Sync failures now use plain sentences with advice on what to do next, and the sync log keeps git’s output with sync credentials removed.
 
 - History for a GitHub skill downloads only that skill's files, so large repositories load far faster.

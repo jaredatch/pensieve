@@ -4,6 +4,7 @@ import SwiftData
 /// The category management surface: one place to manage a category's member PROJECTS and its assigned
 /// SKILLS (the standing rule). Each toggle reconciles and surfaces a resilient §5 result. (PLAN-06 / 06.5)
 struct CategoryDetailView: View {
+    private let platformVM: PlatformViewModel
     let library: SkillLibraryViewModel
     let categoryID: UUID
     let onReveal: (Skill) -> Void
@@ -18,6 +19,7 @@ struct CategoryDetailView: View {
     init(categoryID: UUID, platformVM: PlatformViewModel, library: SkillLibraryViewModel,
          manifestSaves: ManifestSaveModel?,
          notifier: @escaping SyncStateNotifying, onReveal: @escaping (Skill) -> Void) {
+        self.platformVM = platformVM
         self.library = library
         self.categoryID = categoryID
         self.onReveal = onReveal
@@ -39,7 +41,7 @@ struct CategoryDetailView: View {
 
     @ViewBuilder
     private func surface(for category: Category) -> some View {
-        let agents = PlatformTarget.allCases.filter(\.supportsProjectScope).map(\.displayName).joined(separator: ", ")
+        let agents = platformVM.deployablePlatforms(forProject: true).map(\.displayName).joined(separator: ", ")
 
         Form {
             headerSection(for: category, agents: agents)
@@ -116,7 +118,8 @@ struct CategoryDetailView: View {
                     .font(.title2)
                 Text("\(category.projectKeys.count) projects · \(category.skillSlugs.count) skills")
                     .foregroundStyle(.secondary)
-                Text("Deploys to your installed project-capable agents (\(agents)).")
+                Text(agents.isEmpty ? "No project-capable agents were found on this Mac."
+                     : "Deploys to your installed project-capable agents (\(agents)).")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

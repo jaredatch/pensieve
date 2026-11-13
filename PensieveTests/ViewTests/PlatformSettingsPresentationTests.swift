@@ -14,7 +14,10 @@ final class PlatformSettingsPresentationTests: XCTestCase {
         defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }
         defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
-        let runtime = try AppRuntime(defaults: defaults, paths: paths, gitUsabilityProbe: { .usable })
+        let platform = PlatformViewModel(linkService: DeletionTestLinkService(), cursorCompiler: DeletionTestCursorCompiler(),
+            agentDetection: DeletionTestDetection(installed: [.claudeCode, .grok, .cursor]),
+            deployStateStore: .memoryBacked, skillsDirectory: paths.skillsDir)
+        let runtime = try AppRuntime(platformVM: platform, defaults: defaults, paths: paths, gitUsabilityProbe: { .usable })
         let host = NSHostingView(rootView: PlatformSettingsView(defaults: defaults).environment(runtime)
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 420),
@@ -43,12 +46,9 @@ final class PlatformSettingsPresentationTests: XCTestCase {
     }
 
     func testGrokPathRowFollowsClaudeCodeAndShowsItsUserSkillsFolder() {
-        XCTAssertEqual(
-            PlatformPathSetting.rows(paths: TestPaths.deployPaths).map(\.platform),
-            [.claudeCode, .grok, .cursor]
-        )
-
-        guard let grok = PlatformPathSetting.rows(paths: TestPaths.deployPaths).first(where: { $0.platform == .grok }) else {
+        let rows = PlatformPathSetting.rows(paths: TestPaths.deployPaths, detectedPlatforms: [.claudeCode, .grok, .cursor])
+        XCTAssertEqual(rows.map(\.platform), [.claudeCode, .grok, .cursor])
+        guard let grok = rows.first(where: { $0.platform == .grok }) else {
             return XCTFail("Grok is missing from Platform Paths")
         }
         XCTAssertEqual(grok.label, "Grok Skills")
