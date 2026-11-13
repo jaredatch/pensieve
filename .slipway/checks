@@ -1,0 +1,3 @@
+paths = docs/SPEC.md PensieveTests/ViewModelTests/ConflictWindowAuditTests.swift
+behavior = none
+check.hygiene = run bash -c './script/public-hygiene.sh --tree && ./script/test.sh --filter PensieveTests/ConflictWindowAuditTests/testFailureResolvingAuthenticationBeforeEngineIsLoggedAndScrubsURL'
