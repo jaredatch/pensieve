@@ -1,0 +1,2 @@
+paths = PensieveTests/ServiceTests/ PensieveTests/ViewModelTests/PlatformViewModelTests+Removal.swift Pensieve.xcodeproj/project.pbxproj docs/TESTING.md .slipway/changelog/260.md
+behavior = none
