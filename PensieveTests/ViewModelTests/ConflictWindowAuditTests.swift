@@ -64,14 +64,14 @@ final class ConflictWindowAuditTests: XCTestCase {
         let remoteGit = try h.disk.executable("""
             case "$*" in
               *--version*) printf 'git version fixture\\n'; exit 0 ;;
-              *) printf 'fatal: cannot read https://user:privatepassword@fixture.test/store.git\\n' >&2; exit 128 ;;
+              *) printf 'fatal: cannot read https://user:privatepassword@fixture.example/store.git\\n' >&2; exit 128 ;;
             esac
             """)
         let beforeRemote = try h.log()
         let remoteModel = h.window(engine: AuditFailureEngine(), git: remoteGit)
         await remoteModel.loadAndReport(container: try makeContainer())
         guard case .error = remoteModel.phase else { return XCTFail("Expected remote-read error") }
-        try h.assertWindowLine(after: beforeRemote, status: status, fragments: ["fatal: cannot read https://fixture.test"])
+        try h.assertWindowLine(after: beforeRemote, status: status, fragments: ["fatal: cannot read https://fixture.example"])
         XCTAssertFalse(try h.log().contains("privatepassword"))
     }
 
