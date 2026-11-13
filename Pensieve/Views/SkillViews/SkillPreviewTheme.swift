@@ -47,9 +47,9 @@ enum SkillPreviewTheme {
         }
         .blockquote { configuration in
             HStack(spacing: 0) {
-                DesignTokens.markdownSeparator.frame(width: DesignTokens.markdownQuoteRule)
+                DesignTokens.markdownQuoteRuleColor.frame(width: DesignTokens.markdownQuoteRule)
                 configuration.label
-                    .markdownTextStyle { ForegroundColor(.secondary) }
+                    .markdownTextStyle { ForegroundColor(DesignTokens.markdownQuoteText) }
                     .padding(.horizontal, DesignTokens.markdownQuoteInset)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -66,6 +66,7 @@ enum SkillPreviewTheme {
                     .lineHeight(.multiple(factor: DesignTokens.markdownCodeLineHeight))
                     .padding(DesignTokens.markdownCodePadding)
             }
+            .scrollIndicators(.never, axes: .horizontal)
             .background(DesignTokens.markdownCodeFill)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.markdownCodeRadius))
             .markdownMargin(top: 0, bottom: DesignTokens.markdownBlockGap)
@@ -75,7 +76,7 @@ enum SkillPreviewTheme {
                 .fixedSize(horizontal: false, vertical: true)
                 .markdownTableBorderStyle(.init(color: DesignTokens.markdownSeparator,
                                                 width: DesignTokens.markdownRuleThickness))
-                .markdownTableBackgroundStyle(.alternatingRows(.clear, DesignTokens.markdownCodeFill))
+                .markdownTableBackgroundStyle(.clear)
                 .markdownMargin(top: 0, bottom: DesignTokens.markdownBlockGap)
         }
         .tableCell { configuration in

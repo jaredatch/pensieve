@@ -26,6 +26,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- Rendered Markdown has unstriped tables, lighter code backgrounds, hidden code block scroll bars and darker block quotes in Content and History.
+
 - History’s View Diff and View Edits now open the View Changes window. Comparisons stay open when you leave History and tell you when your copy has changed since they were read.
 
 - Import, category headers, Platform Paths and delete questions now name only agents found on this Mac. The delete question also correctly describes removing Cursor rules deployed from this Mac.

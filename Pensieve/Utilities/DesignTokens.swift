@@ -37,7 +37,9 @@ enum DesignTokens {
     static let frontmatterKeyMaximumShare: CGFloat = 0.4
     static let frontmatterTableRuleThickness: CGFloat = 1 // Signed-off frontmatter table frame.
     static let markdownThematicBreakMargin: CGFloat = Spacing.xl // 24 px → 19.5 → 20 pt
-    static let markdownCodeFill = Color(nsColor: .quaternaryLabelColor)
+    static let markdownCodeFill = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+    static let markdownQuoteText = Color.primary.opacity(0.7)
+    static let markdownQuoteRuleColor = Color.primary.opacity(0.18)
     static let markdownSeparator = Color(nsColor: .separatorColor)
 
     // MARK: - Detail header and tabs
