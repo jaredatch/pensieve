@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalIsolationTests: XCTestCase {
     func testWaitingSurvivesBackfillHealAndStaysOutOfPublishedAndDisplayedDeployments() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         try h.hideFolder()
         XCTAssertTrue(h.deleteSkill())
@@ -55,7 +55,7 @@ final class WaitingRemovalIsolationTests: XCTestCase {
 
     func testSuccessfulDaemonPassPrunesUserLinkButNeverRunsReadyProjectWaitingRemoval() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         try h.hideFolder()
         XCTAssertTrue(h.deleteSkill())

@@ -13,7 +13,7 @@ extension PlatformViewModelTests {
     @MainActor
     func testRemoveAllDeploysDropsForeignCursorRecordWithoutRemovingRule() throws {
         let h = try WaitingRemovalHarness(platforms: [.cursor])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         let path = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .userWide)
         try h.mapped.writeFile(at: path, content: "User's foreign rule")
         try h.base.deployState.upsert(DeployStateRecord(slug: h.base.skill.directoryName, platform: "cursor",

@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalDeletionSafetyTests: XCTestCase {
     func testSkillDeletionLosingFolderDuringClassificationKeepsSkillAndEvidenceForRetry() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         let state = try h.base.deployState.read()
         var lost = false
@@ -30,7 +30,7 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
 
     func testProjectRemovalLosingFolderDuringClassificationKeepsRegistrationAndEvidenceForRetry() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         let state = try h.base.deployState.read()
         var lost = false
@@ -52,7 +52,7 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
 
     func testMixedSkillDeletionWritesAvailableBatchThenWaitingRecordsAfterDeletion() throws {
         let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         for platform in [PlatformTarget.claudeCode, .codex] {
             try h.base.addIntent(platform: platform, project: h.base.otherProject)
@@ -83,7 +83,7 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
     func testKeptSkillRecordWarningUsesDeletionOutcomeForFilesAndRowFailures() throws {
         for phase in ["files", "row"] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             try h.hideFolder()
             let failing = RecordingDeletionSkillStore()
@@ -96,6 +96,7 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
                 notifier: {},
             manifestSaves: ManifestSaveModel(manifest: ManifestService(fileService: h.base.files), root: h.base.root + "/store",
                 lockPath: h.base.root + "/store" + ".sync.lock", files: h.mapped))
+            h.trackSaveQueue(try XCTUnwrap(library.manifestSaves), named: "deletion library")
             h.base.mapped.beforeDeployStateWrite = { _ in throw CocoaError(.fileWriteNoPermission) }
             var saves = 0
             XCTAssertFalse(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,
@@ -122,7 +123,7 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
     func testCleanupNamesEveryFailedEvidenceRead() throws {
         for (failure, available) in [("history", false), ("local", false), ("history", true)] {
             let h = try WaitingRemovalHarness(platforms: [.cursor])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             if available {
                 try h.base.files.createDirectory(at: h.base.project.path)
                 let path = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
