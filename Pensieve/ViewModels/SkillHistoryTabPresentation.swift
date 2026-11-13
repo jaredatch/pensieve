@@ -27,15 +27,13 @@ final class SkillHistoryTabPresentation {
         }
     }
 
-    struct Diff: Identifiable {
+    struct Diff {
         let version: SkillHistoryVersion
         let body: String
-        var id: String { version.sha }
     }
 
     var snapshot = SkillHistorySnapshot()
     var showAll = false
-    var diff: Diff?
     var restoring: SkillHistoryVersion?
     var selection: SkillHistorySelection?
     private var actionError: String?
@@ -69,7 +67,6 @@ final class SkillHistoryTabPresentation {
         loadGeneration &+= 1
         actionGeneration &+= 1
         skillID = nil
-        diff = nil
         selection = nil
         restoring = nil
         readingVersion = nil
@@ -94,9 +91,10 @@ final class SkillHistoryTabPresentation {
         }
     }
 
+    @discardableResult
     func read(_ version: SkillHistoryVersion, skill: Skill, git: GitServiceProtocol,
-              workingDir: String, asDiff: Bool) async {
-        guard skillID == skill.id else { return }
+              workingDir: String, asDiff: Bool) async -> Diff? {
+        guard skillID == skill.id else { return nil }
         retireRestore(Self.interruptedRestoreMessage)
         actionGeneration &+= 1
         let generation = actionGeneration
@@ -105,17 +103,18 @@ final class SkillHistoryTabPresentation {
         readingVersion = version.sha
         selection = nil
         let document = await BlockingWork.run { git.show(sha: version.sha, path: path, at: workingDir) }
-        guard !Task.isCancelled, skillID == skill.id, actionGeneration == generation else { return }
+        guard !Task.isCancelled, skillID == skill.id, actionGeneration == generation else { return nil }
         readingVersion = nil
         guard let document else {
             actionError = "Couldn't load that version."
-            return
+            return nil
         }
         if asDiff {
-            diff = Diff(version: version, body: SkillHistoryPresentation.previewBody(from: document))
+            return Diff(version: version, body: SkillHistoryPresentation.previewBody(from: document))
         } else {
             selection = SkillHistorySelection(sha: version.sha, document: document)
         }
+        return nil
     }
 
     private func retireRestore(_ message: String, leavingHistory: Bool = false) {

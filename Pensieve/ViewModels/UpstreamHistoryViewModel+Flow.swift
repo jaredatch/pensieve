@@ -36,6 +36,7 @@ extension UpstreamHistoryViewModel {
         for session in flow.requests.values where session.pending.isEmpty { finish(session) }
         flow.requests = flow.requests.filter { $0.value.continuation != nil || !$0.value.pending.isEmpty }
         flows[skillID] = flow
+        if currentSkillID == skillID { updateShownRevision(from: flow) }
         if case .manualCheck = event { manualCheckRevision &+= 1 }
     }
 
@@ -160,10 +161,25 @@ extension UpstreamHistoryViewModel {
         advance(active, flow: &flow, allowsManual: allowsManual)
     }
 
+    /// Carry the held result's measurement stamp even when an equal visible state isn't reassigned.
+    /// A refresh can keep old rows pressable while a newer local measurement is still running.
+    private func updateShownRevision(from flow: SkillFlow) {
+        let result: UpstreamHistoryResult
+        switch state {
+        case let .loaded(value), let .refreshing(value), let .loadedWithFailure(value, _): result = value
+        case .idle, .loading, .failed: shownLocalRevision = nil; return
+        }
+        shownLocalRevision = flow.held.values.first { $0.result == result }?.localRevision
+    }
+
     func publish(_ value: UpstreamHistoryLoadState, skillID: UUID?) {
         sequenceHooks?.published(value, skillID)
         guard state != value else { return }
         state = value
+        switch value {
+        case .idle, .loading, .failed: shownLocalRevision = nil
+        case .loaded, .refreshing, .loadedWithFailure: break
+        }
     }
 
     func showNoQuestion() {

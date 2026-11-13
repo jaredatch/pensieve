@@ -36,7 +36,7 @@ extension EnvironmentValues {
 
 /// The sync repo's versions of SKILL.md as a timeline (the master `Commit row`): a 12 pt dot column with
 /// a 10 pt dot and the 1 pt connector, the body at 28 on 6 pt gaps, 24 pt between rows. View Diff opens
-/// PLAN-09's line diff against the current file; Restore This Version… confirms, then writes the version
+/// the shared comparison window against the current file; Restore This Version… confirms, then writes the version
 /// back through the existing boundary, which drops any draft only after the write.
 struct SkillHistoryTab: View {
     let skill: Skill
@@ -44,6 +44,8 @@ struct SkillHistoryTab: View {
     @Bindable var library: SkillLibraryViewModel
     @Bindable var upstreamHistory: UpstreamHistoryViewModel
     let localRevision: UpstreamHistoryLocalRevision
+    let currentRevision: UpstreamHistoryLocalRevision
+    let onViewComparison: (HistoryDiffComparison) -> Void
     let onOpenUpdates: () -> Void
     let onUpdateCheck: UpstreamHistoryViewModel.UpdateCheckRequest
     private let hostedPresentation: SkillHistoryTabPresentation?
@@ -64,12 +66,16 @@ struct SkillHistoryTab: View {
          git: GitServiceProtocol,
          store: SkillStoreProtocol,
          workingDir: String,
-         hostedPresentation: SkillHistoryTabPresentation? = nil) {
+         hostedPresentation: SkillHistoryTabPresentation? = nil,
+         currentRevision: UpstreamHistoryLocalRevision = .initial,
+         onViewComparison: @escaping (HistoryDiffComparison) -> Void = { _ in }) {
         self.skill = skill
         self.currentBody = currentBody
         self.library = library
         self.upstreamHistory = upstreamHistory
         self.localRevision = localRevision
+        self.currentRevision = currentRevision
+        self.onViewComparison = onViewComparison
         self.onOpenUpdates = onOpenUpdates
         self.onUpdateCheck = onUpdateCheck
         self.git = git
@@ -89,7 +95,9 @@ struct SkillHistoryTab: View {
                     localRevision: localRevision,
                     onOpenUpdates: onOpenUpdates,
                     onUpdateCheck: onUpdateCheck,
-                    history: upstreamHistory
+                    history: upstreamHistory,
+                    currentRevision: currentRevision,
+                    onViewComparison: onViewComparison
                 )
             } else {
                 authoredHistory
@@ -140,10 +148,6 @@ struct SkillHistoryTab: View {
         )) {
             await presentation.load(skill: skill, git: git, workingDir: workingDir)
         }
-        .sheet(item: $presentation.diff) { diff in
-            SkillHistoryDiffSheet(version: diff.version, versionBody: diff.body,
-                                  currentBody: currentBody, onClose: { presentation.diff = nil })
-        }
         .confirmationDialog("Restore this version?", isPresented: Binding(
             get: { presentation.restoring != nil }, set: { if !$0 { presentation.restoring = nil } }
         ), titleVisibility: .visible, presenting: presentation.restoring) { version in
@@ -163,7 +167,14 @@ struct SkillHistoryTab: View {
     }
 
     private func presentDiff(_ version: SkillHistoryVersion) {
-        Task { await presentation.read(version, skill: skill, git: git, workingDir: workingDir, asDiff: true) }
+        let revision = currentRevision, body = currentBody
+        Task {
+            guard let diff = await presentation.read(version, skill: skill, git: git, workingDir: workingDir,
+                                                     asDiff: true) else { return }
+            onViewComparison(.body(skill: skill, sourceID: "authored:" + diff.version.sha,
+                subtitle: SkillHistoryTimeline.meta(for: diff.version) + " → Current", old: diff.body,
+                current: body, revision: revision))
+        }
     }
 
     private func restore(_ version: SkillHistoryVersion) {
@@ -217,32 +228,5 @@ private struct SkillHistoryRowView: View {
                 }
             }
         }
-    }
-}
-
-/// PLAN-09's line diff in a sheet: the version on the left, the current file on the right.
-private struct SkillHistoryDiffSheet: View {
-    let version: SkillHistoryVersion
-    let versionBody: String
-    let currentBody: String
-    let onClose: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("Changes since " + SkillHistoryTimeline.meta(for: version))
-                .font(.headline)
-            ScrollView {
-                LineDiffView(this: versionBody, other: currentBody,
-                             thisLabel: "That version", otherLabel: "Current")
-            }
-            .frame(minHeight: 420)
-            HStack {
-                Spacer()
-                Button("Close", action: onClose)
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(Spacing.xl)
-        .frame(width: 760)
     }
 }

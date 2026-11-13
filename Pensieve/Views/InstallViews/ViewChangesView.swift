@@ -17,8 +17,8 @@ struct ViewChangesView: View {
                 separator
                 content
             }
-            .navigationTitle(model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
-            .navigationSubtitle(model.row.map(ViewChangesPresentation.subtitle) ?? "")
+            .navigationTitle(model.heading)
+            .navigationSubtitle(model.subtitle)
             .toolbar { changesToolbar }
         }
         .navigationSplitViewStyle(.balanced)
@@ -67,35 +67,37 @@ struct ViewChangesView: View {
             heading.sharedBackgroundVisibility(.hidden)
             ToolbarSpacer(.flexible, placement: .automatic)
         } else { heading }
-        ToolbarItem(id: "changes-github", placement: .primaryAction) {
-            Button("View on GitHub") {
-                if let url = model.row?.compareURL { openURL(url) }
-            }
-            .controlSize(.large)
-            .font(DesignTokens.changesButton)
-            .frame(width: DesignTokens.changesGitHubButtonWidth, height: DesignTokens.changesButtonHeight)
-            .disabled(model.row?.compareURL == nil)
-            .accessibilityIdentifier("changes-github")
-        }
-        ToolbarItem(id: "changes-update", placement: .primaryAction) {
-            Button("Update", action: onUpdate)
+        if !model.isHistory {
+            ToolbarItem(id: "changes-github", placement: .primaryAction) {
+                Button("View on GitHub") {
+                    if let url = model.row?.compareURL { openURL(url) }
+                }
                 .controlSize(.large)
                 .font(DesignTokens.changesButton)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .frame(width: DesignTokens.changesUpdateButtonWidth, height: DesignTokens.changesButtonHeight)
-                .disabled(!model.canUpdate || library.libraryUnavailable)
-                .accessibilityIdentifier("changes-update")
+                .frame(width: DesignTokens.changesGitHubButtonWidth, height: DesignTokens.changesButtonHeight)
+                .disabled(model.row?.compareURL == nil)
+                .accessibilityIdentifier("changes-github")
+            }
+            ToolbarItem(id: "changes-update", placement: .primaryAction) {
+                Button("Update", action: onUpdate)
+                    .controlSize(.large)
+                    .font(DesignTokens.changesButton)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .frame(width: DesignTokens.changesUpdateButtonWidth, height: DesignTokens.changesButtonHeight)
+                    .disabled(!model.canUpdate || library.libraryUnavailable)
+                    .accessibilityIdentifier("changes-update")
+            }
         }
     }
 
     private var heading: some ToolbarContent {
         ToolbarItem(id: "changes-heading", placement: .navigation) {
             VStack(alignment: .leading, spacing: DesignTokens.changesTitleGap) {
-                Text(model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
+                Text(model.heading)
                     .font(DesignTokens.changesTitle)
-                if let row = model.row {
-                    Text(verbatim: ViewChangesPresentation.subtitle(row))
+                if !model.subtitle.isEmpty {
+                    Text(verbatim: model.subtitle)
                         .font(DesignTokens.changesSubtitle).foregroundStyle(.secondary)
                 }
             }
@@ -119,7 +121,7 @@ struct ViewChangesView: View {
                     Button("Re-check") { model.recheck(context: context) }
                         .disabled(!model.canRecheck)
                         .accessibilityIdentifier("changes-recheck")
-                } else {
+                } else if !model.isHistory {
                     Button("Retry") { retry() }.accessibilityIdentifier("changes-retry")
                 }
             }
@@ -140,13 +142,14 @@ struct ViewChangesView: View {
             }
             if let file = model.selectedFile {
                 ViewChangesFileHeader(file: file)
-                if let reason = ViewChangesPresentation.unavailableReason(file) {
+                if let reason = ViewChangesPresentation.unavailableReason(file, history: model.isHistory) {
                     EmptyStateView(ViewChangesPresentation.unavailableTitle(file), description: reason)
                 } else if let diff = file.diff {
                     UnifiedDiffView(diff: diff, notes: model.selectedFileNotes).id(model.selectedFileID)
                 }
             } else {
-                EmptyStateView("No File Changes", description: preview.isIncomplete
+                EmptyStateView("No File Changes", description: model.isHistory
+                    ? "There’s nothing to compare." : preview.isIncomplete
                     ? "Use View on GitHub to see the files outside this preview."
                     : "The local files already match this update.")
             }

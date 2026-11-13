@@ -49,12 +49,12 @@ extension SkillHistoryAsyncTests {
                 if !readFinishesFirst { readGate.open() }
                 readGate.open()
                 await read.value
-                await secondRead.value
+                let selectedDiff = await secondRead.value
                 XCTAssertEqual(model.errorMessage, message + (readFails ? " Couldn't load that version." : ""), name)
                 XCTAssertNil(model.restoringVersion, name)
                 XCTAssertEqual(fixture.store.bodies["example"], "Current", name)
                 XCTAssertEqual(fixture.counter.value, 0, name)
-                XCTAssertEqual(asDiff ? model.diff?.body : model.selection?.sha,
+                XCTAssertEqual(asDiff ? selectedDiff?.body : model.selection?.sha,
                                readFails ? nil : (asDiff ? "read body" : "read"), name)
             }
         }

@@ -79,7 +79,7 @@ A skill's detail is a header (name, where it came from, description, tags) over 
 - **Overview:** what the skill costs to load, what its folder holds, and where it's deployed on this Mac.
 - **Deployments:** a switch per agent, for this Mac, each registered project, and (once sync is set up) your other Macs.
 - **Content:** the rendered file. Switch to source to edit it in a real code editor. Nothing is saved until you press Save or `Cmd+S`, and leaving with unsaved changes asks first.
-- **History:** the versions saved in your sync repo, newest first. View Diff shows what changed since a version, and Restore This Version… puts it back.
+- **History:** the versions saved in your sync repo, newest first. View Diff opens the View Changes window to compare a version with your current copy. Restore This Version… puts it back.
 
 Edit a skill's tags right in the header, with suggestions from tags you already use. Pensieve keeps them in its own metadata and leaves `SKILL.md` alone. File › Export SKILL.md… saves a copy anywhere you like.
 

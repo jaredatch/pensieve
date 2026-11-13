@@ -15,6 +15,7 @@ final class ViewChangesViewModel {
     }
 
     private(set) var state: State = .idle
+    private(set) var historyComparison: HistoryDiffComparison?
     private(set) var row: UpdatesRow?
     private(set) var selectedFileID: Int?
     private(set) var isRechecking = false
@@ -78,7 +79,7 @@ final class ViewChangesViewModel {
     func open(skillID: UUID, context: ModelContext, folderRevision: UInt64? = nil,
               folderRevisions: [String: UInt64] = [:]) {
         do {
-            if requestedSkillID == skillID, case .loaded = state,
+            if historyComparison == nil, requestedSkillID == skillID, case .loaded = state,
                let skill = try skillLookup(skillID, context),
                identity == ViewChangesIdentity(skill: skill,
                    folderRevision: folderRevision ?? folderRevisions[skill.directoryName, default: 0]) {
@@ -106,12 +107,59 @@ final class ViewChangesViewModel {
         }
     }
 
+    func openHistory(_ comparison: HistoryDiffComparison, context: ModelContext) {
+        if historyComparison == comparison, case .loaded = state { validateHistory(context: context); return }
+        close()
+        requestedSkillID = comparison.skillID
+        historyComparison = comparison
+        do {
+            guard let skill = try skillLookup(comparison.skillID, context) else {
+                markStale("This skill was deleted.", allowsRecheck: false)
+                return
+            }
+            identity = ViewChangesIdentity(skill: skill,
+                folderRevision: library.folderChangeRevisions[skill.directoryName, default: 0])
+            guard validateHistory(context: context) else { return }
+            state = .loading
+            let session = sessionID
+            previewTask = Task { await loadPreview(context: context, session: session) }
+        } catch { state = .failed(UpdatesViewModel.readable(error)) }
+    }
+
+    @discardableResult
+    private func validateHistory(context: ModelContext) -> Bool {
+        guard let comparison = historyComparison else { return true }
+        if case .stale = state { return false }
+        do {
+            guard let skill = try skillLookup(comparison.skillID, context), !skill.isDeleted else {
+                markStale("This skill was deleted.", allowsRecheck: false)
+                return false
+            }
+            let revision = UpstreamHistoryLocalRevision(appWriteRevision: library.appWriteRevision,
+                                                        watcherEventSequence: library.watcherEventSequence)
+            if comparison.revision != revision || identity?.updatedAt != skill.updatedAt
+                || identity?.folderRevision != library.folderChangeRevisions[skill.directoryName, default: 0] {
+                markStale("This comparison may be out of date. Open it again from History to compare the current copy.",
+                          allowsRecheck: false)
+                return false
+            }
+            return true
+        } catch {
+            markStale("Couldn't verify whether this comparison is current. Open it again from History.", allowsRecheck: false)
+            return false
+        }
+    }
+
     func retry(context: ModelContext, folderRevision: UInt64? = nil, folderRevisions: [String: UInt64] = [:]) {
         guard let requestedSkillID, !isRechecking else { return }
         open(skillID: requestedSkillID, context: context, folderRevision: folderRevision, folderRevisions: folderRevisions)
     }
 
     func validate(skills: [Skill], folderRevisions: [String: UInt64], context: ModelContext) {
+        if historyComparison != nil {
+            validateHistory(context: context)
+            return
+        }
         guard let identity else { return }
         let skill: Skill?
         do {
@@ -161,6 +209,7 @@ final class ViewChangesViewModel {
         recheckFailureIdentity = nil
         isRechecking = false
         row = nil
+        historyComparison = nil
         selectedFileID = nil
         state = .idle
     }
@@ -173,13 +222,17 @@ final class ViewChangesViewModel {
     }
 
     private func loadPreview(context: ModelContext, session: UUID) async {
-        guard sessionID == session, !Task.isCancelled, let requested = row else { return }
+        guard sessionID == session, !Task.isCancelled else { return }
+        let requested = row, comparison = historyComparison
         let container = context.container
         let diff = operations.diffOperation
         do {
             let (preview, notes) = try await BlockingWork.run(priority: .userInitiated) {
                 try Task.checkCancellation()
-                let preview = try diff(requested, container)
+                let preview: PinnedSkillDiff
+                if let comparison { preview = try comparison.build() } else if let requested {
+                    preview = try diff(requested, container)
+                } else { throw SkillUpdateFlowError.skillNotFound }
                 let notes = preview.files.map { file in
                     file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? []
                 }
@@ -187,6 +240,7 @@ final class ViewChangesViewModel {
                 return (preview, notes)
             }
             guard sessionID == session, !Task.isCancelled else { return }
+            guard validateHistory(context: context) else { return }
             lineNotes = notes
             selectedFileID = preview.files.indices.first
             state = .loaded(preview)

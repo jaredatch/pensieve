@@ -79,6 +79,8 @@ private struct ViewChangesWindowContent: View {
                             openWindow: { openWindow(id: $0) }).window
             .onAppear { validate() }
             .onChange(of: identities) { _, _ in validate() }
+            .onChange(of: UpstreamHistoryLocalRevision(appWriteRevision: library.appWriteRevision,
+                                                      watcherEventSequence: library.watcherEventSequence)) { _, _ in validate() }
     }
 
     private func validate() {
