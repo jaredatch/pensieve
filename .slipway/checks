@@ -1,0 +1,15 @@
+paths = Pensieve/ViewModels/ViewChangesViewModel.swift Pensieve/ViewModels/ViewChangesViewModel+History.swift Pensieve/ViewModels/SkillHistoryTabPresentation.swift Pensieve/ViewModels/UpstreamHistoryViewModel.swift Pensieve/ViewModels/UpstreamHistoryViewModel+Flow.swift Pensieve/Views/InstallViews/ViewChangesView.swift Pensieve/Views/InstallViews/ViewChangesWindow.swift Pensieve/Views/InstallViews/ViewChangesPresentation.swift Pensieve/Views/InstallViews/UpdateReviewRouting.swift Pensieve/Views/SkillViews/Detail/SkillHistoryTab.swift Pensieve/Views/SkillViews/Detail/InstalledSkillHistoryView.swift Pensieve/Views/SkillViews/Detail/InstalledSkillHistorySession.swift Pensieve/Views/SkillViews/Detail/InstalledSkillHistoryDiffSheets.swift Pensieve/Views/MainWindow/DetailView.swift Pensieve/Views/MainWindow/DetailColumnView.swift Pensieve.xcodeproj/project.pbxproj PensieveTests/ViewTests/ PensieveTests/ViewModelTests/ PensieveTests/Fixtures/ docs/ CHANGELOG.md
+check.authored = tests PensieveTests/HistoryDiffWindowTests/testViewDiffOnASkillYouWroteOpensTheChangesWindow
+mutation.authored = .slipway/mutations/authored.patch
+check.upstream = tests PensieveTests/HistoryDiffWindowTests/testViewDiffOnAnInstalledVersionOpensTheChangesWindow
+mutation.upstream = .slipway/mutations/upstream.patch
+check.edits = tests PensieveTests/HistoryDiffWindowTests/testViewEditsOpensTheChangesWindowWithEachEditedFile
+mutation.edits = .slipway/mutations/edits.patch
+check.standalone = tests PensieveTests/HistoryDiffWindowTests/testAHistoryDiffOfASkillWithNoUpdateStaysReadableAndOffersNoUpdate
+mutation.standalone = .slipway/mutations/standalone.patch
+check.switch = tests PensieveTests/HistoryDiffWindowTests/testViewChangesAndViewDiffOnTheSameSkillEachReplaceTheOther
+mutation.switch = .slipway/mutations/switch.patch
+check.fresh = tests PensieveTests/HistoryDiffWindowTests/testAHistoryDiffNeverShowsOldTextAsCurrent
+mutation.fresh = .slipway/mutations/fresh.patch
+check.wording = tests PensieveTests/HistoryDiffWindowTests/testAHistoryDiffsFallbackStatesNameNoUpdateAndNoGitHub
+mutation.wording = .slipway/mutations/wording.patch
