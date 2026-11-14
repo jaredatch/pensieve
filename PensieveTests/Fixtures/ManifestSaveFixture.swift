@@ -10,6 +10,7 @@ final class ManifestSaveFixture {
     let root: String
     let lockPath: String
     let files = FileService()
+    let deletionFailures = FaultyFileService.DeletionFailures()
     let manifest = ManifestService()
     var currentContext: ModelContext?
     var context: ModelContext { currentContext! }
@@ -32,12 +33,10 @@ final class ManifestSaveFixture {
     var beta: Skill { currentBeta! }
     var currentProject: Project?
     var project: Project { currentProject! }
-
     let persistent: Bool
     var runtime: AppRuntime?
     var recordPath: String { RuntimePaths(storeRoot: root, appSupportDir: root + "/support").refusedCreatesPath }
     var storeURL: URL { URL(fileURLWithPath: directory.root + "/library.store") }
-
     init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01,
          rebuildFiles: FileServiceProtocol? = nil, failAlphaDeletion: Bool = false, persistent: Bool = false) throws {
         self.persistent = persistent
@@ -55,8 +54,9 @@ final class ManifestSaveFixture {
             refusedCreatesPath: persistent
                 ? RuntimePaths(storeRoot: root, appSupportDir: root + "/support").refusedCreatesPath : nil,
             waitSeconds: waitSeconds, files: rebuildFiles ?? files, log: { messages.lines.append($0) })
+        if failAlphaDeletion { deletionFailures.paths.insert(root + "/skills/alpha") }
         let skillFiles: FileServiceProtocol = failAlphaDeletion
-            ? FaultyFileService(wrapped: files, failDeletePath: root + "/skills/alpha") : files
+            ? FaultyFileService(wrapped: files, deletionFailures: deletionFailures) : files
         currentLibrary = SkillLibraryViewModel(skillStore: SkillStore(fileService: skillFiles,
             baseDir: root + "/skills", storeRoot: root),
             fileWatchService: FileWatchService(rootDir: root + "/skills"),

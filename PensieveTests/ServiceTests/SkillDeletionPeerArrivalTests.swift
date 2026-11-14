@@ -3,7 +3,7 @@ import XCTest
 @testable import Pensieve
 
 @MainActor
-final class SkillDeletionPeerArrivalTests: XCTestCase {
+final class SkillDeletionPeerArrivalTests: XCTestCase, SkillDeletionArrivalAssertions {
     func testDeletingThenCreatingTheSameNameWhileSyncWaitsPublishesTheNewSkillWithoutOldAssignments() async throws {
         let h = try ManifestSaveFixture(persistent: true)
         defer { h.cleanup() }
@@ -240,8 +240,11 @@ final class SkillDeletionPeerArrivalTests: XCTestCase {
 
 }
 
-extension SkillDeletionPeerArrivalTests {
-    private func seedRetirement(in h: ManifestSaveFixture) throws -> ManifestSnapshot {
+@MainActor
+protocol SkillDeletionArrivalAssertions {}
+
+extension SkillDeletionArrivalAssertions {
+    func seedRetirement(in h: ManifestSaveFixture) throws -> ManifestSnapshot {
         h.local.skillSlugs = ["alpha"]
         for machine in [ProjectIntentHarness.localID, ProjectIntentHarness.remoteID] {
             h.context.insert(MachineDeployIntent(machineID: machine, skillSlug: "alpha", platformRaw: "codex"))
@@ -259,7 +262,7 @@ extension SkillDeletionPeerArrivalTests {
         return peer
     }
 
-    private func delete(in h: ManifestSaveFixture, failRowSave: Bool = false) {
+    func delete(in h: ManifestSaveFixture, failRowSave: Bool = false) {
         var saves = 0
         XCTAssertEqual(SkillDeletionFlow.delete(skill: h.alpha, library: h.library, platformVM: h.platform,
             projects: [], context: h.context, persist: { context in
@@ -269,18 +272,18 @@ extension SkillDeletionPeerArrivalTests {
             }), !failRowSave)
     }
 
-    private func deliver(_ peer: ManifestSnapshot, in h: ManifestSaveFixture) throws {
+    func deliver(_ peer: ManifestSnapshot, in h: ManifestSaveFixture) throws {
         try h.files.writeFile(at: h.root + "/skills/alpha/SKILL.md",
             content: SkillSerializer.serialize(name: "Peer Alpha", description: "peer", body: "peer body"))
         try h.manifest.write(peer, toRoot: h.root)
     }
 
-    private func deletionSlugs(in h: ManifestSaveFixture) throws -> [String] {
+    func deletionSlugs(in h: ManifestSaveFixture) throws -> [String] {
         try RefusedCreateRecords(path: h.recordPath, files: h.files).read().deletions.map(\.slug)
     }
 
-    private func assertPeer(_ peer: ManifestSnapshot, in h: ManifestSaveFixture,
-                            file: StaticString = #filePath, line: UInt = #line) throws {
+    func assertPeer(_ peer: ManifestSnapshot, in h: ManifestSaveFixture,
+                    file: StaticString = #filePath, line: UInt = #line) throws {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root), peer, file: file, line: line)
         let displayed = try h.manifest.snapshot(from: h.context)
         XCTAssertEqual(displayed.skills.first { $0.slug == "alpha" }, peer.skills.first { $0.slug == "alpha" },
@@ -291,12 +294,12 @@ extension SkillDeletionPeerArrivalTests {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root), peer, file: file, line: line)
     }
 
-    private func publishWindow(in h: ManifestSaveFixture) throws {
+    func publishWindow(in h: ManifestSaveFixture) throws {
         try h.manifest.write(try StoreIngestState.snapshotForPublication(using: h.manifest,
             context: h.context, root: h.root), toRoot: h.root)
     }
 
-    private func assertRetired(_ snapshot: ManifestSnapshot, file: StaticString = #filePath, line: UInt = #line) {
+    func assertRetired(_ snapshot: ManifestSnapshot, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertFalse(snapshot.categories.contains { $0.skillSlugs.contains("alpha") }, file: file, line: line)
         XCTAssertFalse(snapshot.deployIntents.contains { $0.skillSlug == "alpha" }, file: file, line: line)
     }
