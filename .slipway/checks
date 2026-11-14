@@ -1,0 +1,4 @@
+paths = Pensieve/ViewModels/ManifestSaveModel+Records.swift PensieveTests/ServiceTests/SkillDeletionRetryArrivalTests.swift PensieveTests/ServiceTests/SkillDeletionPeerArrivalTests.swift PensieveTests/Fixtures/ManifestSaveFixture.swift PensieveTests/Fixtures/FaultyFileService.swift Pensieve.xcodeproj/project.pbxproj docs/ARCHITECTURE.md .slipway/mutations/retry.patch .slipway/changelog/252.md
+risk = Pensieve/ViewModels/ManifestSaveModel+Records.swift
+check.retry = tests PensieveTests/SkillDeletionRetryArrivalTests
+mutation.retry = .slipway/mutations/retry.patch
