@@ -1,0 +1,8 @@
+paths = Pensieve/Services/StoreIngestState.swift Pensieve/Services/SyncEngine.swift Pensieve/Services/ManifestSkillRename.swift PensieveTests/ServiceTests/SyncCoordinatorTests+RenameRace.swift PensieveTests/ServiceTests/SyncCoordinatorTests+RenameCollision.swift Pensieve.xcodeproj/project.pbxproj docs/ARCHITECTURE.md
+risk = Pensieve/Services/StoreIngestState.swift Pensieve/Services/SyncEngine.swift Pensieve/Services/ManifestSkillRename.swift
+check.record-kept = tests PensieveTests/SyncCoordinatorTests/testASyncBeforeARefusedRenameIsSavedLeavesTheOtherMacsRecordAlone
+check.case-kept = tests PensieveTests/SyncCoordinatorTests/testASyncBeforeARefusedRenameIsSavedLeavesARecordSpelledInAnotherCaseAlone
+check.values-kept = tests PensieveTests/SyncCoordinatorTests/testASyncBeforeARefusedRenameIsSavedLeavesThisMacsTagsAndScopeOnItsSkill
+mutation.record-kept = .slipway/mutations/record-kept.patch
+mutation.case-kept = .slipway/mutations/case-kept.patch
+mutation.values-kept = .slipway/mutations/values-kept.patch
