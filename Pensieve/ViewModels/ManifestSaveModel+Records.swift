@@ -130,16 +130,17 @@ extension ManifestSaveModel {
         return true
     }
 
-    /// The deletion flow calls this synchronously after removing files, before the worker's first turn.
-    /// A kept skill's retirement must still publish, even though its folder is present.
+    /// Once files are removed, check every still-queued attempt for this name and window,
+    /// including a head retirement already waiting on sync.lock. Kept skills still retire normally.
     func recheckRemovedSkillDeletion(_ slug: String, createdAt: Date, context: ModelContext,
                                      onCancellation: @escaping () -> Void) {
-        guard !hasCollision(slug, context: context), let index = items.lastIndex(where: {
+        guard !hasCollision(slug, context: context), items.contains(where: {
             guard case .retireSkill(let target) = $0.change else { return false }
             return target == slug && $0.presentation.context === context
         }) else { return }
         let deletion = RemovedSkillDeletion(createdAt: RefusedCreateRecords.writtenDate(createdAt), didCancel: onCancellation)
-        for target in items.indices.dropFirst(index) where items[target].presentation.context === context {
+        for target in items.indices where items[target].presentation.context === context
+            && items[target].removedSkillDeletion == nil {
             switch items[target].change {
             case .retireSkill(let name), .deleteSkill(let name):
                 if name == slug { items[target].removedSkillDeletion = deletion }
