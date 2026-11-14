@@ -170,6 +170,7 @@
 		27726B4AC3430368D6F0A1CE /* SyncEngine+ConflictResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724CCE95210D82E4DA539A66 /* SyncEngine+ConflictResolution.swift */; };
 		27809FD15FE399BF8C7E1532 /* HeadMetadataFault.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5E86262E537B267AFFEB8B /* HeadMetadataFault.swift */; };
 		27AA3239BC7404E834A31073 /* RenderedViewTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F6DDE5C5748F970A9ECF09 /* RenderedViewTestSupport.swift */; };
+		27ACCC706419FAB38CECF68B /* SyncCoordinatorTests+RenameRace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89B643387752B91FD2320F9 /* SyncCoordinatorTests+RenameRace.swift */; };
 		27C06996B1D12805AF3EB3C6 /* PlatformViewModel+SkillCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1542EE879100E9A103B9FC6 /* PlatformViewModel+SkillCleanup.swift */; };
 		28017A9BB4361910156081EF /* CLIProcessProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90484BC953D5B5045F0F0F77 /* CLIProcessProbe.swift */; };
 		282BEA0D23DEDD669C958B19 /* DaemonBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FD449A6A0D59DFF9F61A27 /* DaemonBundleTests.swift */; };
@@ -2508,6 +2509,7 @@
 		F84BFC055DB4321DF870E1DE /* AgentDetectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetectionService.swift; sourceTree = "<group>"; };
 		F86D5A66C20BD8EC7060B720 /* PathJoiningScalars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathJoiningScalars.swift; sourceTree = "<group>"; };
 		F87D546F0C51930F0E28E870 /* SkillLibraryViewModel+Reads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Reads.swift"; sourceTree = "<group>"; };
+		F89B643387752B91FD2320F9 /* SyncCoordinatorTests+RenameRace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SyncCoordinatorTests+RenameRace.swift"; sourceTree = "<group>"; };
 		F8D089F1A6BE56EDBDA67D3E /* ListRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListRowView.swift; sourceTree = "<group>"; };
 		F8F7E742CDB5C1F38AE2D208 /* UnifiedDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedDiffView.swift; sourceTree = "<group>"; };
 		F96D626C2069F6AFFCB32953 /* LoginItemModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemModel.swift; sourceTree = "<group>"; };
@@ -3945,6 +3947,7 @@
 				C4223E14BBC69D2C15C7F73F /* SyncCoordinatorTests+ManifestSaves.swift */,
 				71701CF21AAC72DFAC836639 /* SyncCoordinatorTests+Priority.swift */,
 				B06F9B6F28C35249C04AB4B2 /* SyncCoordinatorTests+RenameCollision.swift */,
+				F89B643387752B91FD2320F9 /* SyncCoordinatorTests+RenameRace.swift */,
 				C0E73E9A2052E8ED3D9C2CF6 /* SyncDaemonMetadataTests.swift */,
 				D9405083883E582D1AB61A34 /* SyncDaemonTests.swift */,
 				6B8D109C7C54D1756CB77B5A /* SyncEngineLockTests.swift */,
@@ -4870,6 +4873,7 @@
 				4658CEA76B91F6175872ECD6 /* SyncCoordinatorTests+ManifestSaves.swift in Sources */,
 				DB32D6ECE0D251F313B0A04C /* SyncCoordinatorTests+Priority.swift in Sources */,
 				D428DE1F51290865B5698545 /* SyncCoordinatorTests+RenameCollision.swift in Sources */,
+				27ACCC706419FAB38CECF68B /* SyncCoordinatorTests+RenameRace.swift in Sources */,
 				230877C7C6B3A8A2E3A34497 /* SyncCoordinatorTests.swift in Sources */,
 				CBA57126725B2DEDC7D86422 /* SyncDaemonMetadataTests.swift in Sources */,
 				B42892713D1B8E13775EB6D9 /* SyncDaemonTests.swift in Sources */,

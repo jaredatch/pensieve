@@ -1,0 +1,10 @@
+--- a/Pensieve/Services/ManifestSkillRename.swift
++++ b/Pensieve/Services/ManifestSkillRename.swift
+@@ -26,6 +26,7 @@
+     /// Use the save queue's disk judgment before sync can publish the moved row itself.
+     func refusedRename(in snapshot: ManifestSnapshot) -> RefusedRename? {
+         guard case .renameSkill(let old, let new, let details) = self, let details else { return nil }
++        guard snapshot.skills.contains(where: { $0.slug == new }) else { return nil }
+         do {
+             try validate(in: snapshot)
+         } catch ManifestSaveError.renameTaken {

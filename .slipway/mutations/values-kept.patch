@@ -1,0 +1,18 @@
+--- a/Pensieve/Services/StoreIngestState.swift
++++ b/Pensieve/Services/StoreIngestState.swift
+@@ -123,15 +123,6 @@
+         var retained: Set<UUID> = []
+         for edit in changes {
+             let change = edit.change
+-            if let rename = change.refusedRename(in: snapshot) {
+-                var own = rename.details.original
+-                if let current = local?.skills.first(where: { $0.slug == rename.new }),
+-                   ManifestService.sameCreation(current, own) { own = current }
+-                own.slug = rename.new
+-                projected.skills.removeAll { $0.slug.lowercased() == rename.new.lowercased() }
+-                projected.skills.append(own)
+-                continue
+-            }
+             if keepingLocalCreates, case .createSkill = change {
+                 RefusedManifestProjection(fields: [.change(change)], cachedLocal: nil)
+                     .project(onto: &projected, keepingLocalCreates: true, knownCreates: creates)
