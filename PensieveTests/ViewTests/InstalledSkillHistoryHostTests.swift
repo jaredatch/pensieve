@@ -58,7 +58,9 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: secondHead, windowCount: 1)),
                                     failureMessage: "Changing local revision must refresh local edits once",
                                     ready: { localProbe.calls == 1 })
-        XCTAssertEqual(localProbe.calls, 1)
+        XCTAssertEqual(localProbe.calls, 1,
+                       "requested=\(String(describing: owner.currentRequest?.localRevision)); model=\(model.localRevision)")
+        XCTAssertEqual(owner.shownLocalRevision, model.localRevision)
         XCTAssertEqual(readProbe.calls, readCount, "Changing local revision must not read upstream history")
         XCTAssertEqual(owner.currentRequest?.key, question)
         XCTAssertEqual(owner.currentSkillID, second.id)
