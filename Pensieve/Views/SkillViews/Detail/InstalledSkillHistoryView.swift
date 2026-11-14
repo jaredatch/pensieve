@@ -25,7 +25,9 @@ struct InstalledSkillHistoryView: View {
         InstalledSkillHistoryPresentation.RequestID(
             skill: skill,
             localRevision: localRevision,
-            windowCount: session.requestedWindow,
+            // prepare(for:) resets paging for a new skill. Use that window in the task's
+            // identity too, so preparation cannot cancel and restart its own request.
+            windowCount: session.mountedSkillID == skill.id ? session.requestedWindow : 1,
             manualCheckCount: history.manualCheckCount(skillID: skill.id)
         )
     }
