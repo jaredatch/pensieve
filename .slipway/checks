@@ -1,0 +1,3 @@
+paths = Pensieve/Views/InstallViews/UnifiedDiffView.swift PensieveTests/ViewTests/ViewChangesSceneTests+LineDrawing.swift Pensieve.xcodeproj/project.pbxproj
+check.lines = tests PensieveTests/ViewChangesSceneTests/testAChangeWithSeveralEditsDrawsEveryLine
+check.notes = tests PensieveTests/ViewChangesSceneTests/testALineEndingChangeDrawsItsNoteUnderEveryLine
