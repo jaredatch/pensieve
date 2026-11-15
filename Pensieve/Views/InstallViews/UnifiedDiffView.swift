@@ -5,28 +5,54 @@ struct UnifiedDiffView: View {
     let diff: UnifiedDiff
     let notes: [[Int: [String]]]
 
+    private enum RowContent {
+        case header(String)
+        case line(UnifiedDiffLine)
+        case note(String)
+    }
+
+    private struct Row: Identifiable {
+        let id: Int
+        let content: RowContent
+    }
+
+    /// One identity space for the lazy stack, including headers and repeated notes.
+    /// These are lightweight row values; SwiftUI still builds only the visible row views.
+    private var rows: [Row] {
+        var result: [Row] = []
+        for (hunkIndex, hunk) in diff.hunks.enumerated() {
+            let hunkNotes = notes.indices.contains(hunkIndex) ? notes[hunkIndex] : [:]
+            result.append(Row(id: result.count, content: .header(hunk.header)))
+            for (lineIndex, line) in hunk.lines.enumerated() {
+                result.append(Row(id: result.count, content: .line(line)))
+                for note in hunkNotes[lineIndex] ?? [] {
+                    result.append(Row(id: result.count, content: .note(note)))
+                }
+            }
+        }
+        return result
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ScrollView([.horizontal, .vertical]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(diff.hunks.indices, id: \.self) { index in
-                        let hunk = diff.hunks[index]
-                        let hunkNotes = notes.indices.contains(index) ? notes[index] : [:]
-                        diffRow(old: nil, new: nil, marker: "", text: AttributedString(hunk.header),
-                                fill: DesignTokens.diffHunkFill, kind: nil)
-                        ForEach(hunk.lines.indices, id: \.self) { index in
-                            let line = hunk.lines[index]
+                    ForEach(rows) { row in
+                        switch row.content {
+                        case let .header(header):
+                            diffRow(old: nil, new: nil, marker: "", text: AttributedString(header),
+                                    fill: DesignTokens.diffHunkFill, kind: nil)
+                        case let .line(line):
                             diffRow(old: line.oldLineNumber, new: line.newLineNumber,
                                     marker: marker(line.kind), text: ViewChangesPresentation.lineText(line),
                                     fill: fill(line.kind), kind: line.kind)
-                            ForEach(hunkNotes[index] ?? [], id: \.self) { note in
-                                Text(verbatim: note)
-                                    .font(DesignTokens.diffLineNumber).foregroundStyle(.secondary)
-                                    .padding(.leading,
-                                             2 * DesignTokens.diffNumberColumnWidth + DesignTokens.diffMarkerColumnWidth)
-                                    .frame(maxWidth: .infinity, minHeight: DesignTokens.diffRowHeight, alignment: .leading)
-                                    .background(DesignTokens.diffHunkFill)
-                            }
+                        case let .note(note):
+                            Text(verbatim: note)
+                                .font(DesignTokens.diffLineNumber).foregroundStyle(.secondary)
+                                .padding(.leading,
+                                         2 * DesignTokens.diffNumberColumnWidth + DesignTokens.diffMarkerColumnWidth)
+                                .frame(maxWidth: .infinity, minHeight: DesignTokens.diffRowHeight, alignment: .leading)
+                                .background(DesignTokens.diffHunkFill)
                         }
                     }
                 }
