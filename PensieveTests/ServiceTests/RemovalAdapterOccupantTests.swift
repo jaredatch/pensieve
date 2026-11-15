@@ -7,7 +7,7 @@ final class RemovalAdapterOccupantTests: XCTestCase {
     func testForeignReplacementNeverReportsAbsentDuplicateThroughSharedAdapters() throws {
         for platform in [PlatformTarget.codex, .cursor] {
             let h = try WaitingRemovalHarness(platforms: [platform])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             h.vm.deploy(skill: h.base.skill, platform: platform, context: h.base.context)
             let adapter = ReplacementRemovalAdapter(files: h.mapped)
             let vm = PlatformViewModel(

@@ -1,5 +1,5 @@
 # Slipway: this project's pin and settings, one `key = value` per line. `slipway install` sets version; the rest is edited by hand.
-version = 0.1.37
+version = 0.1.39
 agent_account = kramer-bot
 commit_author = git
 trusted = jaredatch
@@ -15,3 +15,4 @@ macos.smoke = python3 script/cli_contract_test.py --binary DerivedData/Build/Pro
 macos.smoke_home = real
 macos.test_env = TEST_RUNNER_SWIFTUI_VIEW_DEBUG=1 TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT={tmp} TEST_RUNNER_GIT_CEILING_DIRECTORIES={tmp}
 generated = Pensieve.xcodeproj/project.pbxproj
+check = ./script/public-hygiene.sh --tree

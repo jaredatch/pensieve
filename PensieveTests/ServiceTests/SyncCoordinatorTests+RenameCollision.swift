@@ -85,7 +85,7 @@ extension SyncCoordinatorTests {
         return (peerBody, peerRecord)
     }
 
-    private func renameCollisionPlatform(store: SkillStore, support: String, files: FileService) -> PlatformViewModel {
+    func renameCollisionPlatform(store: SkillStore, support: String, files: FileService) -> PlatformViewModel {
         let paths = DeployPaths(skillsDirectory: store.baseDir,
             userSkillsDirectories: [.claudeCode: support + "/agent"], cursorUserRulesDirectory: support + "/rules")
         return PlatformViewModel(fileService: files,

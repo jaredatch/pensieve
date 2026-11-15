@@ -7,6 +7,21 @@ extension ManifestSaveModel {
         while let worker { await worker.value }
     }
 
+    /// Successful edits queued behind a refusal must not clear its name-taken message.
+    @MainActor
+    func finishRenameRefusalReports() {
+        let reports = renameRefusalReports
+        renameRefusalReports = []
+        for report in reports { report() }
+    }
+
+    @MainActor
+    func reportSave(_ item: Item, error: Error?) {
+        // A later failure keeps its reporting order and must not be hidden by a deferred refusal.
+        if error != nil { finishRenameRefusalReports() }
+        item.report(error)
+    }
+
     func hasPendingRename(_ slug: String, context: ModelContext) -> Bool {
         items.contains {
             guard $0.presentation.context === context, case .renameSkill(_, let new, _) = $0.change else { return false }
@@ -33,9 +48,15 @@ extension ManifestSaveModel {
 
     @discardableResult
     func keepPendingRenameLocal(_ item: Item, in snapshot: inout ManifestSnapshot) -> Bool {
-        guard case .renameSkill(_, let new, let details) = item.change, let details,
-              let local = try? item.fallback().skills.first(where: { $0.slug == new }),
-              ManifestService.sameCreation(local, details.original) else { return false }
+        guard case .renameSkill(_, let new, let details) = item.change, let details else { return false }
+        var local = details.original
+        local.slug = new
+        if let current = try? item.fallback().skills.first(where: { $0.slug == new }),
+           ManifestService.sameCreation(current, details.original) {
+            local = current
+        }
+        // A failed window read must not put the peer's overlay on this Mac's row.
+        // Later queued edits are projected on top of this captured record before acceptance.
         snapshot.skills.removeAll { $0.slug == new }
         snapshot.skills.append(local)
         return true

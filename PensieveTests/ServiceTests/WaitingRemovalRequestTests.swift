@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalRequestTests: XCTestCase {
     func testRecreatedSlugIntentDeploysAndRetiresWaitingWithoutDeleting() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         let slug = h.base.skill.directoryName
         try h.hideFolder()
@@ -34,7 +34,7 @@ final class WaitingRemovalRequestTests: XCTestCase {
         for owner in ["intent", "category"] {
             for alias in ["none", "requester", "removed"] {
                 let h = try WaitingRemovalHarness()
-                defer { h.base.cleanup() }
+                defer { h.tearDown(after: self) }
                 let realPath = h.base.project.path
                 let aliasPath = h.base.root + "/alias"
                 if alias == "removed" {
@@ -71,7 +71,7 @@ final class WaitingRemovalRequestTests: XCTestCase {
     func testEveryDesiredReadFailurePausesAllWaitingEntries() throws {
         for failure in ["skills", "projects", "intents", "categories", "paths"] {
             let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.claudeCode, .codex])
             try h.hideFolder()
             XCTAssertFalse(h.removeProject().hasFailures)

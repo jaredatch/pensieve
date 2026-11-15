@@ -47,6 +47,7 @@ final class ManifestSaveModel {
     @ObservationIgnored private var categoryMessages: [OrderedCategoryNotice] = []
     @ObservationIgnored var stagedRefusals: [StagedRefusal] = []
     @ObservationIgnored var worker: Task<Void, Never>?
+    @ObservationIgnored var renameRefusalReports: [() -> Void] = []
 
     struct Item {
         let order: Int
@@ -125,6 +126,7 @@ final class ManifestSaveModel {
                 + categoryMessages.sorted { $0.order < $1.order }.map(\.entry))
             categoryMessages = []
         }
+        finishRenameRefusalReports()
         if savedAny { didSave() }
     }
 
@@ -143,14 +145,14 @@ final class ManifestSaveModel {
             item = items.first { $0.id == item.id } ?? item
             let result = try await saveWithStableHead(item, disk: &disk, first: read)
             outcome = .finished(result.published)
-            report = { item.report(result.error) }
+            report = { self.reportSave(item, error: result.error) }
         } catch {
             if case ManifestError.damaged = error {
                 outcome = .paused
                 needsDamageRefresh = true
             } else if case ManifestSaveError.renameTaken = error {
                 let failure = restoreRefusedRename(item, durable: disk, error: error)
-                report = { item.report(failure) }
+                report = { self.renameRefusalReports.append { item.report(failure) } }
             } else if item.categoryEdit != nil {
                 stageCategoryRefusal(item, durable: disk, error: error)
             } else {
@@ -161,8 +163,8 @@ final class ManifestSaveModel {
                     _ = await rebuild(item, durable: disk, published: false)
                 }
                 outcome = .finished(false)
-                if case ManifestSaveError.rebuildFailed = error { report = { item.report(error) } } else {
-                    report = { item.report(item.wasHealed || acknowledged ? nil : error) }
+                if case ManifestSaveError.rebuildFailed = error { report = { self.reportSave(item, error: error) } } else {
+                    report = { self.reportSave(item, error: item.wasHealed || acknowledged ? nil : error) }
                 }
             }
         }
@@ -269,14 +271,6 @@ final class ManifestSaveModel {
         }
         defer { notice.cancel() }
         return try await BlockingWork.run { try SyncLock.waitForSave(at: path) }
-    }
-
-    func reportCategoryFailure(_ error: Error?) {
-        if let error {
-            if case ManifestSaveError.rebuildFailed = error {
-                log(error.localizedDescription)
-            } else { log("Category change could not be saved: " + error.localizedDescription) }
-        }
     }
 
     static func logMessage(_ message: String) {

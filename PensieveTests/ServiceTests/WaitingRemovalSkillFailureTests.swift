@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalSkillFailureTests: XCTestCase {
     func testUnrelatedUncheckableProjectGetsNoArtifactInspectionOrWaitingCandidate() throws {
         let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex, .cursor])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         var inspections: [String] = []
         h.mapped.beforeProjectProbe = { path in
             if path == h.base.project.path { throw CocoaError(.fileReadNoPermission) }
@@ -27,7 +27,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
     func testLibraryFailureAfterSavedRetirementKeepsWaitingAndRetiresDeferredState() throws {
         for phase in ["files", "row"] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             try h.hideFolder()
             let failingStore = RecordingDeletionSkillStore()
@@ -41,6 +41,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
                 notifier: {},
             manifestSaves: ManifestSaveModel(manifest: ManifestService(fileService: h.base.files), root: h.base.root + "/store",
                 lockPath: h.base.root + "/store" + ".sync.lock", files: h.mapped))
+            h.trackSaveQueue(try XCTUnwrap(library.manifestSaves), named: "deletion library")
             var saves = 0
             XCTAssertFalse(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,
                 projects: [h.base.project, h.base.otherProject], context: h.base.context, persist: { context in
@@ -65,7 +66,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
     func testMarkedCursorRuleWithOnlyRequestsOrLedgerIsNeverQueuedOrDeleted() throws {
         for evidence in ["request", "intent ledger", "category ledger"] {
             let h = try WaitingRemovalHarness(platforms: [.cursor])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.base.files.createDirectory(at: h.base.project.path)
             let path = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
             let bytes = "---\n# pensieve: managed\n---\nTeammate rule"
@@ -91,7 +92,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
     func testFinalRecordRetirementWarningPreservesWaitingAndManifestNotice() async throws {
         for clearNotice in [false, true] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             try h.hideFolder()
             let manifest = RecordingDeletionManifest()
@@ -103,6 +104,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
                 notifier: {},
             manifestSaves: ManifestSaveModel(manifest: manifest, root: h.base.root + "/store",
                 lockPath: h.base.root + "/store" + ".sync.lock", files: h.mapped))
+            h.trackSaveQueue(try XCTUnwrap(library.manifestSaves), named: "deletion library")
             h.base.mapped.beforeDeployStateWrite = { _ in
                 if clearNotice { library.deletionNotice = nil }
                 throw CocoaError(.fileWriteNoPermission)

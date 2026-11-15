@@ -8,7 +8,7 @@ final class WaitingRemovalAttemptTests: XCTestCase {
     func testProjectFailureWithdrawsOnlyWaitingEntriesCreatedByThisAttempt() throws {
         for phase in ["publish", "reconcile", "state write"] {
             let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.claudeCode, .codex])
             try h.hideFolder()
             let old = h.entry(platform: .claudeCode, source: "project:\(h.base.project.id)")
@@ -38,7 +38,7 @@ final class WaitingRemovalAttemptTests: XCTestCase {
 
     func testUnavailableFolderWithoutEvidencePromisesNoLaterCleanup() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         let plan = try ProjectRemovalPlan.prepare(project: h.base.project, platformVM: h.vm, context: h.base.context)
         XCTAssertFalse(plan.preview.message.contains("when the folder is back"))
         XCTAssertFalse(h.removeProject().hasFailures)
@@ -47,7 +47,7 @@ final class WaitingRemovalAttemptTests: XCTestCase {
 
     func testRejectedEntryNamesInputAndKeepsHealthyWaitingFileUnchanged() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         let good = h.entry()
         try h.vm.waitingRemovalStore.add([good])
         let before = try h.base.files.readData(at: h.storePath)

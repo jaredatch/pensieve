@@ -27,6 +27,7 @@ final class SkillRenameTakeoverFixture {
     var lockPath: String { directory.root + "/support/sync.lock" }
 
     init(record: Bool = true, leftovers: Bool = true,
+         queueManifest: ManifestSnapshotting? = nil, distinctRecords: Bool = false,
          writeLockAttempted: @escaping (Bool) -> Void = { _ in }) throws {
         manifest = ManifestService(writeLockAttempted: writeLockAttempted)
         let parent = directory.root
@@ -36,6 +37,10 @@ final class SkillRenameTakeoverFixture {
         store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
         local = try MachineIdentity(fileService: files, appSupportDir: support).identifier()
         skill.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123)
+        if distinctRecords {
+            skill.cursorConfig = CursorAdapterConfig(description: "Own rules", globs: ["Sources/**/*.swift"], alwaysApply: true)
+            skill.importedFrom = "claude-code"
+        }
         for row in [skill, other] {
             context.insert(row)
             _ = try store.createSkill(name: row.name, description: "Job", body: "Own body.")
@@ -53,12 +58,10 @@ final class SkillRenameTakeoverFixture {
             machines: [local, peer], leftovers: leftovers)
         var snapshot = try manifest.snapshot(from: context)
         own = try XCTUnwrap(snapshot.skills.first { $0.slug == "alpha" })
-        var gone = own; gone.slug = "zulu"; gone.tags = ["gone"]; gone.scope = .user
-        gone.createdAt = Date(timeIntervalSince1970: 1_600_000_000.456)
-        leftover = gone
-        if record { snapshot.skills.append(gone) }
+        leftover = Self.peerRecord(from: own, distinctRecords: distinctRecords)
+        if record { snapshot.skills.append(leftover) }
         try manifest.write(snapshot, toRoot: root)
-        saves = ManifestSaveModel(manifest: manifest, root: root, lockPath: support + "/sync.lock",
+        saves = ManifestSaveModel(manifest: queueManifest ?? manifest, root: root, lockPath: support + "/sync.lock",
             waitSeconds: 0.01, files: files)
         library = SkillLibraryViewModel(skillStore: store, fileService: files,
             fileWatchService: RecordingWatcher(), manifestRoot: root,
@@ -76,6 +79,19 @@ final class SkillRenameTakeoverFixture {
             deployStateStore: DeployStateStore(fileService: files, appSupportDir: support), skillsDirectory: store.baseDir)
         let batch = CategoryReconciler(platformVM: platform).reconcileDeployments(context: context)
         XCTAssertFalse(batch.hasFailures)
+    }
+
+    private static func peerRecord(from own: SkillOverlay, distinctRecords: Bool) -> SkillOverlay {
+        var gone = own
+        gone.slug = "zulu"
+        gone.tags = ["gone"]
+        gone.scope = .user
+        gone.createdAt = Date(timeIntervalSince1970: 1_600_000_000.456)
+        if distinctRecords {
+            gone.cursor = CursorAdapterConfig(description: "Peer rules", globs: ["*.md"], alwaysApply: false)
+            gone.origin = .imported(from: "cursor")
+        }
+        return gone
     }
 
     private static func seedAssignments(context: ModelContext, categories: [Pensieve.Category],

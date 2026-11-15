@@ -109,7 +109,8 @@ final class StoreIngestState {
         let changes = edits
         let retainedEdits = refused
         lock.unlock()
-        let local = retainedEdits.contains { $0.projection.intentMove != nil } ? readLocal() : nil
+        let hasRefusedRename = changes.contains { $0.change.refusedRename(in: snapshot) != nil }
+        let local = hasRefusedRename || retainedEdits.contains { $0.projection.intentMove != nil } ? readLocal() : nil
         let creates = retainedEdits.flatMap { $0.projection.createdSkills } + changes.compactMap { edit -> SkillOverlay? in
             if case .createSkill(let skill) = edit.change { return skill }
             return nil
@@ -122,6 +123,15 @@ final class StoreIngestState {
         var retained: Set<UUID> = []
         for edit in changes {
             let change = edit.change
+            if let rename = change.refusedRename(in: snapshot) {
+                var own = rename.details.original
+                if let current = local?.skills.first(where: { $0.slug == rename.new }),
+                   ManifestService.sameCreation(current, own) { own = current }
+                own.slug = rename.new
+                projected.skills.removeAll { $0.slug.lowercased() == rename.new.lowercased() }
+                projected.skills.append(own)
+                continue
+            }
             if keepingLocalCreates, case .createSkill = change {
                 RefusedManifestProjection(fields: [.change(change)], cachedLocal: nil)
                     .project(onto: &projected, keepingLocalCreates: true, knownCreates: creates)
@@ -145,12 +155,16 @@ final class StoreIngestState {
     /// The four whole-row writers share this boundary. A collision's last observed durable
     /// overlay belongs to the peer even while the window's row contains this Mac's typed values.
     static func snapshotForPublication(using manifest: ManifestSnapshotting, context: ModelContext,
-                                       root: String) throws -> ManifestSnapshot {
+                                       root: String, guardingPendingRenames: Bool = false) throws -> ManifestSnapshot {
         var snapshot = try manifest.snapshot(from: context)
         let local = snapshot
         let state = shared(for: context.container)
         state.lock.lock()
         let projections = state.refused.map(\.projection)
+        let renames = guardingPendingRenames ? state.edits.map(\.change).filter {
+            if case .renameSkill = $0 { return true }
+            return false
+        } : []
         let queuedCreates = state.edits.compactMap { edit -> SkillOverlay? in
             guard case .createSkill(let overlay) = edit.change else { return nil }
             return overlay
@@ -160,7 +174,7 @@ final class StoreIngestState {
         // A queued or failed create may meet a peer for the first time during a rebuild or a whole-row
         // write. Probe identity here too; HEAD can be current and the queue need not run again.
         let creates = queuedCreates + projections.flatMap(\.createdSkills)
-        let disk = preserved.isEmpty && creates.isEmpty ? nil : try manifest.read(fromRoot: root)
+        let disk = preserved.isEmpty && creates.isEmpty && renames.isEmpty ? nil : try manifest.read(fromRoot: root)
         let known = creates + (disk?.skills ?? [])
         for projection in projections {
             projection.intentMove?.apply(to: &snapshot, durable: disk ?? local, local: local, knownCreates: known)
@@ -171,7 +185,37 @@ final class StoreIngestState {
             snapshot.skills.removeAll { $0.slug == peer.slug }
             snapshot.skills.append(peer)
         }
+        if let disk {
+            for change in renames {
+                guard let rename = change.refusedRename(in: disk) else { continue }
+                keepRenameRecords(from: disk, old: rename.old, new: rename.new, in: &snapshot)
+            }
+        }
         return snapshot
+    }
+
+    /// The moved row and its pending assignments cannot take either durable name before refusal.
+    private static func keepRenameRecords(from disk: ManifestSnapshot, old: String, new: String,
+                                          in snapshot: inout ManifestSnapshot) {
+        let names = Set([old.lowercased(), new.lowercased()])
+        func affected(_ slug: String) -> Bool { names.contains(slug.lowercased()) }
+        snapshot.skills.removeAll { affected($0.slug) }
+        snapshot.skills += disk.skills.filter { affected($0.slug) }
+        snapshot.deployIntents.removeAll { affected($0.skillSlug) }
+        snapshot.deployIntents += disk.deployIntents.filter { affected($0.skillSlug) }
+        for index in snapshot.categories.indices {
+            snapshot.categories[index].skillSlugs.removeAll(where: affected)
+        }
+        for category in disk.categories {
+            let members = category.skillSlugs.filter(affected)
+            guard !members.isEmpty else { continue }
+            if let index = snapshot.categories.firstIndex(where: { $0.name == category.name }) {
+                snapshot.categories[index].skillSlugs += members
+            } else {
+                snapshot.categories.append(CategoryRecord(name: category.name,
+                    projectKeys: category.projectKeys, skillSlugs: members))
+            }
+        }
     }
 
     func invalidate() {

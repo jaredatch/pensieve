@@ -2,13 +2,16 @@ import Foundation
 @testable import Pensieve
 
 /// Wraps a real `FileService`, optionally throwing for one read, directory listing or directory
-/// deletion path. Other operations delegate; faults model I/O failure without removing the entry.
+/// deletion path, or a shared set of deletion paths that tests can release between attempts.
+/// Other operations delegate; faults model I/O failure without removing the entry.
 struct FaultyFileService: FileServiceProtocol {
     struct Boom: Error {}
+    final class DeletionFailures { var paths: Set<String> = [] }
     let wrapped: FileService
     var failReadPath: String?
     var failListPath: String?
     var failDeletePath: String?
+    var deletionFailures: DeletionFailures?
 
     func readFile(at path: String) throws -> String {
         if path == failReadPath { throw Boom() }
@@ -29,7 +32,7 @@ struct FaultyFileService: FileServiceProtocol {
     func removeEmptyDirectory(at path: String) throws { try wrapped.removeEmptyDirectory(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws {
-        if path == failDeletePath { throw Boom() }
+        if path == failDeletePath || deletionFailures?.paths.contains(path) == true { throw Boom() }
         try wrapped.deleteDirectory(at: path)
     }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {

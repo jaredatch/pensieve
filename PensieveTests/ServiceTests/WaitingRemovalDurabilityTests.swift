@@ -8,7 +8,7 @@ final class WaitingRemovalDurabilityTests: XCTestCase {
     func testWaitingWriteFailureRetainsSkillOrProjectAndAllSourceRecords() throws {
         for route in ["skill", "project"] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             let category = try h.base.addCategory()
             XCTAssertFalse(h.base.category.reconcile(context: h.base.context).hasFailures)
@@ -45,7 +45,7 @@ final class WaitingRemovalDurabilityTests: XCTestCase {
         for content in ["broken json", #"{"schema_version":2,"removals":[]}"#,
                         #"{"schema_version":1e40,"removals":[]}"#] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             try h.base.files.writeFile(at: h.storePath, content: content)
             let state = try h.base.deployState.read()
@@ -64,7 +64,7 @@ final class WaitingRemovalDurabilityTests: XCTestCase {
 
     func testNewerEntryAtSamePathSurvivesOlderPassAndIdempotentCreation() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         try h.hideFolder()
         XCTAssertFalse(h.removeProject().hasFailures)
@@ -87,7 +87,7 @@ final class WaitingRemovalDurabilityTests: XCTestCase {
     func testArtifactAndRetirementFailuresKeepWaitingForSafeRetry() throws {
         for phase in ["ownership", "delete", "waiting save"] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             try h.hideFolder()
             XCTAssertFalse(h.removeProject().hasFailures)

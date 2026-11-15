@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalLifecycleTests: XCTestCase {
     func testSkillDeletionWaitsAcrossRelaunchThenLaunchRemovesRestoredLink() throws {
         let h = try WaitingRemovalHarness(persistent: true)
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         let path = h.base.artifact(.codex)
         try h.hideFolder()
@@ -39,7 +39,7 @@ final class WaitingRemovalLifecycleTests: XCTestCase {
     func testForeignOccupantsRetireWaitingWithoutChangingTheirContents() throws {
         for shape in ["link", "file", "folder", "absent"] {
             let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex])
             let path = h.base.artifact(.codex)
             try h.hideFolder()
@@ -61,7 +61,7 @@ final class WaitingRemovalLifecycleTests: XCTestCase {
     func testLegacyCursorDigestRemovesOnlyExactBytesAfterSourceDeletion() throws {
         for replacement in ["exact", "edited", "source unavailable", "marked without source"] {
             let h = try WaitingRemovalHarness(platforms: [.cursor])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.cursor])
             let path = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
             let legacy = "---\nalwaysApply: false\n---\n\n# Body\n"
@@ -90,7 +90,7 @@ final class WaitingRemovalLifecycleTests: XCTestCase {
 
     func testUncheckableSkillFolderWaitsAndLaterCleansItsLink() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         h.mapped.beforeProjectProbe = { path in
             if path == h.base.project.path { throw CocoaError(.fileReadNoPermission) }

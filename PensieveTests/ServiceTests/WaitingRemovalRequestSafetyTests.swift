@@ -7,7 +7,7 @@ import XCTest
 final class WaitingRemovalRequestSafetyTests: XCTestCase {
     func testKeylessDirectRedeployProtectsReinstalledSkillFromWaitingCleanup() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         h.base.project.identityKey = nil
         try h.base.files.createDirectory(at: h.base.project.path)
         XCTAssertFalse(try h.base.model().set(true, skill: h.base.skill, platform: .codex,
@@ -36,7 +36,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
 
     func testKeylessAliasDirectDeploySurvivesOtherOfflineRegistrationRemoval() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         h.base.project.identityKey = nil
         h.base.otherProject.identityKey = nil
         try h.base.files.createDirectory(at: h.base.project.path)
@@ -59,7 +59,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
 
     func testUnassignedKeylessHistoryCannotProtectAnOlderWaitingArtifact() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         h.base.project.identityKey = nil
         try h.base.files.createDirectory(at: h.base.project.path)
         let model = h.base.model()
@@ -80,7 +80,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
 
     func testUnreadableDeployStatePausesEveryReadyWaitingRemoval() throws {
         let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.claudeCode, .codex])
         try h.hideFolder()
         XCTAssertFalse(h.removeProject().hasFailures)
@@ -97,7 +97,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
     func testChangedIdentityStillCleansWaitingOwnedLinkAndMarkedRule() throws {
         for identity in ["renamed", "unparseable", "absent", "unreadable"] {
             let h = try WaitingRemovalHarness(platforms: [.codex, .cursor])
-            defer { h.base.cleanup() }
+            defer { h.tearDown(after: self) }
             try h.deploy([.codex, .cursor])
             try h.hideFolder()
             XCTAssertFalse(h.removeProject().hasFailures)
@@ -131,7 +131,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
 
     func testEntryPathPermissionFailureIsReportedAndKeptForRetry() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex])
         try h.hideFolder()
         XCTAssertFalse(h.removeProject().hasFailures)
@@ -150,7 +150,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
 
     func testWaitingRequestsCoverAllCategoryAndIntentDeployPathsIncludingAlias() throws {
         let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex, .cursor])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.base.files.createDirectory(at: h.base.project.path)
         let alias = h.base.root + "/alias"
         try h.base.files.createSymlink(at: alias, pointingTo: h.base.project.path)

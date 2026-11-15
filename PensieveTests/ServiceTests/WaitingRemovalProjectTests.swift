@@ -10,7 +10,7 @@ final class WaitingRemovalProjectTests: XCTestCase {
             for platform in [PlatformTarget.claudeCode, .cursor] {
                 for identity in [false, true] {
                     let h = try WaitingRemovalHarness(platforms: [platform])
-                    defer { h.base.cleanup() }
+                    defer { h.tearDown(after: self) }
                     if !identity { h.base.project.identityKey = nil }
                     try h.base.files.createDirectory(at: h.base.project.path)
                     let path = h.vm.artifactPath(skill: h.base.skill, platform: platform, target: .project(h.base.project))
@@ -56,7 +56,7 @@ final class WaitingRemovalProjectTests: XCTestCase {
 
     func testUncheckableProjectUnregistersWithWaitingNoticeThenConvergenceCleans() throws {
         let h = try WaitingRemovalHarness(platforms: [.codex, .cursor])
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         try h.deploy([.codex, .cursor])
         h.mapped.beforeProjectProbe = { path in
             if path == h.base.project.path { throw CocoaError(.fileReadNoPermission) }
@@ -82,7 +82,7 @@ final class WaitingRemovalProjectTests: XCTestCase {
 
     func testRelativeSavedProjectUnregistersWithoutWaitingRemovals() throws {
         let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
+        defer { h.tearDown(after: self) }
         h.base.project.path = "old/relative/project"
         h.base.context.insert(IntentAssignment(skillID: h.base.skill.id, platformRaw: "codex", projectID: h.base.project.id))
         try h.base.context.save()

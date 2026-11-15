@@ -17,6 +17,25 @@ struct ManifestSkillRename {
 }
 
 extension ManifestChange {
+    struct RefusedRename {
+        let old: String
+        let new: String
+        let details: ManifestSkillRename
+    }
+
+    /// Use the save queue's disk judgment before sync can publish the moved row itself.
+    func refusedRename(in snapshot: ManifestSnapshot) -> RefusedRename? {
+        guard case .renameSkill(let old, let new, let details) = self, let details else { return nil }
+        do {
+            try validate(in: snapshot)
+        } catch ManifestSaveError.renameTaken {
+            return RefusedRename(old: old, new: new, details: details)
+        } catch {
+            return nil
+        }
+        return nil
+    }
+
     func renameTargetIsTaken(_ target: SkillOverlay, old: String, details: ManifestSkillRename?,
                              in snapshot: ManifestSnapshot) -> Bool {
         if details?.matchesLeftover(target) == true { return false }
