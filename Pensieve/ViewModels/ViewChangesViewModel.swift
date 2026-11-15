@@ -15,6 +15,8 @@ final class ViewChangesViewModel {
     }
 
     private(set) var state: State = .idle
+    // Equal previews can finish between render passes; a load still resets the window's sidebar default.
+    private(set) var previewLoadID = UUID()
     private(set) var historyComparison: HistoryDiffComparison?
     private(set) var row: UpdatesRow?
     private(set) var selectedFileID: Int?
@@ -244,6 +246,7 @@ final class ViewChangesViewModel {
             lineNotes = notes
             selectedFileID = preview.files.indices.first
             state = .loaded(preview)
+            previewLoadID = UUID()
         } catch {
             guard sessionID == session, !Task.isCancelled else { return }
             state = .failed(UpdatesViewModel.readable(error))

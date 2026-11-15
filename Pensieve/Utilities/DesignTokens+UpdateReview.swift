@@ -51,7 +51,8 @@ extension DesignTokens {
     static let changesCount = Font.system(size: 11, design: .monospaced)
     static let changesFilePath = Font.system(size: 11, design: .monospaced)
     static let changesSummary = Font.system(size: 10)
-    static let diffLineNumber = Font.system(size: 11, design: .monospaced)
+    static let diffLineNumberSize: CGFloat = 11
+    static let diffLineNumber = Font.system(size: diffLineNumberSize, design: .monospaced)
     static let diffText = Font.system(size: 12, design: .monospaced)
     static let diffMarker = Font.system(size: 12, design: .monospaced)
     static let changesButton = Font.system(size: 13)
@@ -61,11 +62,10 @@ extension DesignTokens {
     static let changesSidebarInset: CGFloat = 8
     static let changesSidebarHeaderTop: CGFloat = 4
     static let changesSidebarHeaderBottom: CGFloat = 6
-    static let changesFileRowHeight: CGFloat = 28
-    static let changesNestedFileRowHeight: CGFloat = 42
+    static let changesFileRowHeight: CGFloat = 20
+    static let changesNestedFileRowHeight: CGFloat = 32
     static let changesFileRowHorizontalPadding: CGFloat = 10
     static let changesFileRowGap: CGFloat = 8
-    static let changesFileRowSpacing: CGFloat = 2
     static let changesFileFolderGap: CGFloat = 1
     static let changesCountGap: CGFloat = 4
     static let changesFileGlyphWidth: CGFloat = 13
@@ -73,9 +73,6 @@ extension DesignTokens {
     static let changesToolbarHeight: CGFloat = 59
     static let changesToolbarInset: CGFloat = 16
     static let changesTitleGap: CGFloat = 2
-    static let changesGitHubButtonWidth: CGFloat = 128
-    static let changesUpdateButtonWidth: CGFloat = 78
-    static let changesButtonHeight: CGFloat = 28
     static let changesDividerHeight: CGFloat = 1
     static let changesFileHeaderHeight: CGFloat = 29
     static let changesFileNameMinimumWidth: CGFloat = 80
@@ -84,8 +81,8 @@ extension DesignTokens {
     static let changesFileSummaryMinimumWidth: CGFloat = 160
     static let diffRowHeight: CGFloat = 20
     static let diffTextLineHeight: CGFloat = 18
-    static let diffNumberColumnWidth: CGFloat = 36
-    static let diffMarkerColumnWidth: CGFloat = 28
+    static let diffNumberColumnWidth: CGFloat = 28
+    static let diffMarkerColumnWidth: CGFloat = 20
     static let diffTrailingInset: CGFloat = 16
     static let diffBodyVerticalPadding: CGFloat = 6
 

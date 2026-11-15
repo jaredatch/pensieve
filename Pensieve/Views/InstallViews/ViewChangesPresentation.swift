@@ -3,6 +3,11 @@ import SwiftUI
 
 /// Presentation of precomputed hunks only. This mapping never runs a diff or reads file contents.
 enum ViewChangesPresentation {
+    static func sidebarVisibility(_ state: ViewChangesViewModel.State) -> NavigationSplitViewVisibility {
+        guard case let .loaded(preview) = state, preview.files.count > 1 else { return .detailOnly }
+        return .all
+    }
+
     static func accessibilityLabel(_ file: PinnedSkillFileDiff) -> String {
         let path = visibleText(file.path, filename: true) as NSString
         let parent = path.deletingLastPathComponent

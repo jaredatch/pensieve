@@ -30,6 +30,14 @@ enum RenderedViewTestSupport {
         func strings(_ value: Any, depth: Int) -> [String] {
             if let text = value as? AttributedString { return [String(text.characters)] }
             if let text = value as? NSAttributedString { return [text.string] }
+            // LocalizedTextStorage's debug description includes its resolved, formatted text.
+            if String(reflecting: type(of: value)).hasSuffix("LocalizedTextStorage"),
+               let key = Mirror(reflecting: value).descendant("key", "key") as? String, key.contains("%") {
+                let description = String(describing: value)
+                if let start = description.range(of: ">: \""), description.hasSuffix("\"") {
+                    return [String(description[start.upperBound...].dropLast())]
+                }
+            }
             if let string = value as? String {
                 // SwiftUI's render debug values escape apostrophes in their text payloads.
                 return [string.replacingOccurrences(of: "\\'", with: "'")]
@@ -55,34 +63,61 @@ enum RenderedViewTestSupport {
         let frame: CGRect?
         let hasOwnFrame: Bool
         let isEnabled: Bool?
+        let controlSize: ControlSize?
+        let keyboardShortcut: KeyboardShortcut?
+        let ancestors: [(type: String, frame: CGRect)]
     }
 
     /// SwiftUI puts geometry on layout-owning nodes; their transparent descendants share it.
-    /// Positions are host-relative origins. Convert nested AppKit label hosts into the root's
-    /// coordinates so a native button title can be compared with a SwiftUI label.
+    /// Scroll content uses its viewport's origin; nested AppKit hosts need conversion to the root.
+    /// Keep measured ancestor frames so callers can find a text's actual row or column bounds.
     static func layoutValues(in root: NSView) -> [LayoutValue] {
         root.layoutSubtreeIfNeeded()
-        func walk(_ nodes: [_ViewDebug.Data], in host: NSView, inherited: CGRect?, enabled: Bool?) -> [LayoutValue] {
+        struct Context {
+            var frame: CGRect?
+            var scrollOrigin: CGPoint = .zero
+            var scrollViewport: CGRect?
+            var environment: EnvironmentValues?
+            var ancestors: [(type: String, frame: CGRect)] = []
+        }
+        func walk(_ nodes: [_ViewDebug.Data], in host: NSView, context: Context) -> [LayoutValue] {
             nodes.flatMap { node -> [LayoutValue] in
                 let mirror = Mirror(reflecting: node)
                 let properties = mirror.descendant("data") as? [_ViewDebug.Property: Any] ?? [:]
+                var next = context
+                let valueType = properties[.value].map { String(reflecting: type(of: $0)) }
+                // Scroll content positions start again at zero within the live viewport.
+                if valueType?.hasPrefix("SwiftUI.SystemScrollViewContainer<") == true,
+                   let viewport = context.scrollViewport {
+                    next.scrollOrigin = root.convert(viewport, to: host).origin
+                }
                 let ownFrame: CGRect?
                 if let position = properties[.position] as? CGPoint, let size = properties[.size] as? CGSize {
-                    ownFrame = host.convert(CGRect(origin: position, size: size), to: root)
+                    let origin = CGPoint(x: position.x + next.scrollOrigin.x, y: position.y + next.scrollOrigin.y)
+                    ownFrame = host.convert(CGRect(origin: origin, size: size), to: root)
                 } else {
                     ownFrame = nil
                 }
-                let frame = ownFrame ?? inherited
-                let isEnabled = (properties[.environment] as? EnvironmentValues)?.isEnabled ?? enabled
-                let value = properties[.value].map {
-                    LayoutValue(value: $0, frame: frame, hasOwnFrame: ownFrame != nil, isEnabled: isEnabled)
+                next.frame = ownFrame ?? context.frame
+                if valueType?.hasPrefix("SwiftUI.SystemScrollView<") == true {
+                    next.scrollViewport = next.frame
+                }
+                next.environment = properties[.environment] as? EnvironmentValues ?? context.environment
+                let value = properties[.value].map { value in
+                    LayoutValue(value: value, frame: next.frame, hasOwnFrame: ownFrame != nil,
+                        isEnabled: next.environment?.isEnabled, controlSize: next.environment?.controlSize,
+                        keyboardShortcut: next.environment?.keyboardShortcut, ancestors: context.ancestors)
+                }
+                if let frame = next.frame, let valueType {
+                    next.ancestors.append((String(valueType.prefix { $0 != "<" }), frame))
                 }
                 let children = mirror.descendant("childData") as? [_ViewDebug.Data] ?? []
-                return (value.map { [$0] } ?? []) + walk(children, in: host, inherited: frame, enabled: isEnabled)
+                return (value.map { [$0] } ?? []) + walk(children, in: host, context: next)
             }
         }
+
         func hosts(_ view: NSView) -> [LayoutValue] {
-            walk((view as? RenderedTestHost)?.renderedTestData ?? [], in: view, inherited: nil, enabled: nil)
+            walk((view as? RenderedTestHost)?.renderedTestData ?? [], in: view, context: Context())
                 + view.subviews.flatMap(hosts)
         }
         return hosts(root)

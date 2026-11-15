@@ -33,7 +33,18 @@ struct UnifiedDiffView: View {
         return result
     }
 
+    /// One width for the whole file keeps text and notes aligned across hunks.
+    private var numberColumnWidth: CGFloat {
+        let longest = diff.hunks.reduce(0) { longest, hunk in
+            hunk.lines.reduce(longest) { max($0, $1.oldLineNumber ?? 0, $1.newLineNumber ?? 0) }
+        }
+        let font = NSFont.monospacedSystemFont(ofSize: DesignTokens.diffLineNumberSize, weight: .regular)
+        let width = (String(longest) as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+        return max(DesignTokens.diffNumberColumnWidth, width)
+    }
+
     var body: some View {
+        let columnWidth = numberColumnWidth
         GeometryReader { geometry in
             ScrollView([.horizontal, .vertical]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -41,32 +52,32 @@ struct UnifiedDiffView: View {
                         switch row.content {
                         case let .header(header):
                             diffRow(old: nil, new: nil, marker: "", text: AttributedString(header),
-                                    fill: DesignTokens.diffHunkFill, kind: nil)
+                                    kind: nil, columnWidth: columnWidth)
                         case let .line(line):
                             diffRow(old: line.oldLineNumber, new: line.newLineNumber,
                                     marker: marker(line.kind), text: ViewChangesPresentation.lineText(line),
-                                    fill: fill(line.kind), kind: line.kind)
+                                    kind: line.kind, columnWidth: columnWidth)
                         case let .note(note):
                             Text(verbatim: note)
                                 .font(DesignTokens.diffLineNumber).foregroundStyle(.secondary)
                                 .padding(.leading,
-                                         2 * DesignTokens.diffNumberColumnWidth + DesignTokens.diffMarkerColumnWidth)
+                                         2 * columnWidth + DesignTokens.diffMarkerColumnWidth)
                                 .frame(maxWidth: .infinity, minHeight: DesignTokens.diffRowHeight, alignment: .leading)
                                 .background(DesignTokens.diffHunkFill)
                         }
                     }
                 }
                 .frame(minWidth: geometry.size.width, alignment: .leading)
-                .padding(.vertical, DesignTokens.diffBodyVerticalPadding)
+                .padding(.bottom, DesignTokens.diffBodyVerticalPadding)
             }
         }
     }
 
     private func diffRow(old: Int?, new: Int?, marker: String, text: AttributedString,
-                         fill: Color, kind: UnifiedDiffLine.Kind?) -> some View {
+                         kind: UnifiedDiffLine.Kind?, columnWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
-            number(old)
-            number(new)
+            number(old, width: columnWidth)
+            number(new, width: columnWidth)
             Text(verbatim: marker)
                 .font(DesignTokens.diffMarker)
                 .foregroundStyle(kind == .removed ? Color(nsColor: .systemRed) : Color(nsColor: .systemGreen))
@@ -81,14 +92,14 @@ struct UnifiedDiffView: View {
         .padding(.trailing, DesignTokens.diffTrailingInset)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.diffRowHeight, maxHeight: DesignTokens.diffRowHeight,
                alignment: .leading)
-        .background(fill)
+        .background(kind.map(fill) ?? DesignTokens.diffHunkFill)
     }
 
-    private func number(_ value: Int?) -> some View {
+    private func number(_ value: Int?, width: CGFloat) -> some View {
         Text(verbatim: value.map(String.init) ?? "")
             .font(DesignTokens.diffLineNumber)
             .foregroundStyle(.tertiary)
-            .frame(width: DesignTokens.diffNumberColumnWidth, alignment: .trailing)
+            .frame(width: width, alignment: .trailing)
     }
 
     private func marker(_ kind: UnifiedDiffLine.Kind) -> String {

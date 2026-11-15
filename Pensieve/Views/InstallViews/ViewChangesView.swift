@@ -5,11 +5,12 @@ struct ViewChangesView: View {
     @Bindable var model: ViewChangesViewModel
     @Bindable var library: SkillLibraryViewModel
     let onUpdate: () -> Void
+    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
                 .navigationSplitViewColumnWidth(DesignTokens.changesSidebarWidth)
         } detail: {
@@ -22,6 +23,13 @@ struct ViewChangesView: View {
             .toolbar { changesToolbar }
         }
         .navigationSplitViewStyle(.balanced)
+        .onChange(of: model.previewLoadID, initial: true) { _, _ in
+            columnVisibility = ViewChangesPresentation.sidebarVisibility(model.state)
+        }
+        .onChange(of: model.state) { _, state in
+            if case .loaded = state { return }
+            columnVisibility = ViewChangesPresentation.sidebarVisibility(state)
+        }
         .toolbarBackground(.hidden, for: .windowToolbar)
         .accessibilityIdentifier("view-changes-content")
         .frame(minWidth: DesignTokens.changesWindowWidth,
@@ -46,7 +54,7 @@ struct ViewChangesView: View {
                 // Rows capture their file with its offset, so a reload that shrinks `files` never indexes past its end.
                 ForEach(Array(model.files.enumerated()), id: \.offset) { id, file in
                     ViewChangesFileRow(file: file)
-                        .padding(.vertical, DesignTokens.changesFileRowSpacing / 2)
+                        .listRowInsets(.all, 0)
                         .tag(id)
                         .listRowSeparator(.hidden)
                         .accessibilityElement(children: .ignore)
@@ -54,11 +62,11 @@ struct ViewChangesView: View {
                         .accessibilityIdentifier("changes-file-\(file.path)")
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.inset(alternatesRowBackgrounds: false))
+            .environment(\.defaultMinListRowHeight, 0)
             .scrollContentBackground(.hidden)
             .accessibilityLabel("Changed Files")
         }
-        .padding(.horizontal, DesignTokens.changesSidebarInset * 2)
         .accessibilityIdentifier("changes-files")
     }
 
@@ -72,19 +80,17 @@ struct ViewChangesView: View {
                 Button("View on GitHub") {
                     if let url = model.row?.compareURL { openURL(url) }
                 }
-                .controlSize(.large)
+                .controlSize(.regular)
                 .font(DesignTokens.changesButton)
-                .frame(width: DesignTokens.changesGitHubButtonWidth, height: DesignTokens.changesButtonHeight)
                 .disabled(model.row?.compareURL == nil)
                 .accessibilityIdentifier("changes-github")
             }
             ToolbarItem(id: "changes-update", placement: .primaryAction) {
                 Button("Update", action: onUpdate)
-                    .controlSize(.large)
+                    .controlSize(.regular)
                     .font(DesignTokens.changesButton)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .frame(width: DesignTokens.changesUpdateButtonWidth, height: DesignTokens.changesButtonHeight)
                     .disabled(!model.canUpdate || library.libraryUnavailable)
                     .accessibilityIdentifier("changes-update")
             }
@@ -101,6 +107,7 @@ struct ViewChangesView: View {
                         .font(DesignTokens.changesSubtitle).foregroundStyle(.secondary)
                 }
             }
+            .padding(.leading, DesignTokens.changesToolbarInset / 2)
             .accessibilityIdentifier("changes-heading")
         }
     }

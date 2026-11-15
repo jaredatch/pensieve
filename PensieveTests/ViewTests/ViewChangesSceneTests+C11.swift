@@ -94,7 +94,7 @@ extension ViewChangesSceneTests {
         let name = "comment-with-an-extremely-long-filename.swift"
         let file = PinnedSkillFileDiff(change: FileTreeChange(path: folder + name,
             kind: .modified, content: .binary, permissions: .init(old: 0o644, new: 0o755)), result: nil)
-        let width = DesignTokens.changesSidebarWidth - 4 * DesignTokens.changesSidebarInset
+        let width = DesignTokens.changesSidebarWidth - 2 * DesignTokens.changesSidebarInset
         let image = try renderLongRow(file, width: width)
         let text = try recognizedText(image)
         for part in ["co", "swift", "scripts", "TAIL", "Binary"] {
@@ -148,7 +148,7 @@ extension ViewChangesSceneTests {
                                "The full \(text) must render without truncation at proposed width \(width)")
             }
         }
-        let width = DesignTokens.changesSidebarWidth - 4 * DesignTokens.changesSidebarInset
+        let width = DesignTokens.changesSidebarWidth - 2 * DesignTokens.changesSidebarInset
         let original = try renderLongRow(file, width: width)
         for changedName in ["project-with-an-extremely-long-filename.swift", "comment-with-an-extremely-long-filename.zzzzz"] {
             let changed = try renderLongRow(longCountFile(path: folder + changedName), width: width)
@@ -205,4 +205,64 @@ extension ViewChangesSceneTests {
         }
         return pixels
     }
+}
+
+extension ViewChangesPolishTests {
+    func assertRowInk(_ file: PinnedSkillFileDiff, width: CGFloat) throws {
+        let renderer = ImageRenderer(content: ViewChangesFileRow(file: file).frame(width: width)
+            .padding(20).background(Color.white).environment(\.colorScheme, .light)
+            .environment(\.locale, Locale(identifier: "en_US")))
+        renderer.scale = 4
+        let image = try XCTUnwrap(renderer.cgImage)
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        try pixels.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        var ink = CGRect.null
+        for y in 0..<image.height {
+            for x in 0..<image.width {
+                let offset = (y * image.width + x) * 4
+                if min(pixels[offset], pixels[offset + 1], pixels[offset + 2]) < 200 {
+                    ink = ink.union(CGRect(x: CGFloat(x) / 4, y: CGFloat(y) / 4, width: 0.25, height: 0.25))
+                }
+            }
+        }
+        XCTAssertFalse(ink.isNull, "An offscreen comparison must contain visible pixels")
+        XCTAssertGreaterThanOrEqual(ink.minX, 20)
+        XCTAssertLessThanOrEqual(ink.maxX, 20 + width)
+        XCTAssertGreaterThanOrEqual(ink.minY, 20)
+        XCTAssertLessThanOrEqual(ink.maxY, CGFloat(image.height) / 4 - 20)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        let labels = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+        XCTAssertTrue(labels.contains("co"), "The name's beginning must draw: \(labels)")
+        XCTAssertTrue(labels.contains("swift"), "The name's extension must draw: \(labels)")
+    }
+}
+
+extension ViewChangesPolishTests {
+    func largeButtonHeight(_ label: String, prominent: Bool) throws -> CGFloat {
+        let button = Button(label) {}.font(DesignTokens.changesButton).controlSize(.large)
+        let host = NSHostingView(rootView: AnyView(Group {
+            if prominent { button.buttonStyle(.borderedProminent) } else { button }
+        }))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close(); window.contentView = nil }
+        host.layoutSubtreeIfNeeded()
+        let value = try XCTUnwrap(RenderedViewTestSupport.layoutValues(in: host).first {
+            String(reflecting: type(of: $0.value)).hasPrefix("SwiftUI.Button<")
+        })
+        return try XCTUnwrap(value.frame).height
+    }
+
 }
