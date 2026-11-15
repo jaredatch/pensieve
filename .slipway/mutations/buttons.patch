@@ -1,0 +1,19 @@
+--- a/Pensieve/Views/InstallViews/ViewChangesView.swift
++++ b/Pensieve/Views/InstallViews/ViewChangesView.swift
+@@ -80,14 +80,14 @@
+                 Button("View on GitHub") {
+                     if let url = model.row?.compareURL { openURL(url) }
+                 }
+-                .controlSize(.regular)
++                .controlSize(.large)
+                 .font(DesignTokens.changesButton)
+                 .disabled(model.row?.compareURL == nil)
+                 .accessibilityIdentifier("changes-github")
+             }
+             ToolbarItem(id: "changes-update", placement: .primaryAction) {
+                 Button("Update", action: onUpdate)
+-                    .controlSize(.regular)
++                    .controlSize(.large)
+                     .font(DesignTokens.changesButton)
+                     .buttonStyle(.borderedProminent)
+                     .keyboardShortcut(.defaultAction)

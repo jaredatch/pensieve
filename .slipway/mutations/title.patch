@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/InstallViews/ViewChangesView.swift
++++ b/Pensieve/Views/InstallViews/ViewChangesView.swift
+@@ -107,7 +107,6 @@
+                         .font(DesignTokens.changesSubtitle).foregroundStyle(.secondary)
+                 }
+             }
+-            .padding(.leading, DesignTokens.changesToolbarInset / 2)
+             .accessibilityIdentifier("changes-heading")
+         }
+     }

@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/InstallViews/ViewChangesView.swift
++++ b/Pensieve/Views/InstallViews/ViewChangesView.swift
+@@ -10,7 +10,7 @@
+     @Environment(\.openURL) private var openURL
+ 
+     var body: some View {
+-        NavigationSplitView(columnVisibility: $columnVisibility) {
++        NavigationSplitView(columnVisibility: .constant(ViewChangesPresentation.sidebarVisibility(model.state))) {
+             sidebar
+                 .navigationSplitViewColumnWidth(DesignTokens.changesSidebarWidth)
+         } detail: {

@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/InstallViews/UnifiedDiffView.swift
++++ b/Pensieve/Views/InstallViews/UnifiedDiffView.swift
+@@ -68,7 +68,7 @@
+                     }
+                 }
+                 .frame(minWidth: geometry.size.width, alignment: .leading)
+-                .padding(.bottom, DesignTokens.diffBodyVerticalPadding)
++                .padding(.vertical, DesignTokens.diffBodyVerticalPadding)
+             }
+         }
+     }

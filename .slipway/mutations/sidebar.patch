@@ -1,0 +1,11 @@
+--- a/Pensieve/Views/InstallViews/ViewChangesPresentation.swift
++++ b/Pensieve/Views/InstallViews/ViewChangesPresentation.swift
+@@ -4,7 +4,7 @@
+ /// Presentation of precomputed hunks only. This mapping never runs a diff or reads file contents.
+ enum ViewChangesPresentation {
+     static func sidebarVisibility(_ state: ViewChangesViewModel.State) -> NavigationSplitViewVisibility {
+-        guard case let .loaded(preview) = state, preview.files.count > 1 else { return .detailOnly }
++        // Regression: every window state shows the file list.
+         return .all
+     }
+ 

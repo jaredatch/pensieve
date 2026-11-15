@@ -1,0 +1,18 @@
+--- a/Pensieve/Views/InstallViews/UnifiedDiffView.swift
++++ b/Pensieve/Views/InstallViews/UnifiedDiffView.swift
+@@ -34,14 +34,7 @@
+     }
+ 
+     /// One width for the whole file keeps text and notes aligned across hunks.
+-    private var numberColumnWidth: CGFloat {
+-        let longest = diff.hunks.reduce(0) { longest, hunk in
+-            hunk.lines.reduce(longest) { max($0, $1.oldLineNumber ?? 0, $1.newLineNumber ?? 0) }
+-        }
+-        let font = NSFont.monospacedSystemFont(ofSize: DesignTokens.diffLineNumberSize, weight: .regular)
+-        let width = (String(longest) as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+-        return max(DesignTokens.diffNumberColumnWidth, width)
+-    }
++    private var numberColumnWidth: CGFloat { DesignTokens.diffNumberColumnWidth }
+ 
+     var body: some View {
+         let columnWidth = numberColumnWidth

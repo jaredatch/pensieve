@@ -1,0 +1,10 @@
+--- a/Pensieve/Views/InstallViews/ViewChangesView.swift
++++ b/Pensieve/Views/InstallViews/ViewChangesView.swift
+@@ -67,6 +67,7 @@
+             .scrollContentBackground(.hidden)
+             .accessibilityLabel("Changed Files")
+         }
++        .padding(.horizontal, DesignTokens.changesSidebarInset * 2)
+         .accessibilityIdentifier("changes-files")
+     }
+ 

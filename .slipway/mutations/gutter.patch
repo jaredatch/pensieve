@@ -1,0 +1,11 @@
+--- a/Pensieve/Utilities/DesignTokens+UpdateReview.swift
++++ b/Pensieve/Utilities/DesignTokens+UpdateReview.swift
+@@ -85,7 +85,7 @@
+     static let changesFileSummaryMinimumWidth: CGFloat = 160
+     static let diffRowHeight: CGFloat = 20
+     static let diffTextLineHeight: CGFloat = 18
+-    static let diffNumberColumnWidth: CGFloat = 28
++    static let diffNumberColumnWidth: CGFloat = 36
+     static let diffMarkerColumnWidth: CGFloat = 20
+     static let diffTrailingInset: CGFloat = 16
+     static let diffBodyVerticalPadding: CGFloat = 6

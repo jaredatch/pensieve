@@ -111,3 +111,93 @@ final class ViewChangesSceneTests: XCTestCase {
     }
 
 }
+
+@MainActor
+final class PolishReview {
+    let fixture: UpdateReviewFixture
+    let skills: [Skill]
+    let model: ViewChangesViewModel
+    let window: NSWindow
+    var root: NSView { window.contentView! }
+    var operationGate: TestWait.Gate? {
+        get { gate.value }
+        set { gate.value = newValue }
+    }
+    private let gate: PolishGate
+
+    init(previews: [PinnedSkillDiff]) async throws {
+        let fixture = try UpdateReviewFixture()
+        self.fixture = fixture
+        skills = try (0...previews.count).map { try fixture.skill("polish-\($0)") }
+        let rows = try skills.map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false) }
+        let gate = PolishGate()
+        self.gate = gate
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: rows, diff: { row, _ in
+                try gate.value?.wait()
+                guard let index = rows.firstIndex(where: { $0.id == row.id }), previews.indices.contains(index) else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                return previews[index]
+            }))
+        self.model = model
+        let representation = NSHostingSceneRepresentation {
+            ViewChangesScene(model: model, library: fixture.library,
+                             updates: fixture.sheet(rows: rows), container: fixture.container)
+        }
+        NSApp.addSceneRepresentation(representation)
+        representation.environment.openWindow(id: WindowPolicy.changesWindowID)
+        await TestWait.until(failureMessage: "The production View Changes scene did not open") {
+            NSApp.windows.contains {
+                $0.isVisible && $0.accessibilityIdentifier() == WindowPolicy.changesWindowID
+            }
+        }
+        window = try XCTUnwrap(NSApp.windows.first {
+            $0.isVisible && $0.accessibilityIdentifier() == WindowPolicy.changesWindowID
+        })
+        window.animationBehavior = .none
+    }
+
+    func load(_ index: Int) async throws {
+        model.open(skillID: skills[index].id, context: fixture.context)
+        await TestWait.until(failureMessage: "Polish preview did not finish loading") { self.model.state != .loading }
+        await settle(model.files.first?.path ?? (model.files.isEmpty && index == skills.count - 1
+            ? "Couldn't Load Changes" : "No File Changes"))
+    }
+
+    func settle(_ string: String) async {
+        await TestWait.until(failureMessage: "Missing rendered \(string)") {
+            RenderedViewTestSupport.values(in: self.root).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).contains(string)
+        }
+        let clock = ContinuousClock()
+        var previous: [CGRect?] = []
+        var stableSince = clock.now
+        await TestWait.until(failureMessage: "The live layout did not settle") {
+            let frames = RenderedViewTestSupport.layoutValues(in: self.root).map(\.frame)
+            if frames != previous { previous = frames; stableSince = clock.now }
+            return stableSince.duration(to: clock.now) >= .milliseconds(300)
+        }
+    }
+}
+
+private final class PolishGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: TestWait.Gate?
+    var value: TestWait.Gate? {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); defer { lock.unlock() }; stored = newValue }
+    }
+}
+
+@MainActor
+func polishSidebarButtonFrame(in window: NSWindow) throws -> CGRect {
+    let host = try XCTUnwrap(window.toolbar?.items.first {
+        $0.itemIdentifier.rawValue.contains("navigationSplitView.toggleSidebar")
+    }?.view)
+    let values = RenderedViewTestSupport.layoutValues(in: host)
+    let button = try XCTUnwrap(values.first {
+        String(reflecting: type(of: $0.value)).hasPrefix("SwiftUI.Button<")
+    }?.frame, "Missing live sidebar toolbar button")
+    return window.convertToScreen(host.convert(button, to: nil))
+}

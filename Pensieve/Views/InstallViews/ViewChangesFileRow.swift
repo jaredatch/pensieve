@@ -36,7 +36,6 @@ struct ViewChangesFileRow: View {
                     .frame(minWidth: DesignTokens.changesFileMarkerMinimumWidth, alignment: .trailing)
             }
         }
-        .padding(.horizontal, DesignTokens.changesFileRowHorizontalPadding)
         .frame(maxWidth: .infinity)
         .frame(height: parent.isEmpty ? DesignTokens.changesFileRowHeight : DesignTokens.changesNestedFileRowHeight)
         .contentShape(Rectangle())
