@@ -154,6 +154,42 @@ extension UpdatesSheetTests {
         RenderedViewTestSupport.values(in: host).compactMap { $0 as? Text }.flatMap(RenderedViewTestSupport.strings)
     }
 
+    func renderedButtons(in host: NSView) -> [NSButton] {
+        func buttons(_ view: NSView) -> [NSButton] {
+            [view].compactMap { $0 as? NSButton } + view.subviews.flatMap(buttons)
+        }
+        host.layoutSubtreeIfNeeded()
+        return buttons(host)
+    }
+
+    func assertLocalEditsBox(_ host: NSView, confirmed: Bool, enabled: Bool,
+                             file: StaticString = #filePath, line: UInt = #line) throws {
+        let strings = renderedStrings(host)
+        XCTAssertTrue(strings.contains("You have local edits to this skill. Updating replaces them."), file: file, line: line)
+        XCTAssertTrue(strings.contains("Replace my local edits"), file: file, line: line)
+        let images = RenderedViewTestSupport.values(in: host).compactMap { $0 as? Image }
+        XCTAssertTrue(images.contains(Image(systemName: "exclamationmark.triangle")), file: file, line: line)
+        let label = try textFrame("Replace my local edits", in: host)
+        // The native checkbox has no title in this host; find it beside its rendered label.
+        let checkbox = try XCTUnwrap(renderedButtons(in: host).first {
+            let frame = host.convert($0.bounds, from: $0)
+            return frame.maxX <= label.minX && frame.minY < label.maxY && frame.maxY > label.minY
+        }, "The replace checkbox must be mounted beside its label", file: file, line: line)
+        XCTAssertEqual(checkbox.state, confirmed ? .on : .off, file: file, line: line)
+        XCTAssertEqual(checkbox.isEnabled, enabled, file: file, line: line)
+    }
+
+    func assertNoLocalEditsBox(_ host: NSView, sameHeightAs plain: NSView,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        let strings = renderedStrings(host)
+        XCTAssertFalse(strings.contains("You have local edits to this skill. Updating replaces them."), file: file, line: line)
+        XCTAssertFalse(strings.contains("Replace my local edits"), file: file, line: line)
+        let images = RenderedViewTestSupport.values(in: host).compactMap { $0 as? Image }
+        XCTAssertFalse(images.contains(Image(systemName: "exclamationmark.triangle")), file: file, line: line)
+        XCTAssertEqual(renderedButtons(in: host).count, 1, "Only the skill selection checkbox may remain", file: file, line: line)
+        XCTAssertEqual(host.fittingSize.height, plain.fittingSize.height, "The box must leave no space", file: file, line: line)
+    }
+
     func textFrame(_ string: String, in host: NSView, contains: Bool = false) throws -> CGRect {
         let matches = RenderedViewTestSupport.layoutValues(in: host).filter { element in
             guard let text = element.value as? Text else { return false }
