@@ -42,7 +42,7 @@ final class RefusedCreateRecordsUpgradeTests: XCTestCase, SkillDeletionArrivalAs
         XCTAssertFalse(published.deployIntents.contains { $0.skillSlug == "alpha" })
         XCTAssertEqual(published.skills.first { $0.slug == "beta" }, seed.disk.skills.first { $0.slug == "beta" })
         XCTAssertEqual(published.skills.first { $0.slug == "preserved" }, seed.preserved)
-        XCTAssertEqual(try readJSON(in: h)["schema_version"] as? Int, 2)
+        XCTAssertEqual(rewritten["schema_version"] as? Int, 2)
     }
 
     private struct LegacySeed {
@@ -93,7 +93,7 @@ final class RefusedCreateRecordsUpgradeTests: XCTestCase, SkillDeletionArrivalAs
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root), before)
         XCTAssertEqual(try h.manifest.snapshot(from: h.context).skills.first { $0.slug == "alpha" },
                        before.skills.first { $0.slug == "alpha" })
-        XCTAssertEqual(try deletionSlugs(in: h), [])
+        XCTAssertEqual((try readJSON(in: h)["deletions"] as? [[String: Any]])?.count, 0)
         try publishWindow(in: h)
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root), before)
     }

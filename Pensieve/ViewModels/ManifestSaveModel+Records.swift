@@ -217,6 +217,7 @@ extension ManifestSaveModel {
     func replayRestoredDeletions(context: ModelContext) {
         let deletions = restoredDeletions
         restoredDeletions = []
+        guard !deletions.isEmpty else { return }
         for deletion in deletions {
             for change in deletion.changes {
                 // submit appends synchronously, before its worker can take a turn.
