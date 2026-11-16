@@ -88,7 +88,7 @@ enum SkillAdoptResult: Equatable {
     case localDrift
 }
 
-protocol SkillInstallGitServing: GitShallowCloning, GitCommitReading, GitTreeReading {
+protocol SkillInstallGitServing: GitShallowCloning, GitPinnedCommitDownloading, GitCommitReading, GitTreeReading {
 
     @_disfavoredOverload
     func currentBranch(at path: String) throws -> String
