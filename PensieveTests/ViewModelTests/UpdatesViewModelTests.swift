@@ -128,36 +128,6 @@ final class UpdatesViewModelTests: XCTestCase {
         XCTAssertEqual(model.status(for: driftedRow), .updated)
     }
 
-    func testApplyRefusesWhenRemoteMovedOffPin() async throws {
-        let fixture = try prepareRealPinnedUpdate()
-        XCTAssertEqual(fixture.skill.installedOrigin?.path, "skills/vendor")
-        try fileService.writeFile(
-            at: fixture.repository + "/README.md",
-            content: "move HEAD without changing the skill subtree\n"
-        )
-        _ = try commit(
-            fixture.repository,
-            message: "move branch without touching the skill subtree"
-        )
-        let model = makeRealModel(fixture: fixture)
-        await model.loadAndReport(context: context)
-
-        await model.applySelectedAndReport(context: context)
-
-        let row = try XCTUnwrap(model.rows.first)
-        guard case let .failed(message, offersRecheck) = model.status(for: row) else {
-            return XCTFail("a moved branch must report a per-skill failure")
-        }
-        XCTAssertEqual(message, SkillUpdateFlowError.repositoryChangedMessage)
-        XCTAssertTrue(offersRecheck)
-        XCTAssertTrue(fixture.skill.updateAvailable)
-        XCTAssertEqual(fixture.skill.upstreamCommit, fixture.pinnedCommit)
-        XCTAssertTrue(
-            try fileService.readFile(at: fixture.storeRoot + "/skills/vendor/SKILL.md")
-                .contains("old body")
-        )
-    }
-
     func testPinnedApplyClearsFlagsRefreshesCoordinatesAndFrontmatter() async throws {
         let fixture = try prepareRealPinnedUpdate()
         let model = makeRealModel(fixture: fixture)

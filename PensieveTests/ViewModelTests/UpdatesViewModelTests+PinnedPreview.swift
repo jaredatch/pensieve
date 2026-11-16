@@ -148,9 +148,9 @@ extension UpdatesViewModelTests {
         }
     }
 
-    private func pinnedPreviewService(_ fixture: RealFixture, git: SkillInstallGitServing,
-                                      files: FileServiceProtocol = FileService(),
-                                      credentials: CredentialStoreProtocol = InMemoryCredentialStore()) -> SkillInstallService {
+    func pinnedPreviewService(_ fixture: RealFixture, git: SkillInstallGitServing,
+                              files: FileServiceProtocol = FileService(),
+                              credentials: CredentialStoreProtocol = InMemoryCredentialStore()) -> SkillInstallService {
         SkillInstallService(gitService: git, credentialStore: credentials, fileService: files,
             scratchRoot: tempDir + "/preview-scratch", storeRoot: fixture.storeRoot,
             lockPath: tempDir + "/sync.lock",
@@ -164,12 +164,12 @@ extension UpdatesViewModelTests {
     }
 }
 
-/// Records preview transport requests; real clones supply a checkout for verification failures.
-private final class PinnedPreviewGit: SkillInstallGitServing {
+/// Records transport requests and otherwise uses real git; can misreport checkout verification.
+final class PinnedPreviewGit: SkillInstallGitServing {
     let git = TestPaths.git
     let failure: Error?
-    let wrongHead: Bool
-    let wrongTree: Bool
+    var wrongHead: Bool
+    var wrongTree: Bool
     var downloadedCommits: [String] = []
     var downloadCredentials: [GitCredential?] = []
     var calls = 0
@@ -186,7 +186,7 @@ private final class PinnedPreviewGit: SkillInstallGitServing {
         downloadedCommits.append(commit)
         downloadCredentials.append(credential)
         if let failure { throw failure }
-        try git.cloneShallow(remote: remote, branch: "main", into: path, credential: credential)
+        try git.downloadPinnedCommit(remote: remote, commit: commit, into: path, credential: credential)
     }
 
     func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
