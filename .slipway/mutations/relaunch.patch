@@ -1,0 +1,7 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
+@@ -61,3 +61,3 @@
+     func registerRestoredRenames(_ records: [RefusedCreateRecords.Rename], context: ModelContext) {
+-        for record in records {
++        for record in records where record.old == record.new {
+             heldRenames.append((record, context))

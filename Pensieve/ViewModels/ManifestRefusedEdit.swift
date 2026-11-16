@@ -76,11 +76,12 @@ final class ManifestRefusedEdit {
     }
 
     var deletionCreatedAt: String?
+    var deletionRequiresCreation: Bool?
 
     var deletionRecord: RefusedCreateRecords.Deletion? {
         switch original {
         case .retireSkill(let slug), .deleteSkill(let slug):
-            return .init(slug: slug, machineID: nil, createdAt: deletionCreatedAt)
+            return .init(slug: slug, machineID: nil, createdAt: deletionCreatedAt, requiresCreation: deletionRequiresCreation)
         case .retireLocalSkill(let slug, let machine): return .init(slug: slug, machineID: machine)
         default: return nil
         }

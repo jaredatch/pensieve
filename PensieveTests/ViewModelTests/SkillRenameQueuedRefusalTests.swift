@@ -25,7 +25,8 @@ final class SkillRenameQueuedRefusalTests: XCTestCase {
         await h.saves.waitUntilIdle()
         XCTAssertNil(h.tagLibrary.error, "The earlier edit must never report a rebuild failure")
         XCTAssertEqual(h.library.error, h.takenMessage()
-            + " The folder is still under “zulu” because the old name “alpha” is taken.")
+            + " The folder is still under “zulu” because the old name “alpha” is taken. "
+            + SkillRenameTakeoverFixture.holdSentence)
         XCTAssertEqual(h.skill.directoryName, "zulu")
         XCTAssertTrue(h.files.directoryExists(at: h.store.baseDir + "/zulu"))
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "other" }?.tags, ["edited"])

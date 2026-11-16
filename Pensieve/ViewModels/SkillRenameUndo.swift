@@ -14,6 +14,7 @@ final class SkillRenameUndo {
     let planned: [DeployRemovalKey]
     let cleanup: SkillCleanupResult
     let assignments: ManifestSnapshot
+    private(set) var recoveredUnderOldName = false
 
     init(skill: Skill, oldName: String, oldSlug: String, newSlug: String, library: SkillLibraryViewModel,
          platform: PlatformViewModel, projects: [Project], planned: [DeployRemovalKey], cleanup: SkillCleanupResult,
@@ -42,17 +43,46 @@ final class SkillRenameUndo {
             try acceptAssignments(window, context: context)
             try context.save()
         } catch {
-            // Nothing half-moved is exposed when the save releases sync.lock.
+            let failure = error
+            do {
+                try library.skillStore.renameSkill(directoryName: oldSlug, to: newSlug)
+            } catch {
+                return finishMovedBack(restored: restored, window: window, failure: failure, context: context)
+            }
             skill.name = SkillParser.parse(current, retainingBOM: true).name ?? skill.name
             skill.directoryName = newSlug
             try? acceptAssignments(before, context: context)
             try? context.save()
-            try library.skillStore.renameSkill(directoryName: oldSlug, to: newSlug)
             try library.skillStore.writeBody(directoryName: newSlug, body: current)
-            throw error
+            throw failure
         }
         library.acceptRename(from: newSlug, to: oldSlug, document: restored, carryingDraft: true)
         return restoreDeployments(context: context)
+    }
+
+    /// Once the inverse cannot move the folder, every remaining step follows its old path.
+    /// Further I/O failures add warnings; none can put the row back under the absent new path.
+    private func finishMovedBack(restored: String, window: ManifestSnapshot, failure: Error,
+                                 context: ModelContext) -> String {
+        recoveredUnderOldName = true
+        skill.name = oldName
+        skill.directoryName = oldSlug
+        var warnings = [failure.localizedDescription]
+        do { try library.skillStore.writeBody(directoryName: oldSlug, body: restored) } catch {
+            warnings.append("Couldn't restore the file's name: " + error.localizedDescription)
+        }
+        do { try acceptAssignments(window, context: context) } catch {
+            warnings.append("Couldn't restore the window's assignments: " + error.localizedDescription)
+        }
+        do { try context.save() } catch {
+            StoreIngestState.shared(for: context.container).invalidate()
+            warnings.append("Couldn't save the restored row: " + error.localizedDescription)
+        }
+        let document = (try? library.skillStore.readData(directoryName: oldSlug))
+            .flatMap { String(validating: $0, as: UTF8.self) } ?? restored
+        library.acceptRename(from: newSlug, to: oldSlug, document: document, carryingDraft: true)
+        if let notice = restoreDeployments(context: context) { warnings.append(notice) }
+        return "The skill moved back to “\(oldSlug)”, but restoring it needed recovery: " + warnings.joined(separator: " ")
     }
 
     private func restoredAssignments(_ before: ManifestSnapshot, durable: ManifestSnapshot,

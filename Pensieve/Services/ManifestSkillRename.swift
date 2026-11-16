@@ -6,6 +6,7 @@ struct ManifestSkillRename {
     let leftoverCreatedAt: Date?
     let takesLeftovers: Bool
     var undo: SkillRenameUndo?
+    var requiresOwnedSource = false
 
     func matchesLeftover(_ target: SkillOverlay) -> Bool {
         guard takesLeftovers, let leftoverCreatedAt, leftoverCreatedAt != Date(timeIntervalSince1970: 0),
@@ -39,6 +40,7 @@ extension ManifestChange {
     func renameTargetIsTaken(_ target: SkillOverlay, old: String, details: ManifestSkillRename?,
                              in snapshot: ManifestSnapshot) -> Bool {
         if details?.matchesLeftover(target) == true { return false }
+        if let details, details.requiresOwnedSource, ManifestService.sameCreation(details.original, target) { return false }
         if snapshot.skills.contains(where: { $0.slug == old }) { return true }
         guard let details else { return false }
         return !ManifestService.sameCreation(details.original, target)
@@ -59,4 +61,49 @@ extension ManifestChange {
         default: return self
         }
     }
+}
+
+extension RefusedCreateRecords.Rename {
+    func isTaken(in snapshot: ManifestSnapshot) -> Bool {
+        snapshot.skills.contains { $0.slug.lowercased() == new.lowercased() && !owns($0) }
+    }
+
+    func change(publishing current: SkillOverlay, as slug: String) -> ManifestChange {
+        var details = ManifestSkillRename(original: current, leftoverCreatedAt: nil, takesLeftovers: false)
+        details.requiresOwnedSource = true
+        return .renameSkill(old, slug, details: details)
+    }
+
+    /// Absence and a different creation both mean this hold owns nothing under the old name.
+    func retire(in snapshot: inout ManifestSnapshot, deleting: Bool) {
+        guard snapshot.skills.contains(where: { $0.slug == old && owns($0) }) else { return }
+        ManifestChange.retireSkill(old).apply(to: &snapshot)
+        if deleting { ManifestChange.deleteSkill(old).apply(to: &snapshot) }
+    }
+}
+
+extension ManifestChange {
+    func renameOwnedSkill(_ old: String, to new: String, current: SkillOverlay,
+                          in snapshot: inout ManifestSnapshot) -> Bool {
+        let ownsOld = snapshot.skills.contains { $0.slug == old && ManifestService.sameCreation($0, current) }
+        // An empty destination can still carry the departed peer's assignments.
+        if !snapshot.skills.contains(where: { $0.slug == new && ManifestService.sameCreation($0, current) }) {
+            clearRenameTarget(new, in: &snapshot)
+        }
+        if ownsOld {
+            snapshot.skills.removeAll { $0.slug == old }
+            for index in snapshot.deployIntents.indices where snapshot.deployIntents[index].skillSlug == old {
+                snapshot.deployIntents[index].skillSlug = new
+            }
+            for index in snapshot.categories.indices {
+                snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map { $0 == old ? new : $0 }
+            }
+        }
+        var renamed = current
+        renamed.slug = new
+        snapshot.skills.removeAll { $0.slug == new }
+        snapshot.skills.append(renamed)
+        return true
+    }
+
 }

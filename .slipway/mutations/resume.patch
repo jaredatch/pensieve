@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/ManifestSkillRename.swift
++++ b/Pensieve/Services/ManifestSkillRename.swift
+@@ -94,3 +94,3 @@
+             snapshot.skills.removeAll { $0.slug == old }
+-            for index in snapshot.deployIntents.indices where snapshot.deployIntents[index].skillSlug == old {
++            for index in snapshot.deployIntents.indices where snapshot.deployIntents[index].skillSlug == new {
+                 snapshot.deployIntents[index].skillSlug = new
+@@ -98,3 +98,3 @@
+             for index in snapshot.categories.indices {
+-                snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map { $0 == old ? new : $0 }
++                snapshot.categories[index].skillSlugs = snapshot.categories[index].skillSlugs.map { $0 == new ? new : $0 }
+             }

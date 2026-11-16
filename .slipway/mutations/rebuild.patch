@@ -1,0 +1,6 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
+@@ -7,2 +7,3 @@
+     func isRefusedRename(_ item: Item, durable: ManifestSnapshot?, error: Error) -> Bool {
++        if case ManifestSaveError.rebuildFailed = error { return false }
+         if case ManifestSaveError.renameTaken = error { return true }

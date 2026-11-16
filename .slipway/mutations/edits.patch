@@ -1,0 +1,13 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
+@@ -29,3 +29,3 @@
+         case .deleteSkill: hold.record.retire(in: &snapshot, deleting: true)
+-        default: throw ManifestSaveError.createCollision(slug)
++        default: return false
+         }
+--- a/Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Ingest.swift
+@@ -136,2 +136,3 @@
+     private func collisionDeletion(for item: Item) throws -> String? {
++        if hasHeldRename(heldEditSlug(item.change) ?? "", context: item.presentation.context) { return nil }
+         switch item.change {

@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/ManifestSkillRename.swift
++++ b/Pensieve/Services/ManifestSkillRename.swift
+@@ -87,2 +87,3 @@
+                           in snapshot: inout ManifestSnapshot) -> Bool {
++        let published = snapshot.skills.first { $0.slug == old } ?? current
+         let ownsOld = snapshot.skills.contains { $0.slug == old && ManifestService.sameCreation($0, current) }
+@@ -101,3 +102,3 @@
+         }
+-        var renamed = current
++        var renamed = published
+         renamed.slug = new

@@ -1,0 +1,7 @@
+--- a/Pensieve/ViewModels/SkillRenameUndo.swift
++++ b/Pensieve/ViewModels/SkillRenameUndo.swift
+@@ -49,3 +49,3 @@
+             } catch {
+-                return finishMovedBack(restored: restored, window: window, failure: failure, context: context)
++                throw failure
+             }

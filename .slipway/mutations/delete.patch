@@ -1,0 +1,9 @@
+--- a/Pensieve/Services/ManifestSkillRename.swift
++++ b/Pensieve/Services/ManifestSkillRename.swift
+@@ -79,4 +79,4 @@
+         guard snapshot.skills.contains(where: { $0.slug == old && owns($0) }) else { return }
+-        ManifestChange.retireSkill(old).apply(to: &snapshot)
+-        if deleting { ManifestChange.deleteSkill(old).apply(to: &snapshot) }
++        ManifestChange.retireSkill(new).apply(to: &snapshot)
++        if deleting { ManifestChange.deleteSkill(new).apply(to: &snapshot) }
+     }

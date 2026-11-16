@@ -1,0 +1,7 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+RenameHold.swift
+@@ -95,3 +95,3 @@
+         let queued = items.compactMap { item -> RefusedCreateRecords.Rename? in
+-            guard item.id != excludingPublished, !item.wasHealed, !item.wasCancelled,
++            guard item.id != excludingPublished, !item.wasHealed, !item.wasCancelled, item.intentMove != nil,
+                   case .renameSkill(let old, let new, let details) = item.change, let details else { return nil }

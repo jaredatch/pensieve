@@ -11,6 +11,7 @@ extension ManifestSaveModel {
         let slug: String
         let machineID: String?
         let createdAt: String?
+        var requiresCreation = false
         let changes: [ManifestChange]
         let projectionIDs: Set<UUID>
     }
@@ -20,7 +21,8 @@ extension ManifestSaveModel {
     }
 
     func hasCollision(_ slug: String, context: ModelContext) -> Bool {
-        refused.contains { $0.context === context && $0.createdSkill?.slug == slug && $0.isCollisionHeld }
+        StoreIngestState.shared(for: context.container).heldRename(slug) != nil
+            || refused.contains { $0.context === context && $0.createdSkill?.slug == slug && $0.isCollisionHeld }
     }
 
     func discardRefusedCreate(_ slug: String, context: ModelContext) {
@@ -48,7 +50,8 @@ extension ManifestSaveModel {
             return
         }
         guard !record.held.isEmpty || !record.preserved.isEmpty
-            || !record.retirements.isEmpty || !record.deletions.isEmpty else { return }
+            || !record.retirements.isEmpty || !record.deletions.isEmpty || !record.renames.isEmpty else { return }
+        registerRestoredRenames(record.renames, context: context)
         let durable = probeLibraryForRecordRestore()
         let state = StoreIngestState.shared(for: context.container)
         for slug in record.preserved where durable.map({ $0.skills.contains { $0.slug == slug } }) ?? true {
@@ -62,6 +65,7 @@ extension ManifestSaveModel {
             log("Couldn't restore refused creates: " + error.localizedDescription)
             return
         }
+        validateRestoredRenames(local: local, context: context)
         restoreHeldCreates(record.held, local: local, durable: durable, context: context)
         persistRefusedCreates()
     }
@@ -106,17 +110,20 @@ extension ManifestSaveModel {
 
     private func restoreDeletions(_ records: [RefusedCreateRecords.Deletion], durable: ManifestSnapshot?, context: ModelContext) {
         for record in records where record.machineID != nil
-            || !restoredDeletionReappeared(record.slug, createdAt: record.createdAt, durable: durable) {
+            || !restoredDeletionReappeared(record.slug, createdAt: record.createdAt, durable: durable,
+                requiresCreation: record.requiresCreation == true) {
             let changes: [ManifestChange] = record.machineID.map { [.retireLocalSkill(record.slug, $0)] }
                 ?? [.retireSkill(record.slug), .deleteSkill(record.slug)]
             let edits = changes.map { ManifestRefusedEdit($0, context: context, order: -1) }
             for edit in edits {
                 edit.deletionCreatedAt = record.createdAt
+                edit.deletionRequiresCreation = record.requiresCreation
                 edit.retain()
                 refused.append(edit)
             }
             restoredDeletions.append(.init(slug: record.slug, machineID: record.machineID,
-                                          createdAt: record.createdAt, changes: changes, projectionIDs: Set(edits.map(\.id))))
+                                          createdAt: record.createdAt, requiresCreation: record.requiresCreation == true,
+                                          changes: changes, projectionIDs: Set(edits.map(\.id))))
         }
     }
 
@@ -126,7 +133,8 @@ extension ManifestSaveModel {
         guard !restoredDeletions.isEmpty else { return false }
         let durable = probeLibraryForRecordRestore()
         let reappeared = restoredDeletions.filter {
-            $0.machineID == nil && restoredDeletionReappeared($0.slug, createdAt: $0.createdAt, durable: durable)
+            $0.machineID == nil && restoredDeletionReappeared($0.slug, createdAt: $0.createdAt, durable: durable,
+                requiresCreation: $0.requiresCreation)
         }
         guard !reappeared.isEmpty else { return false }
         let slugs = Set(reappeared.map(\.slug))
@@ -193,7 +201,8 @@ extension ManifestSaveModel {
         let reappeared = items.filter { item in
             guard let slug = checkedDeletionSlug(item) else { return false }
             if let restored = item.restoredDeletion, let durable {
-                return restoredDeletionReappeared(slug, createdAt: restored.createdAt, durable: durable)
+                return restoredDeletionReappeared(slug, createdAt: restored.createdAt, durable: durable,
+                    requiresCreation: restored.requiresCreation)
             }
             return !hasQueuedLocalReplacement(for: item, slug: slug, durable: durable) && retirementFolderMayExist(slug)
         }
@@ -225,6 +234,7 @@ extension ManifestSaveModel {
                 submit(change, context: context) { _ in }
                 items[index].restoredDeletion = deletion
                 items[index].presentation.deletionCreatedAt = deletion.createdAt
+                items[index].presentation.deletionRequiresCreation = deletion.requiresCreation ? true : nil
             }
         }
         persistRefusedCreates()
@@ -232,10 +242,11 @@ extension ManifestSaveModel {
 
     /// Dated restart reminders identify the deleted creation without needing a queued replacement.
     /// An unreadable launch probe defers the decision to the worker's locked manifest read.
-    private func restoredDeletionReappeared(_ slug: String, createdAt: String?, durable: ManifestSnapshot?) -> Bool {
+    private func restoredDeletionReappeared(_ slug: String, createdAt: String?, durable: ManifestSnapshot?,
+                                            requiresCreation: Bool = false) -> Bool {
         guard let createdAt else { return retirementFolderMayExist(slug) }
         guard let durable else { return false }
-        guard let overlay = durable.skills.first(where: { $0.slug == slug }) else { return false }
+        guard let overlay = durable.skills.first(where: { $0.slug == slug }) else { return requiresCreation }
         return RefusedCreateRecords.writtenDate(overlay.createdAt) != createdAt
     }
 
@@ -294,7 +305,8 @@ extension ManifestSaveModel {
         let deletions = deletionRecords(excludingPublished: excludingPublished)
         do {
             try RefusedCreateRecords(path: refusedCreatesPath, files: files)
-                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements, deletions: deletions))
+                .write(.init(held: held, preserved: preservedPeerSlugs.sorted(), retirements: retirements,
+                             deletions: deletions, renames: renameRecords(excludingPublished: excludingPublished)))
         } catch {
             if case RefusedCreateRecords.ReadError.unsupportedSchema = error { recordsRequireNewerVersion = true }
             log("Couldn't write refused creates at \(refusedCreatesPath): \(error)")
@@ -307,6 +319,7 @@ extension ManifestSaveModel {
         }.map(\.presentation)
         let records = (refused + pending).compactMap { edit -> RefusedCreateRecords.Deletion? in
             guard let record = edit.deletionRecord else { return nil }
+            if let owned = heldRenameDeletionRecord(record, context: edit.context) { return owned }
             let localOnly = record.machineID != nil
             let peer = edit.deletesSkillOverlay
                 && (hasCollision(record.slug, context: edit.context) || preservedPeerSlugs.contains(record.slug))

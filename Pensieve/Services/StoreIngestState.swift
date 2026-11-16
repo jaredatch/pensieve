@@ -8,7 +8,8 @@ final class StoreIngestState {
     private static let registryLock = NSLock()
     private static let registry = NSMapTable<ModelContainer, StoreIngestState>(
         keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
-    private let lock = NSLock()
+    let lock = NSLock()
+    var renameHolds: [String: RenameHold] = [:]
     private var pending = false
     private var ingestedHead: String?
     private struct QueuedEdit {
@@ -65,6 +66,7 @@ final class StoreIngestState {
         lock.lock()
         defer { lock.unlock() }
         edits.append(QueuedEdit(id: id, change: change, categoryWindow: categoryWindow))
+        if case .skillMetadata(let slug, _, _) = change { renameHolds[slug]?.observe(change) }
     }
 
     func retargetSkill(from old: String, to new: String, ids: Set<UUID>) {
@@ -108,14 +110,17 @@ final class StoreIngestState {
         lock.lock()
         let changes = edits
         let retainedEdits = refused
+        let holds = Array(renameHolds.values)
         lock.unlock()
         let hasRefusedRename = changes.contains { $0.change.refusedRename(in: snapshot) != nil }
-        let local = hasRefusedRename || retainedEdits.contains { $0.projection.intentMove != nil } ? readLocal() : nil
+        let needsLocal = !holds.isEmpty || hasRefusedRename || retainedEdits.contains { $0.projection.intentMove != nil }
+        let local = needsLocal ? readLocal() : nil
         let creates = retainedEdits.flatMap { $0.projection.createdSkills } + changes.compactMap { edit -> SkillOverlay? in
             if case .createSkill(let skill) = edit.change { return skill }
             return nil
         }
         var projected = snapshot
+        projectRenameHolds(holds, onto: &projected, durable: snapshot, local: local)
         for edit in retainedEdits {
             edit.projection.project(onto: &projected, keepingLocalCreates: keepingLocalCreates,
                                     knownCreates: creates, local: local, durable: snapshot)
@@ -169,12 +174,14 @@ final class StoreIngestState {
             guard case .createSkill(let overlay) = edit.change else { return nil }
             return overlay
         }
+        let holds = Array(state.renameHolds.values)
         let preserved = state.preservedPeers
         state.lock.unlock()
         // A queued or failed create may meet a peer for the first time during a rebuild or a whole-row
         // write. Probe identity here too; HEAD can be current and the queue need not run again.
         let creates = queuedCreates + projections.flatMap(\.createdSkills)
-        let disk = preserved.isEmpty && creates.isEmpty && renames.isEmpty ? nil : try manifest.read(fromRoot: root)
+        let needsDisk = !preserved.isEmpty || !creates.isEmpty || !renames.isEmpty || !holds.isEmpty
+        let disk = needsDisk ? try manifest.read(fromRoot: root) : nil
         let known = creates + (disk?.skills ?? [])
         for projection in projections {
             projection.intentMove?.apply(to: &snapshot, durable: disk ?? local, local: local, knownCreates: known)
@@ -186,6 +193,7 @@ final class StoreIngestState {
             snapshot.skills.append(peer)
         }
         if let disk {
+            preserveRenameHolds(holds, from: disk, local: local, in: &snapshot)
             for change in renames {
                 guard let rename = change.refusedRename(in: disk) else { continue }
                 keepRenameRecords(from: disk, old: rename.old, new: rename.new, in: &snapshot)
@@ -195,8 +203,8 @@ final class StoreIngestState {
     }
 
     /// The moved row and its pending assignments cannot take either durable name before refusal.
-    private static func keepRenameRecords(from disk: ManifestSnapshot, old: String, new: String,
-                                          in snapshot: inout ManifestSnapshot) {
+    static func keepRenameRecords(from disk: ManifestSnapshot, old: String, new: String,
+                                  in snapshot: inout ManifestSnapshot) {
         let names = Set([old.lowercased(), new.lowercased()])
         func affected(_ slug: String) -> Bool { names.contains(slug.lowercased()) }
         snapshot.skills.removeAll { affected($0.slug) }

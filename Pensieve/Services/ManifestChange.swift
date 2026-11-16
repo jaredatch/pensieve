@@ -33,7 +33,8 @@ enum ManifestChange {
             guard SkillStore.isPathSafeSlug(new), ManifestService.isAdmittedIntentComponent(new) else {
                 throw ManifestError.corruptManifestFile("skills/" + new + ".yaml")
             }
-            if let target = snapshot.skills.first(where: { $0.slug != old && $0.slug.lowercased() == new.lowercased() }),
+            if let target = snapshot.skills.first(where: { ($0.slug != old || details?.requiresOwnedSource == true)
+                && $0.slug.lowercased() == new.lowercased() }),
                renameTargetIsTaken(target, old: old, details: details, in: snapshot) {
                 throw ManifestSaveError.renameTaken(new)
             }
@@ -101,8 +102,12 @@ enum ManifestChange {
 
     private func renameSkill(_ old: String, to new: String, details: ManifestSkillRename?,
                              in snapshot: inout ManifestSnapshot) -> Bool {
+        if let details, details.requiresOwnedSource {
+            return renameOwnedSkill(old, to: new, current: details.original, in: &snapshot)
+        }
         let hasOld = snapshot.skills.contains { $0.slug == old }
-        let target = snapshot.skills.first { $0.slug != old && $0.slug.lowercased() == new.lowercased() }
+        let target = snapshot.skills.first { ($0.slug != old || details?.requiresOwnedSource == true)
+                && $0.slug.lowercased() == new.lowercased() }
         if !hasOld {
             // A scan after the folder move may have put the leftover overlay on our row.
             // A whole-row write of our own creation, however, has already completed the rename.
@@ -128,7 +133,7 @@ enum ManifestChange {
         return true
     }
 
-    private func clearRenameTarget(_ slug: String, in snapshot: inout ManifestSnapshot) {
+    func clearRenameTarget(_ slug: String, in snapshot: inout ManifestSnapshot) {
         let folded = slug.lowercased()
         snapshot.skills.removeAll { $0.slug.lowercased() == folded }
         snapshot.deployIntents.removeAll { $0.skillSlug.lowercased() == folded }

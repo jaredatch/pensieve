@@ -101,6 +101,7 @@ enum SkillDeletionFlow {
                                           platform: PlatformViewModel, context: ModelContext) throws
         -> (changed: Bool, change: ManifestChange) {
         let localOnly = library.manifestSaves?.hasCollision(skill.directoryName, context: context) == true
+            && library.manifestSaves?.hasHeldRename(skill.directoryName, context: context) != true
         let machine = localOnly ? try MachineIdentity(fileService: library.fileService,
             appSupportDir: platform.deployStateStore.appSupportDir).identifier() : nil
         let changed = try retire(skill: skill, context: context, machine: machine)

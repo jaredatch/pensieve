@@ -1,0 +1,7 @@
+--- a/Pensieve/Services/StoreIngestState+RenameHold.swift
++++ b/Pensieve/Services/StoreIngestState+RenameHold.swift
+@@ -85,3 +85,3 @@
+                 var resolved = disk
+-                hold.record.change(publishing: current, as: hold.record.new).apply(to: &resolved)
++                _ = current
+                 keepRenameRecords(from: resolved, old: hold.record.old, new: hold.record.new, in: &snapshot)

@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/ManifestSkillRename.swift
++++ b/Pensieve/Services/ManifestSkillRename.swift
+@@ -78,3 +78,3 @@
+     func retire(in snapshot: inout ManifestSnapshot, deleting: Bool) {
+-        guard snapshot.skills.contains(where: { $0.slug == old && owns($0) }) else { return }
++        guard snapshot.skills.contains(where: { $0.slug == old }) else { return }
+         ManifestChange.retireSkill(old).apply(to: &snapshot)
+@@ -87,3 +87,3 @@
+                           in snapshot: inout ManifestSnapshot) -> Bool {
+-        let ownsOld = snapshot.skills.contains { $0.slug == old && ManifestService.sameCreation($0, current) }
++        let ownsOld = snapshot.skills.contains { $0.slug == old }
+         // An empty destination can still carry the departed peer's assignments.

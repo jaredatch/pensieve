@@ -32,18 +32,28 @@ extension ManifestSaveModel {
     /// The caller still owns sync.lock. Refused renames never become retained create projections.
     @MainActor
     func restoreRefusedRename(_ item: Item, durable: ManifestSnapshot?, error: Error) -> Error {
-        guard case .renameSkill(let old, let new, let details) = item.change,
-              let undo = details?.undo, let durable else { return error }
-        do {
-            let following = items.filter { $0.order > item.order && $0.presentation.context === item.presentation.context }
-                .map { $0.change.retargetingSkill(from: new, to: old) }
-            let notice = try undo.restore(durable: durable, following: following, context: item.presentation.context)
-            retargetPendingSkills(after: item, from: new, to: old)
-            if let notice { return ManifestSaveError.renameRestoreFailed(error.localizedDescription + " " + notice) }
-            return error
-        } catch {
-            return ManifestSaveError.renameRestoreFailed(errorMessage(error, new: new))
+        guard case .renameSkill(let old, let new, let details) = item.change else { return error }
+        let refusal = ManifestSaveError.renameTaken(new)
+        if let undo = details?.undo, let durable {
+            do {
+                let following = items.filter { $0.order > item.order && $0.presentation.context === item.presentation.context }
+                    .map { $0.change.retargetingSkill(from: new, to: old) }
+                let notice = try undo.restore(durable: durable, following: following, context: item.presentation.context)
+                retargetPendingSkills(after: item, from: new, to: old)
+                if undo.recoveredUnderOldName {
+                    StoreIngestState.shared(for: item.presentation.context.container).preservePeer(new)
+                    preservedPeerSlugs.insert(new)
+                    persistRefusedCreates(excludingPublished: item.id)
+                }
+                if let notice { return ManifestSaveError.renameRestoreFailed(refusal.localizedDescription + " " + notice) }
+                return refusal
+            } catch {
+                holdRefusedRename(item)
+                return ManifestSaveError.renameRestoreFailed(errorMessage(error, new: new) + " " + Self.renameHoldMessage)
+            }
         }
+        holdRefusedRename(item)
+        return ManifestSaveError.renameRestoreFailed(refusal.localizedDescription + " " + Self.renameHoldMessage)
     }
 
     @discardableResult
