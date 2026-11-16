@@ -112,3 +112,21 @@ extension GitRemoteHeadReading {
         }
     }
 }
+
+/// A nil answer means the fetched history could not establish reachability.
+protocol GitPinnedCommitChecking {
+    @_disfavoredOverload
+    func pinnedCommitIsReachable(_ commit: String, from tip: String, remote: String,
+                                 into path: String, credential: GitCredential?) throws -> Bool?
+}
+
+extension GitPinnedCommitChecking {
+    func pinnedCommitIsReachable(_ commit: String, from tip: String, remote: String,
+                                 into path: String, credential: GitCredential?,
+                                 file: StaticString = #fileID, line: UInt = #line) throws -> Bool? {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            let operation: (String, String, String, String, GitCredential?) throws -> Bool? = self.pinnedCommitIsReachable
+            return try operation(commit, tip, remote, path, credential)
+        }
+    }
+}

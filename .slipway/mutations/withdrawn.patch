@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/SkillInstallService+Updates.swift
++++ b/Pensieve/Services/SkillInstallService+Updates.swift
+@@ -255,8 +255,7 @@
+         let sessionRoot = scratchRoot + "/" + UUID().uuidString
+         defer { try? fileService.deleteDirectory(at: sessionRoot) }
+         try fileService.createDirectory(at: sessionRoot)
+-        return try gitService.pinnedCommitIsReachable(source.headCommit, from: tip, remote: remote.cloneRemote,
+-                                                      into: sessionRoot + "/history", credential: credential)
++        return true
+     }
+ 
+ }

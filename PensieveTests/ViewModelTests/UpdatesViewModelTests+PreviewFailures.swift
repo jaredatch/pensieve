@@ -102,6 +102,13 @@ extension UpdatesViewModelTests {
 private struct PreviewFailingGit: SkillInstallGitServing {
     let step: String
     let git = TestPaths.git
+    func remoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String? {
+        try git.remoteHead(remote: remote, ref: ref, credential: credential)
+    }
+    func pinnedCommitIsReachable(_ commit: String, from tip: String, remote: String,
+                                 into path: String, credential: GitCredential?) throws -> Bool? {
+        try git.pinnedCommitIsReachable(commit, from: tip, remote: remote, into: path, credential: credential)
+    }
     func downloadPinnedCommit(remote: String, commit: String, into path: String,
                               credential: GitCredential?) throws {
         if step == "unusable-clone" { throw GitError.unusable(.developerToolsMissing) }

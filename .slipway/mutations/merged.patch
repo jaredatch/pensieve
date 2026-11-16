@@ -1,0 +1,13 @@
+--- a/Pensieve/Services/GitService+PinnedFetch.swift
++++ b/Pensieve/Services/GitService+PinnedFetch.swift
+@@ -27,7 +27,9 @@
+               try !isShallowRepository(at: path) else { return nil }
+         // Missing in this complete graph means withdrawn; asking merge-base would throw for it.
+         guard try objectExists(commit + "^{commit}", at: path) else { return false }
+-        return try isAncestor(commit, of: tip, at: path)
++        let ancestors = try runOrThrow(["-C", path, "rev-list", "--first-parent", tip],
++                                       in: nil, environment: Self.historyEnvironment)
++        return ancestors.stdout.split(whereSeparator: \.isNewline).contains(Substring(commit))
+     }
+ 
+     /// Fetch only the saved commit, without resolving a moving branch or copying local history.

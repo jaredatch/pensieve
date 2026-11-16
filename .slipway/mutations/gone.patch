@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SkillInstallService+Updates.swift
++++ b/Pensieve/Services/SkillInstallService+Updates.swift
+@@ -249,7 +249,7 @@
+         }
+         let credential = credentialStore.credential(forHost: CredentialHost.githubInstall)
+         guard let tip = try gitService.remoteHead(remote: remote.cloneRemote, ref: source.ref,
+-                                                  credential: credential) else { return false }
++                                                  credential: credential) else { return true }
+         if tip == source.headCommit { return true }
+         try prepareScratchRoot()
+         let sessionRoot = scratchRoot + "/" + UUID().uuidString

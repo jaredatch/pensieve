@@ -1,0 +1,12 @@
+--- a/Pensieve/Services/SkillInstallService+Updates.swift
++++ b/Pensieve/Services/SkillInstallService+Updates.swift
+@@ -231,8 +231,7 @@
+             case .repositoryNotFound: reason = .repositoryNotFound
+             default: reason = nil
+             }
+-            throw SkillUpdateFlowError.pinnedCommitUnconfirmed(
+-                commit: String(source.headCommit.prefix(7)), ref: source.ref, reason: reason)
++            return
+         }
+         guard let confirmed else {
+             throw SkillUpdateFlowError.pinnedCommitUnconfirmed(

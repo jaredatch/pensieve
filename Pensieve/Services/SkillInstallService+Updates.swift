@@ -56,6 +56,8 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
     case missingPinnedUpdate
     case repositoryChanged
     case pinnedCommitUnavailable(String)
+    case pinnedCommitWithdrawn(commit: String, ref: String)
+    case pinnedCommitUnconfirmed(commit: String, ref: String, reason: SkillInstallError?)
     case localEditsRequireConfirmation
     case skillNotFound
     case unsafeSkillDirectory(String)
@@ -70,6 +72,11 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
             Self.repositoryChangedMessage
         case let .pinnedCommitUnavailable(commit):
             "Commit \(commit) is no longer in the repository — re-check to review the latest version"
+        case let .pinnedCommitWithdrawn(commit, ref):
+            "Commit \(commit) is no longer on \(ref) — re-check to review the latest version"
+        case let .pinnedCommitUnconfirmed(commit, ref, reason):
+            "Couldn't confirm commit \(commit) is still on \(ref), so nothing was installed"
+                + (reason.map { ". " + $0.localizedDescription } ?? "")
         case .localEditsRequireConfirmation:
             "This skill has local edits — updating will overwrite them"
         case .skillNotFound:
@@ -184,6 +191,7 @@ extension SkillInstallService {
     func applyUpdate(_ update: PinnedSkillUpdate, allowLocalOverwrite: Bool,
                      bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
                      context: ModelContext) throws {
+        try requirePinnedUpdateOnTrackedRef(update.source)
         do {
             try updateVerified(
                 existingSlug: update.existingSlug,
@@ -205,4 +213,50 @@ extension SkillInstallService {
             throw SkillUpdateFlowError.repositoryChanged
         }
     }
+
+    /// Ask before the library lock or ingestion: a refusal must leave every saved fact untouched.
+    private func requirePinnedUpdateOnTrackedRef(_ source: SkillFetchResult) throws {
+        guard GitService.isHistoryObjectID(source.headCommit) else {
+            throw SkillUpdateFlowError.missingPinnedUpdate
+        }
+        let confirmed: Bool?
+        do {
+            confirmed = try pinnedUpdateIsOnTrackedRef(source)
+        } catch {
+            if error is CancellationError { throw error }
+            let reason: SkillInstallError?
+            switch Self.mappedRepositoryError(error) as? SkillInstallError {
+            case .authenticationFailed: reason = .authenticationFailed
+            case .networkUnavailable: reason = .networkUnavailable
+            case .repositoryNotFound: reason = .repositoryNotFound
+            default: reason = nil
+            }
+            throw SkillUpdateFlowError.pinnedCommitUnconfirmed(
+                commit: String(source.headCommit.prefix(7)), ref: source.ref, reason: reason)
+        }
+        guard let confirmed else {
+            throw SkillUpdateFlowError.pinnedCommitUnconfirmed(
+                commit: String(source.headCommit.prefix(7)), ref: source.ref, reason: nil)
+        }
+        guard confirmed else {
+            throw SkillUpdateFlowError.pinnedCommitWithdrawn(commit: String(source.headCommit.prefix(7)), ref: source.ref)
+        }
+    }
+
+    private func pinnedUpdateIsOnTrackedRef(_ source: SkillFetchResult) throws -> Bool? {
+        guard let remote = validateRemote(source.repo) else {
+            throw SkillInstallError.unsupportedRepositoryRemote
+        }
+        let credential = credentialStore.credential(forHost: CredentialHost.githubInstall)
+        guard let tip = try gitService.remoteHead(remote: remote.cloneRemote, ref: source.ref,
+                                                  credential: credential) else { return false }
+        if tip == source.headCommit { return true }
+        try prepareScratchRoot()
+        let sessionRoot = scratchRoot + "/" + UUID().uuidString
+        defer { try? fileService.deleteDirectory(at: sessionRoot) }
+        try fileService.createDirectory(at: sessionRoot)
+        return try gitService.pinnedCommitIsReachable(source.headCommit, from: tip, remote: remote.cloneRemote,
+                                                      into: sessionRoot + "/history", credential: credential)
+    }
+
 }
