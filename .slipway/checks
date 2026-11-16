@@ -1,0 +1,4 @@
+paths = Pensieve/Views/SkillViews/SkillPreviewTheme.swift Pensieve/Views/SkillViews/SkillPreviewCodeBlock.swift Pensieve/Utilities/DesignTokens.swift PensieveTests/ViewTests/SkillPreviewCodeFadeTests.swift PensieveTests/ViewTests/SkillPreviewStyleTests.swift CHANGELOG.md Pensieve.xcodeproj/project.pbxproj
+check.fade = tests PensieveTests/SkillPreviewCodeFadeTests/testLongLineFadesAtTheRightEdgeUntilItsEnd
+check.fits = tests PensieveTests/SkillPreviewCodeFadeTests/testFadeFollowsTheColumnWidth
+check.fresh = tests PensieveTests/SkillPreviewCodeFadeTests/testReplacedDocumentShowsItsOwnFade
