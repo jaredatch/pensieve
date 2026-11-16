@@ -226,6 +226,27 @@ final class SkillPreviewNestedMetadataTests: XCTestCase {
 }
 
 extension SkillPreviewNestedMetadataTests {
+    func testShortNestedWordsStayOnOneLineWhileLongValuesWrap() async throws {
+        let tags = "ADHD, Output Style, Productivity, Formatting"
+        let fixture = try await mount("""
+        description: A single line.
+        metadata: {tags: "\(tags)", category: "productivity"}
+        """)
+        defer { fixture.close() }
+        // Content's 16-point margins leave tables 460 and 360 points wide.
+        for width: CGFloat in [492, 392] {
+            try await resize(fixture, width: width)
+            let lineHeight = try cell("A single line.", in: fixture).height
+            XCTAssertEqual(try cell("productivity", in: fixture).height, lineHeight, accuracy: 0.5,
+                           "A short word stays whole while the wider column can wrap")
+            XCTAssertEqual(try cell("category", in: fixture).height, lineHeight, accuracy: 0.5,
+                           "The short header also stays on one line")
+            XCTAssertGreaterThan(try cell(tags, in: fixture).height, lineHeight,
+                                 "The tags value wraps to make room for the short column")
+            try assertInside(["tags", tags, "category", "productivity"], fixture: fixture)
+        }
+    }
+
     private func mount(_ header: String) async throws -> FrontmatterHost {
         let fixture = try FrontmatterHost(document: "---\n\(header)\n---\n\nBody text.")
         XCTAssertFalse(fixture.snapshot.frontmatterRows.isEmpty, "Fixture must have readable, trusted YAML")

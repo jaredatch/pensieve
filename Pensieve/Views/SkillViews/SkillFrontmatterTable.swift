@@ -215,8 +215,8 @@ private extension SkillFrontmatterValue {
     var columnMinimums: [CGFloat] { values.map(\.minimumWidth) }
 }
 
-/// Both rows share column widths. Extra room is distributed in proportion to
-/// each column's unwrapped text, after reserving every column's recursive floor.
+/// Both rows share column widths. Squeeze the widest columns first, preserving
+/// short text until wider columns reach its width, and respecting recursive floors.
 private struct NestedFrontmatterLayout: Layout {
     let minimums: [CGFloat]
     let hasHeader: Bool
@@ -256,8 +256,23 @@ private struct NestedFrontmatterLayout: Layout {
         }
         let floor = minimums.reduce(0, +), natural = ideal.reduce(0, +)
         let available = width.flatMap { $0.isFinite ? max(floor, $0) : nil } ?? natural
-        let fraction = natural > floor ? min(1, (available - floor) / (natural - floor)) : 0
-        let widths = minimums.indices.map { minimums[$0] + (ideal[$0] - minimums[$0]) * fraction }
+        var widths = ideal
+        var shortfall = max(0, natural - available)
+        // Each ideal width or minimum is a point where another column joins or
+        // leaves the group being squeezed. Between those points, reduce it evenly.
+        for cap in Set(ideal + minimums).sorted(by: >).dropFirst() where shortfall > 0 {
+            let capped = minimums.indices.map { max(minimums[$0], min(ideal[$0], cap)) }
+            let saving = zip(widths, capped).reduce(CGFloat.zero) { $0 + $1.0 - $1.1 }
+            if saving <= shortfall {
+                widths = capped
+                shortfall -= saving
+            } else {
+                let shrinking = widths.indices.filter { widths[$0] > capped[$0] }
+                let reduction = shortfall / CGFloat(shrinking.count)
+                for column in shrinking { widths[column] -= reduction }
+                break
+            }
+        }
         let heights = (0..<rows).map { row in
             widths.indices.map { column in
                 subviews[row * minimums.count + column]
