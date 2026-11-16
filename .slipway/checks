@@ -1,0 +1,6 @@
+paths = Pensieve/Services/RefusedCreateRecords.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestRefusedEdit.swift Pensieve/ViewModels/SkillDeletionFlow.swift PensieveTests/ Pensieve.xcodeproj/project.pbxproj docs/ARCHITECTURE.md .slipway/mutations/reuse.patch .slipway/mutations/upgrade.patch .slipway/changelog/253.md
+risk = Pensieve/Services/RefusedCreateRecords.swift Pensieve/ViewModels/ManifestSaveModel+Records.swift Pensieve/ViewModels/ManifestSaveModel.swift Pensieve/ViewModels/ManifestRefusedEdit.swift
+check.reuse = tests PensieveTests/SkillDeletionNameReuseRestartTests
+check.upgrade = tests PensieveTests/RefusedCreateRecordsUpgradeTests
+mutation.reuse = .slipway/mutations/reuse.patch
+mutation.upgrade = .slipway/mutations/upgrade.patch
