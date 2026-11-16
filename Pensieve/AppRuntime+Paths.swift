@@ -172,7 +172,8 @@ struct AppRuntimePaths {
             root: storeRoot,
             audit: SyncAudit(appSupport: appSupportDir, fileService: fileService),
             machine: (identity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
-                stateService: makeMachineStateService(defaults: defaults, fileService: fileService))
+                stateService: makeMachineStateService(defaults: defaults, fileService: fileService)),
+            commandLink: makeCommandLinkInstaller()
         )
     }
 

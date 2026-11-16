@@ -37,6 +37,7 @@ final class ConflictResolutionModel {
     private let git: GitServiceProtocol
     private let credentials: CredentialStoreProtocol
     private let root: String
+    private let commandLink: CommandLinkInstaller?
     private let audit: SyncAudit?
     private let headStamp: () -> String?
     private let now: () -> Date
@@ -47,6 +48,7 @@ final class ConflictResolutionModel {
          credentials: CredentialStoreProtocol,
          root: String,
          audit: SyncAudit? = nil,
+         commandLink: CommandLinkInstaller? = nil,
          headStamp: (() -> String?)? = nil,
          now: @escaping () -> Date = Date.init,
          steps: SyncStepModel,
@@ -56,6 +58,7 @@ final class ConflictResolutionModel {
         self.git = git
         self.credentials = credentials
         self.root = root
+        self.commandLink = commandLink
         self.audit = audit
         self.headStamp = headStamp ?? { GitHeadStamp().read(root: root) }
         self.now = now
@@ -98,8 +101,9 @@ final class ConflictResolutionModel {
             guard !presentations.isEmpty, self.inspectionID == inspectionID else { return }
             phase = result.groups.isEmpty ? .empty : .ready(result.groups)
         } catch {
+            let message = await failureMessage(error, fallback: "Couldn't load conflicts.")
             guard !presentations.isEmpty, self.inspectionID == inspectionID else { return }
-            phase = .error(SyncFailureCause.message(for: error, fallback: "Couldn't load conflicts."))
+            phase = .error(message)
         }
     }
 
@@ -150,10 +154,17 @@ final class ConflictResolutionModel {
                 selectionError = error.errorDescription
                 phase = .ready(groups)
             default:
-                phase = .error(SyncFailureCause.message(for: error, fallback: "Couldn't resolve conflicts."))
+                phase = .error(await failureMessage(error, fallback: "Couldn't resolve conflicts."))
             }
         } catch {
-            phase = .error(SyncFailureCause.message(for: error, fallback: "Couldn't resolve conflicts."))
+            phase = .error(await failureMessage(error, fallback: "Couldn't resolve conflicts."))
+        }
+    }
+
+    private func failureMessage(_ error: Error, fallback: String) async -> String {
+        let commandLink = commandLink
+        return await BlockingWork.run {
+            SyncFailureCause.message(for: error, fallback: fallback, commandLink: commandLink)
         }
     }
 

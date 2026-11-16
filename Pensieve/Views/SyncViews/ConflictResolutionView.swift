@@ -82,6 +82,7 @@ struct ConflictResolutionView: View {
         case let .error(message):
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Label(message, systemImage: "exclamationmark.triangle")
+                    .textSelection(.enabled)
                     .font(.callout)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)

@@ -12,7 +12,8 @@ final class SyncFailureAuditFixture {
     let audit: SyncAudit
     let credentials = InMemoryCredentialStore()
 
-    init(token: String? = nil, usability: GitUsability? = nil) async throws {
+    init(token: String? = nil, usability: GitUsability? = nil,
+         commandLink: CommandLinkInstaller? = nil) async throws {
         disk = try GitFailureFixture()
         try disk.seedRepository()
         if let token { try credentials.store(token: token, username: "kept", forHost: "fixture.test") }
@@ -21,7 +22,7 @@ final class SyncFailureAuditFixture {
         audit = SyncAudit(appSupport: disk.support)
         let git = try usability.map { try disk.broken($0) } ?? disk.paths.makeGitService()
         await coordinator.configure(engine: engine, git: git, credentials: credentials, root: disk.root, audit: audit,
-            machine: (InertMachineIdentity(), InertMachineStateService()))
+            machine: (InertMachineIdentity(), InertMachineStateService()), commandLink: commandLink)
     }
 
     func run(_ error: Error) async -> SyncCycleResult {
