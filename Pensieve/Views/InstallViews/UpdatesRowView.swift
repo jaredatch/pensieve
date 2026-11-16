@@ -33,7 +33,7 @@ struct UpdatesRowView: View {
                         trailingControl
                             .padding(.top, DesignTokens.updatesRowMetaGap)
                     }
-                    if let copy = shown.localEditsCopy { localEdits(copy) }
+                    if shown.status != .updated, let copy = shown.localEditsCopy { localEdits(copy) }
                 }
             }
             statusView

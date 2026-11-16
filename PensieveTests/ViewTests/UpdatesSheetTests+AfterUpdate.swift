@@ -39,6 +39,94 @@ extension UpdatesSheetTests {
         XCTAssertTrue(renderedStrings(failure).contains("Re-check"))
     }
 
+    func testUpdatedRowDropsItsLocalEditsBox() async throws {
+        let fixture = try UpdateReviewFixture()
+        defer { try? fixture.cleanup() }
+        let edited = try fixture.skill("edited"), failed = try fixture.skill("failed")
+        let waiting = try fixture.skill("waiting"), plain = try fixture.skill("plain")
+        edited.name = "Equal name"
+        plain.name = edited.name
+        let rows = try [edited, failed, waiting, plain].map {
+            try UpdatesViewModel.makeRow(skill: $0, driftedLocally: $0.id != plain.id)
+        }
+        let completions = try [edited.id: completion(for: edited), plain.id: completion(for: plain)]
+        let model = fixture.sheet(rows: rows, apply: { id, _, _, _, _, _ in
+            guard let completion = completions[id] else { throw SkillUpdateFlowError.repositoryChanged }
+            return completion
+        })
+        model.present(library: fixture.library)
+        await model.loadAndReport(context: fixture.context)
+        for index in 0..<3 {
+            try assertLocalEditsBox(rowHost(model, index: index, fixture: fixture), confirmed: false, enabled: true)
+        }
+        model.setDriftConfirmation(true, for: rows[0])
+        model.setDriftConfirmation(true, for: rows[1])
+        model.setSelection(false, for: rows[2])
+        await model.applySelectedAndReport(context: fixture.context)
+        let updated = rowHost(model, index: 0, fixture: fixture)
+        let unedited = rowHost(model, index: 3, fixture: fixture)
+        _ = try assertUpdatedRow(updated, name: edited.name)
+        _ = try assertUpdatedRow(unedited, name: plain.name)
+        assertNoLocalEditsBox(updated, sameHeightAs: unedited)
+        let failure = rowHost(model, index: 1, fixture: fixture)
+        XCTAssertTrue(renderedStrings(failure).contains(SkillUpdateFlowError.repositoryChanged.localizedDescription))
+        try assertLocalEditsBox(failure, confirmed: true, enabled: true)
+        try assertLocalEditsBox(rowHost(model, index: 2, fixture: fixture), confirmed: false, enabled: true)
+    }
+
+    func testLocalEditsBoxStaysUntilTheUpdateLands() async throws {
+        let fixture = try UpdateReviewFixture()
+        defer { try? fixture.cleanup() }
+        let known = try fixture.skill("known"), discovered = try fixture.skill("discovered"), plain = try fixture.skill("plain")
+        for skill in [known, discovered, plain] { skill.name = "Equal name" }
+        let rows = try [known, discovered, plain].map {
+            try UpdatesViewModel.makeRow(skill: $0, driftedLocally: $0.id == known.id)
+        }
+        let completions = try [known.id: completion(for: known), discovered.id: completion(for: discovered),
+                               plain.id: completion(for: plain)]
+        let applied = UpdateReviewRecorder<UUID>()
+        let started = DispatchSemaphore(value: 0), release = TestWait.Gate(owner: self)
+        defer { release.open() }
+        let model = fixture.sheet(rows: rows, apply: { id, _, _, confirmed, _, _ in
+            if id != plain.id && !confirmed { throw SkillUpdateFlowError.localEditsRequireConfirmation }
+            if id == known.id { started.signal(); try release.wait() }
+            applied.append(id)
+            guard let completion = completions[id] else { throw SkillUpdateFlowError.skillNotFound }
+            return completion
+        })
+        model.present(library: fixture.library)
+        await model.loadAndReport(context: fixture.context)
+        try assertLocalEditsBox(rowHost(model, index: 0, fixture: fixture), confirmed: false, enabled: true)
+        let initiallyUnedited = rowHost(model, index: 1, fixture: fixture)
+        XCTAssertFalse(renderedStrings(initiallyUnedited).contains("Replace my local edits"))
+        XCTAssertEqual(renderedButtons(in: initiallyUnedited).count, 2)
+        await model.applySelectedAndReport(context: fixture.context)
+        XCTAssertEqual(applied.values, [plain.id], "Neither edited skill may update without confirmation")
+        for index in 0..<2 {
+            let host = rowHost(model, index: index, fixture: fixture)
+            XCTAssertTrue(renderedStrings(host).contains("Confirm the overwrite for this skill, then update again."))
+            try assertLocalEditsBox(host, confirmed: false, enabled: true)
+            model.setDriftConfirmation(true, for: model.rows[index])
+            try assertLocalEditsBox(rowHost(model, index: index, fixture: fixture), confirmed: true, enabled: true)
+        }
+        model.applySelected(context: fixture.context)
+        let batch = try XCTUnwrap(model.operationTask)
+        guard await TestWait.forSemaphore(started) else { return XCTFail("The confirmed update did not start") }
+        let updating = rowHost(model, index: 0, fixture: fixture)
+        XCTAssertTrue(renderedStrings(updating).contains("Updating…"))
+        try assertLocalEditsBox(updating, confirmed: true, enabled: false)
+        release.open()
+        await TestWait.forTask(batch, failureMessage: "The confirmed update batch did not finish")
+        XCTAssertEqual(applied.values, [plain.id, known.id, discovered.id], "Confirmation must allow both retries")
+        let unedited = rowHost(model, index: 2, fixture: fixture)
+        _ = try assertUpdatedRow(unedited, name: plain.name)
+        for index in 0..<2 {
+            let updated = rowHost(model, index: index, fixture: fixture)
+            _ = try assertUpdatedRow(updated, name: "Equal name")
+            assertNoLocalEditsBox(updated, sameHeightAs: unedited)
+        }
+    }
+
     func testUpdatedStaysWholeBesideAWrappedNameAndLocalEdits() async throws {
         let fixture = try UpdateReviewFixture()
         defer { try? fixture.cleanup() }
@@ -66,8 +154,8 @@ extension UpdatesSheetTests {
         let label = NSHostingView(rootView: Label("Updated", systemImage: "checkmark.circle.fill").font(.caption))
         let renderedLabel = try labelFrame(in: host)
         XCTAssertGreaterThanOrEqual(renderedLabel.width, label.fittingSize.width - 0.5, "Updated must keep its full width")
-        XCTAssertTrue(renderedStrings(host).contains("You have local edits to this skill. Updating replaces them."))
-        XCTAssertTrue(renderedStrings(host).contains("Replace my local edits"))
+        XCTAssertFalse(renderedStrings(host).contains("You have local edits to this skill. Updating replaces them."))
+        XCTAssertFalse(renderedStrings(host).contains("Replace my local edits"))
     }
 
     func testCancelReadsCloseOnceASkillHasUpdated() async throws {
