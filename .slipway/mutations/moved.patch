@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SkillInstallService+Updates.swift
++++ b/Pensieve/Services/SkillInstallService+Updates.swift
+@@ -190,7 +190,7 @@
+                 candidate: update.candidate,
+                 from: update.source,
+                 credential: nil,
+-                pinned: true,
++                pinned: false,
+                 beforeVendorSwap: { destination in
+                     guard !allowLocalOverwrite else { return }
+                     let currentHash = try stableContentHash(at: destination)

@@ -115,7 +115,7 @@ extension UpdatesViewModelTests {
         )
     }
 
-    func makeRealModel(fixture: RealFixture) -> UpdatesViewModel {
+    func makeRealModel(fixture: RealFixture, service: SkillInstallService? = nil) -> UpdatesViewModel {
         let checker = UpdateCheckService(
             gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
             credentialStore: InMemoryCredentialStore(),
@@ -127,7 +127,7 @@ extension UpdatesViewModelTests {
         )
         let operations = UpdatesViewModel.DefaultOperations(
             updateCheckService: checker,
-            skillInstallService: fixture.service
+            skillInstallService: service ?? fixture.service
         )
         return UpdatesViewModel(
             rowLoader: operations.rowLoader,
@@ -169,11 +169,12 @@ extension UpdatesViewModelTests {
         )
     }
 
-    func prepareRealPinnedUpdate() throws -> RealFixture {
+    func prepareRealPinnedUpdate(includingCompanionFiles: Bool = false) throws -> RealFixture {
         let repository = tempDir + "/repository"
         XCTAssertEqual(try rawGit(["init", "--initial-branch=main", repository]), 0)
         try writeSkill(name: "Old Name", description: "Old Description", body: "old body",
                        repository: repository)
+        if includingCompanionFiles { try writeCompanionFiles(body: "old body", repository: repository) }
         _ = try commit(repository, message: "installed")
         let storeRoot = tempDir + "/store"
         let service = SkillInstallService(
@@ -198,6 +199,7 @@ extension UpdatesViewModelTests {
 
         try writeSkill(name: "Fresh Name", description: "Fresh Description", body: "fresh body",
                        repository: repository)
+        if includingCompanionFiles { try writeCompanionFiles(body: "fresh body", repository: repository) }
         let pinnedCommit = try commit(repository, message: "checked update")
         let updateSource = try NativeTestWork.run {
             try service.fetch(repo: "file://" + repository, ref: nil, credential: nil)
@@ -208,14 +210,13 @@ extension UpdatesViewModelTests {
         skill.upstreamCommit = pinnedCommit
         skill.upstreamCommitDate = Date(timeIntervalSince1970: 1_860_000_000)
         skill.checkError = nil
+        if includingCompanionFiles {
+            skill.lastCheckedAt = Date(timeIntervalSince1970: 1_860_000_000)
+            skill.lastCheckedHead = pinnedCommit
+        }
         try context.save()
-        return RealFixture(
-            repository: repository,
-            storeRoot: storeRoot,
-            service: service,
-            skill: skill,
-            pinnedCommit: pinnedCommit
-        )
+        return RealFixture(repository: repository, storeRoot: storeRoot, service: service,
+                           skill: skill, pinnedCommit: pinnedCommit)
     }
 
     func writeSkill(name: String, description: String, body: String,
@@ -256,6 +257,74 @@ extension UpdatesViewModelTests {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return (process.terminationStatus, String(bytes: data, encoding: .utf8) ?? "")
+    }
+
+    func writeCompanionFiles(body: String, repository: String) throws {
+        try fileService.writeFile(at: repository + "/skills/vendor/companion.txt", content: body + "\n")
+        try fileService.writeExecutableFile(at: repository + "/skills/vendor/run.sh",
+                                            content: "#!/bin/sh\nprintf '%s\\n' '\(body)'\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                              ofItemAtPath: repository + "/skills/vendor/run.sh")
+    }
+
+    struct ApplyFileSnapshot: Equatable {
+        let bytes: Data
+        let executable: Bool
+    }
+
+    struct ApplyRecordSnapshot: Equatable {
+        let installedOrigin: InstalledOrigin?
+        let name: String
+        let skillDescription: String
+        let updatedAt: Date
+        let updateAvailable: Bool
+        let upstreamCommit: String?
+        let upstreamTree: String?
+        let upstreamCommitDate: Date?
+        let lastCheckedAt: Date?
+        let lastCheckedHead: String?
+        let checkError: String?
+    }
+
+    struct ApplySkillSnapshot: Equatable {
+        let files: [String: ApplyFileSnapshot]
+        let manifest: [String: ApplyFileSnapshot]
+        let record: ApplyRecordSnapshot
+    }
+
+    func snapshotFiles(at root: String) throws -> [String: ApplyFileSnapshot] {
+        var files: [String: ApplyFileSnapshot] = [:]
+        func visit(_ directory: String, prefix: String) throws {
+            for entry in try fileService.listDirectory(at: directory) {
+                let path = directory + "/" + entry
+                let relative = prefix + entry
+                if fileService.directoryExists(at: path) {
+                    try visit(path, prefix: relative + "/")
+                } else {
+                    files[relative] = ApplyFileSnapshot(bytes: try fileService.readData(at: path),
+                                                        executable: fileService.isUserExecutableFile(at: path))
+                }
+            }
+        }
+        try visit(root, prefix: "")
+        return files
+    }
+
+    func snapshotSkill(_ fixture: RealFixture) throws -> ApplySkillSnapshot {
+        // Apply persists through its own context; the fixture's held object may be stale.
+        let freshContext = ModelContext(container)
+        let skill = try XCTUnwrap(try UpdatesViewModel.findSkill(fixture.skill.id, context: freshContext))
+        return ApplySkillSnapshot(
+            files: try snapshotFiles(at: fixture.storeRoot + "/skills/vendor"),
+            manifest: try snapshotFiles(at: fixture.storeRoot + "/manifest"),
+            record: ApplyRecordSnapshot(
+                installedOrigin: skill.installedOrigin, name: skill.name, skillDescription: skill.skillDescription,
+                updatedAt: skill.updatedAt, updateAvailable: skill.updateAvailable,
+                upstreamCommit: skill.upstreamCommit, upstreamTree: skill.upstreamTree,
+                upstreamCommitDate: skill.upstreamCommitDate, lastCheckedAt: skill.lastCheckedAt,
+                lastCheckedHead: skill.lastCheckedHead, checkError: skill.checkError
+            )
+        )
     }
 
 }

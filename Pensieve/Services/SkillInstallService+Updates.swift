@@ -190,6 +190,7 @@ extension SkillInstallService {
                 candidate: update.candidate,
                 from: update.source,
                 credential: nil,
+                pinned: true,
                 beforeVendorSwap: { destination in
                     guard !allowLocalOverwrite else { return }
                     let currentHash = try stableContentHash(at: destination)

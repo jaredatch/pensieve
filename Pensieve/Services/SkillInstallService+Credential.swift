@@ -16,7 +16,7 @@ extension SkillInstallService {
         }
     }
 
-    func downloadForPreview(remote: String, commit: String, into path: String) throws {
+    func downloadPinnedUpdate(remote: String, commit: String, into path: String) throws {
         let credential = credentialStore.credential(forHost: CredentialHost.githubInstall)
         do {
             try gitService.downloadPinnedCommit(remote: remote, commit: commit, into: path, credential: credential)

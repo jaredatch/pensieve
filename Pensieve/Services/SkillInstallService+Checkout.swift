@@ -5,9 +5,10 @@ extension SkillInstallService {
         candidate: SkillCandidate,
         source: SkillFetchResult,
         credential: GitCredential?,
+        pinned: Bool = false,
         body: (String, SkillCandidate) throws -> Result
     ) throws -> Result {
-        try withCheckout(source: source, credential: credential) { checkoutPath in
+        try withCheckout(source: source, credential: credential, pinned: pinned) { checkoutPath in
             let refreshed = try discover(at: checkoutPath, path: candidate.path)
             guard let verified = refreshed.first, verified.treeHash == candidate.treeHash,
                   verified.slug == candidate.slug else {
@@ -18,7 +19,7 @@ extension SkillInstallService {
     }
 
     /// The preview verifies coordinates without discovery's whole SKILL.md/frontmatter read.
-    /// The unchanged install/apply path still performs its normal candidate admission above.
+    /// Install and apply still perform their normal candidate admission above.
     func withPinnedCheckout<Result>(candidate: SkillCandidate, source: SkillFetchResult,
                                     credential: GitCredential?, checkout: String? = nil,
                                     body: (String) throws -> Result) throws -> Result {
@@ -76,8 +77,8 @@ extension SkillInstallService {
     }
 
     private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?, preview: Bool = false,
-                                      body: (String) throws -> Result) throws -> Result {
-        if preview, !GitService.isHistoryObjectID(source.headCommit) {
+                                      pinned: Bool = false, body: (String) throws -> Result) throws -> Result {
+        if preview || pinned, !GitService.isHistoryObjectID(source.headCommit) {
             throw SkillUpdateFlowError.missingPinnedUpdate
         }
         try previewOperation(.prepare, enabled: preview) { try prepareScratchRoot() }
@@ -91,9 +92,9 @@ extension SkillInstallService {
         let checkoutName = SkillStore.slugify(repositoryName(for: validatedRemote.repo))
         let checkoutPath = sessionRoot + "/" + checkoutName
         try previewOperation(.fetch, enabled: preview) {
-            if preview {
-                try downloadForPreview(remote: validatedRemote.cloneRemote, commit: source.headCommit,
-                                       into: checkoutPath)
+            if preview || pinned {
+                try downloadPinnedUpdate(remote: validatedRemote.cloneRemote, commit: source.headCommit,
+                                         into: checkoutPath)
             } else {
                 try cloneForInstall(remote: validatedRemote.cloneRemote, branch: source.ref,
                                     into: checkoutPath, credential: credential)

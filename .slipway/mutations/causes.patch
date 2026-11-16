@@ -1,0 +1,14 @@
+--- a/Pensieve/Services/SkillInstallService+Credential.swift
++++ b/Pensieve/Services/SkillInstallService+Credential.swift
+@@ -20,10 +20,8 @@
+         let credential = credentialStore.credential(forHost: CredentialHost.githubInstall)
+         do {
+             try gitService.downloadPinnedCommit(remote: remote, commit: commit, into: path, credential: credential)
+-        } catch PinnedCommitFetchError.unavailable {
++        } catch {
+             throw SkillUpdateFlowError.pinnedCommitUnavailable(String(commit.prefix(7)))
+-        } catch {
+-            throw Self.mappedRepositoryError(error)
+         }
+     }
+ 

@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SkillInstallService+Credential.swift
++++ b/Pensieve/Services/SkillInstallService+Credential.swift
+@@ -21,7 +21,7 @@
+         do {
+             try gitService.downloadPinnedCommit(remote: remote, commit: commit, into: path, credential: credential)
+         } catch PinnedCommitFetchError.unavailable {
+-            throw SkillUpdateFlowError.pinnedCommitUnavailable(String(commit.prefix(7)))
++            throw SkillUpdateFlowError.repositoryChanged
+         } catch {
+             throw Self.mappedRepositoryError(error)
+         }

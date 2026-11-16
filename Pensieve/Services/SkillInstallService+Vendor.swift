@@ -99,6 +99,7 @@ extension SkillInstallService {
     func updateVerified(existingSlug: String, candidate: SkillCandidate,
                         from source: SkillFetchResult,
                         credential: GitCredential? = nil,
+                        pinned: Bool = false,
                         beforeVendorSwap: ((String) throws -> Void)?,
                         bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
                         context: ModelContext) throws {
@@ -116,7 +117,8 @@ extension SkillInstallService {
         try withVerifiedCheckout(
             candidate: candidate,
             source: source,
-            credential: credential
+            credential: credential,
+            pinned: pinned
         ) { checkout, verified in
             try requireInstallable(verified)
             let sourceDirectory = candidateDirectory(candidate: verified, checkout: checkout)

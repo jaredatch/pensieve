@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SkillInstallService+Checkout.swift
++++ b/Pensieve/Services/SkillInstallService+Checkout.swift
+@@ -78,7 +78,7 @@
+ 
+     private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?, preview: Bool = false,
+                                       pinned: Bool = false, body: (String) throws -> Result) throws -> Result {
+-        if preview || pinned, !GitService.isHistoryObjectID(source.headCommit) {
++        if preview, !GitService.isHistoryObjectID(source.headCommit) {
+             throw SkillUpdateFlowError.missingPinnedUpdate
+         }
+         try previewOperation(.prepare, enabled: preview) { try prepareScratchRoot() }
