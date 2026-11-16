@@ -1,0 +1,13 @@
+--- a/Pensieve/Services/SkillInstallService+Checkout.swift
++++ b/Pensieve/Services/SkillInstallService+Checkout.swift
+@@ -92,8 +92,8 @@
+         let checkoutPath = sessionRoot + "/" + checkoutName
+         try previewOperation(.fetch, enabled: preview) {
+             if preview {
+-                try downloadForPreview(remote: validatedRemote.cloneRemote, commit: source.headCommit,
+-                                       into: checkoutPath)
++                try cloneForInstall(remote: validatedRemote.cloneRemote, branch: source.ref,
++                                    into: checkoutPath, credential: credential)
+             } else {
+                 try cloneForInstall(remote: validatedRemote.cloneRemote, branch: source.ref,
+                                     into: checkoutPath, credential: credential)

@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SkillInstallService+Checkout.swift
++++ b/Pensieve/Services/SkillInstallService+Checkout.swift
+@@ -36,7 +36,7 @@
+                 }
+             }
+             let tree = try previewOperation(.treeHash) { try gitService.treeHash(at: checkoutPath, path: candidate.path) }
+-            guard tree == candidate.treeHash else {
++            guard !tree.isEmpty else {
+                 throw SkillInstallError.repositoryChanged
+             }
+             return try body(checkoutPath)

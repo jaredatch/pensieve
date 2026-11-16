@@ -16,6 +16,12 @@ protocol GitShallowCloning {
                       credential: GitCredential?) throws
 }
 
+protocol GitPinnedCommitDownloading {
+    @_disfavoredOverload
+    func downloadPinnedCommit(remote: String, commit: String, into path: String,
+                              credential: GitCredential?) throws
+}
+
 protocol GitCommitReading {
     @_disfavoredOverload
     func commitSHA(at path: String) throws -> String
@@ -61,6 +67,17 @@ extension GitShallowCloning {
         try GitThreadGuard.withCallSite(file: file, line: line) {
             let operation: (String, String?, String, GitCredential?) throws -> Void = self.cloneShallow
             return try operation(remote, branch, path, credential)
+        }
+    }
+}
+
+extension GitPinnedCommitDownloading {
+    func downloadPinnedCommit(remote: String, commit: String, into path: String,
+                              credential: GitCredential?,
+                              file: StaticString = #fileID, line: UInt = #line) throws {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            let operation: (String, String, String, GitCredential?) throws -> Void = self.downloadPinnedCommit
+            return try operation(remote, commit, path, credential)
         }
     }
 }

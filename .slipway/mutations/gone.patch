@@ -1,0 +1,13 @@
+--- a/Pensieve/Services/GitService+PinnedFetch.swift
++++ b/Pensieve/Services/GitService+PinnedFetch.swift
+@@ -22,7 +22,9 @@
+                 "fatal: git upload-pack: not our ref \(commit)",
+                 "fatal: couldn't find remote ref \(commit)"
+             ]
+-            if output.stderr.split(whereSeparator: \.isNewline).contains(where: { missingObjectLines.contains(String($0)) }) {
++            if output.exit == 0 && output.stderr.split(whereSeparator: \.isNewline).contains(where: {
++                missingObjectLines.contains(String($0))
++            }) {
+                 throw PinnedCommitFetchError.unavailable
+             }
+             throw commandError(output, args: args, authenticationRemote: remote)

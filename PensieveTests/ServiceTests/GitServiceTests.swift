@@ -906,6 +906,10 @@ extension GitServiceTests {
                 .init("cloneShallow named branch", "clone", {
                     try service.cloneShallow(remote: remote, branch: "main", into: root, credential: credential)
                 }),
+                .init("downloadPinnedCommit", "fetch", {
+                    try service.downloadPinnedCommit(remote: remote, commit: String(repeating: "a", count: 40),
+                                                     into: root, credential: credential)
+                }),
                 .init("remoteHasCommits", "ls-remote", { _ = service.remoteHasCommits(remote: remote, credential: credential) }),
                 .init("remoteReferences", "ls-remote", {
                     _ = try service.remoteReferences(remote: remote, credential: credential)

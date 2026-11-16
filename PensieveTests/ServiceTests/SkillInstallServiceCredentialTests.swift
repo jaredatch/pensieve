@@ -15,6 +15,12 @@ private final class RejectingInstallGitService: SkillInstallGitServing {
         throw cloneError
     }
 
+    func downloadPinnedCommit(remote: String, commit: String, into path: String,
+                              credential: GitCredential?) throws {
+        receivedCredentials.append(credential)
+        throw cloneError
+    }
+
     func commitSHA(at path: String) throws -> String { "unused" }
     func currentBranch(at path: String) throws -> String { "unused" }
     func treeHash(at repositoryPath: String, path: String) throws -> String { "unused" }

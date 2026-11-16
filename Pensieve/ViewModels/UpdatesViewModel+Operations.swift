@@ -202,7 +202,10 @@ extension UpdatesViewModel {
     }
 
     nonisolated static func offersRecheck(_ error: Error) -> Bool {
-        error as? SkillUpdateFlowError == .repositoryChanged
-            || error as? SkillUpdateFlowError == .missingPinnedUpdate
+        guard let failure = error as? SkillUpdateFlowError else { return false }
+        switch failure {
+        case .repositoryChanged, .missingPinnedUpdate, .pinnedCommitUnavailable: return true
+        default: return false
+        }
     }
 }

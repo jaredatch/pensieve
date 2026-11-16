@@ -102,9 +102,13 @@ extension UpdatesViewModelTests {
 private struct PreviewFailingGit: SkillInstallGitServing {
     let step: String
     let git = TestPaths.git
-    func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
+    func downloadPinnedCommit(remote: String, commit: String, into path: String,
+                              credential: GitCredential?) throws {
         if step == "unusable-clone" { throw GitError.unusable(.developerToolsMissing) }
-        if step == "clone" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted clone text " + path) }
+        if step == "clone" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted fetch text " + path) }
+        try git.downloadPinnedCommit(remote: remote, commit: commit, into: path, credential: credential)
+    }
+    func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
         try git.cloneShallow(remote: remote, branch: branch, into: path, credential: credential)
     }
     func commitSHA(at path: String) throws -> String {
