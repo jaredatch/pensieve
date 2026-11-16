@@ -3,7 +3,7 @@ import Foundation
 /// This Mac's collision identities, folderless peer overlays and owed deletions, never synced.
 /// Rows keep the metadata; this file only identifies which rows and peer slugs need protection.
 struct RefusedCreateRecords {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     struct Held: Codable {
         let slug: String
@@ -37,6 +37,7 @@ struct RefusedCreateRecords {
     struct Deletion: Codable {
         let slug: String
         let machineID: String?
+        var createdAt: String?
     }
 
     struct Record: Codable {
@@ -67,11 +68,13 @@ struct RefusedCreateRecords {
         guard let probe = try? decoder.decode(SchemaProbe.self, from: data) else { throw ReadError.unreadable }
         // Probe before decoding the shape, including versions too large to fit in an Int.
         guard probe.version <= Double(Self.currentSchemaVersion) else { throw ReadError.unsupportedSchema }
-        guard let record = try? decoder.decode(Record.self, from: data), record.schemaVersion == Self.currentSchemaVersion,
+        guard let record = try? decoder.decode(Record.self, from: data),
+              (1...Self.currentSchemaVersion).contains(record.schemaVersion),
               record.held.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) && ManifestService.parseDate($0.createdAt) != nil }),
               record.preserved.allSatisfy(SkillStore.isPathSafeSlug),
               record.retirements.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) }),
-              record.deletions.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) }) else { throw ReadError.unreadable }
+              record.deletions.allSatisfy({ SkillStore.isPathSafeSlug($0.slug)
+                  && ($0.createdAt.map { ManifestService.parseDate($0) != nil } ?? true) }) else { throw ReadError.unreadable }
         return record
     }
 
@@ -82,7 +85,9 @@ struct RefusedCreateRecords {
             && record.deletions.isEmpty && !exists { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let encoded = try encoder.encode(record)
+        var current = record
+        current.schemaVersion = Self.currentSchemaVersion
+        let encoded = try encoder.encode(current)
         guard let text = String(data: encoded, encoding: .utf8) else { throw ReadError.unreadable }
         if files.directoryExists(at: path) { try files.deleteDirectory(at: path) }
         try files.writeFile(at: path, content: text)
@@ -137,5 +142,14 @@ private extension RefusedCreateRecords.RetirementIntent {
 }
 
 private extension RefusedCreateRecords.Deletion {
-    enum CodingKeys: String, CodingKey { case slug, machineID = "machine_id" }
+    enum CodingKeys: String, CodingKey { case slug, machineID = "machine_id", createdAt = "created_at" }
+}
+
+extension RefusedCreateRecords.Deletion {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        slug = try values.decode(String.self, forKey: .slug)
+        machineID = try values.decodeIfPresent(String.self, forKey: .machineID)
+        createdAt = values.contains(.createdAt) ? try values.decode(String.self, forKey: .createdAt) : nil
+    }
 }

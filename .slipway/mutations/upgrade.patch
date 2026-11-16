@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/RefusedCreateRecords.swift
++++ b/Pensieve/Services/RefusedCreateRecords.swift
+@@ -69,7 +69,7 @@
+         // Probe before decoding the shape, including versions too large to fit in an Int.
+         guard probe.version <= Double(Self.currentSchemaVersion) else { throw ReadError.unsupportedSchema }
+         guard let record = try? decoder.decode(Record.self, from: data),
+-              (1...Self.currentSchemaVersion).contains(record.schemaVersion),
++              record.schemaVersion == Self.currentSchemaVersion,
+               record.held.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) && ManifestService.parseDate($0.createdAt) != nil }),
+               record.preserved.allSatisfy(SkillStore.isPathSafeSlug),
+               record.retirements.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) }),

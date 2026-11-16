@@ -37,7 +37,7 @@ extension ManifestRenameTests {
         XCTAssertEqual(move["new_slug"] as? String, "item-2")
         XCTAssertEqual(move["machine_id"] as? String, ProjectIntentHarness.localID)
         XCTAssertEqual(move["carried_slugs"] as? [String], carried)
-        XCTAssertEqual(try h.record()["schema_version"] as? Int, 1)
+        XCTAssertEqual(try h.record()["schema_version"] as? Int, 2)
     }
 
     func assertCarried(_ h: CollisionCreateFixture, category: String) throws {

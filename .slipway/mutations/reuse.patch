@@ -1,0 +1,14 @@
+--- a/Pensieve/ViewModels/ManifestSaveModel+Records.swift
++++ b/Pensieve/ViewModels/ManifestSaveModel+Records.swift
+@@ -231,10 +231,7 @@
+     /// Dated restart reminders identify the deleted creation without needing a queued replacement.
+     /// An unreadable launch probe defers the decision to the worker's locked manifest read.
+     private func restoredDeletionReappeared(_ slug: String, createdAt: String?, durable: ManifestSnapshot?) -> Bool {
+-        guard let createdAt else { return retirementFolderMayExist(slug) }
+-        guard let durable else { return false }
+-        guard let overlay = durable.skills.first(where: { $0.slug == slug }) else { return false }
+-        return RefusedCreateRecords.writtenDate(overlay.createdAt) != createdAt
++        return retirementFolderMayExist(slug)
+     }
+ 
+     /// A replay deletes the old overlay, not a reused folder's row. There is no queued create
