@@ -1,0 +1,14 @@
+paths = Pensieve/Services/SyncFailureCause.swift Pensieve/Services/SyncEngine.swift Pensieve/Services/SyncEngine+ConflictResolution.swift Pensieve/Services/SyncCoordinator.swift Pensieve/ViewModels/ConflictResolutionModel.swift Pensieve/ViewModels/ConflictResolutionJob.swift Pensieve/AppRuntime+CommandLine.swift Pensieve/AppRuntime+Construction.swift Pensieve/AppRuntime+Paths.swift Pensieve/Views/SyncViews/ConflictResolutionView.swift docs/ARCHITECTURE.md Pensieve.xcodeproj/project.pbxproj PensieveTests/
+risk = Pensieve/Services/SyncFailureCause.swift
+check.wired = tests PensieveTests/SyncLogCommandTests/testRuntimeBuiltSyncAndWindowFollowTheLink
+check.fullpath = tests PensieveTests/SyncLogCommandTests/testUnlinkedCommandGetsThisAppsFullPath
+check.linked = tests PensieveTests/SyncLogCommandTests/testLinkedCommandKeepsTheShortForm
+check.pastes = tests PensieveTests/SyncLogCommandTests/testFullPathLineRunsWhenPasted
+check.cleaned = tests PensieveTests/SyncLogCommandTests/testPathDisplayCleanupWouldChangeKeepsTheShortForm
+check.copies = tests PensieveTests/SyncLogCommandTests/testConflictWindowErrorCanBeSelectedAndRuns
+mutation.wired = .slipway/mutations/wired.patch
+mutation.fullpath = .slipway/mutations/fullpath.patch
+mutation.linked = .slipway/mutations/linked.patch
+mutation.pastes = .slipway/mutations/pastes.patch
+mutation.cleaned = .slipway/mutations/cleaned.patch
+mutation.copies = .slipway/mutations/copies.patch
