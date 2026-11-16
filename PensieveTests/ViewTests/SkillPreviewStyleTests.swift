@@ -37,6 +37,7 @@ final class SkillPreviewStyleTests: XCTestCase {
         }
     }
 
+    // The overflow mask must leave the translucent code background unchanged.
     func testCodeBlockFillIsLighterThanBefore() throws {
         let paint = try render(preview("```\nMMMMMMMMMMMM\n```\n\nVisible body."))
         try assertLighterFill(paint, context: "Fenced code")
@@ -55,6 +56,7 @@ final class SkillPreviewStyleTests: XCTestCase {
         XCTAssertGreaterThan(rule, quote, "Quote rule must stay lighter than its text")
     }
 
+    // Keep the masked production block at this boundary: its backing scroller count and layout must stay unchanged.
     func testWideCodeBlockScrollsWithoutAScrollBar() async throws {
         let line = String(repeating: "abcdefghij", count: 12) + "END"
         let host = NSHostingView(rootView: preview("```\n\(line)\n```\n\n```\nShort\n```"))

@@ -29,7 +29,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - View Changes has tighter file rows and line-number gutters, an aligned title and smaller toolbar buttons. Its file list starts closed for a single changed file and keeps your choice until another set of changes loads.
 
-- Rendered Markdown has unstriped tables, lighter code backgrounds, hidden code block scroll bars and darker block quotes in Content and History.
+- Rendered Markdown has unstriped tables, lighter code backgrounds, darker block quotes and code blocks that hide their scroll bars. A soft fade at the right edge marks hidden code in Content and the version preview opened while resolving a sync conflict. The fade narrows as you scroll and disappears when the last character is visible.
 
 - History’s View Diff and View Edits now open the View Changes window. Comparisons stay open when you leave History and tell you when your copy has changed since they were read.
 
