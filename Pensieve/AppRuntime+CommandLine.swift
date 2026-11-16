@@ -15,17 +15,20 @@ extension AppRuntime {
 
 extension AppRuntimePaths {
     /// Production resolves system paths here. Fixture runtimes stay wholly inside their App Support.
-    @MainActor
-    func makeCommandLineSettings() -> CommandLineSettingsModel {
+    func makeCommandLinkInstaller() -> CommandLinkInstaller {
         let live = runtimePaths.isProduction && CLIAppLauncher(fileService: FileService()).launchRefusal(
             appPath: Bundle.main.bundlePath, bundleID: Bundle.main.bundleIdentifier ?? "") == nil
-        let installer = CommandLinkInstaller(files: FileService(),
+        return CommandLinkInstaller(files: FileService(),
             directory: live ? "/usr/local/bin" : appSupportDir + "/command-line/bin",
             executable: Bundle.main.bundlePath + "/Contents/Helpers/pensieve", user: getuid(),
             homebrewDirectories: live ? ["/opt/homebrew/bin", "/usr/local/bin"] : [],
             authorization: live ? AdminCommandLinkAuthorization() : UnavailableCommandLinkAuthorization(),
             ancestorOwner: live ? 0 : getuid())
-        return CommandLineSettingsModel(installer: installer)
+    }
+
+    @MainActor
+    func makeCommandLineSettings() -> CommandLineSettingsModel {
+        CommandLineSettingsModel(installer: makeCommandLinkInstaller())
     }
 }
 

@@ -77,8 +77,9 @@ extension SyncConflictResolutionTests {
         func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .diverged }
         func manifestMatchesHead(at path: String) throws -> Bool { false }
         let conflictPath: String
-        let pullError: Error?
-        let abortError: Error?
+        var pullError: Error?
+        var abortError: Error?
+        var initialAbortError: Error?
         private(set) var stagedPaths: [String] = []
         private(set) var pullAttempted = false
         private(set) var abortsAfterPull = 0
@@ -88,6 +89,8 @@ extension SyncConflictResolutionTests {
             self.pullError = pullError
             self.abortError = abortError
         }
+
+        func resetPullAttempt() { pullAttempted = false }
 
         func remoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
         func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
@@ -114,6 +117,7 @@ extension SyncConflictResolutionTests {
         }
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws {
+            if !pullAttempted, let initialAbortError { throw initialAbortError }
             if pullAttempted {
                 abortsAfterPull += 1
                 if let abortError { throw abortError }

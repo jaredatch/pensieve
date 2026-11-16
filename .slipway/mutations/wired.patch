@@ -1,0 +1,23 @@
+--- a/Pensieve/AppRuntime+Paths.swift
++++ b/Pensieve/AppRuntime+Paths.swift
+@@ -172,8 +172,7 @@
+             root: storeRoot,
+             audit: SyncAudit(appSupport: appSupportDir, fileService: fileService),
+             machine: (identity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
+-                stateService: makeMachineStateService(defaults: defaults, fileService: fileService)),
+-            commandLink: makeCommandLinkInstaller()
++                stateService: makeMachineStateService(defaults: defaults, fileService: fileService))
+         )
+     }
+ 
+--- a/Pensieve/AppRuntime+Construction.swift
++++ b/Pensieve/AppRuntime+Construction.swift
+@@ -84,7 +84,7 @@
+         onResolutionStarted: @escaping () throws -> (SyncCycleResult) -> Void
+     ) -> ConflictResolutionModel {
+         ConflictResolutionModel(engine: makeSyncEngine(), git: makeGitService(), credentials: makeCredentialStore(),
+-            root: storeRoot, audit: SyncAudit(appSupport: appSupportDir), commandLink: makeCommandLinkInstaller(),
++            root: storeRoot, audit: SyncAudit(appSupport: appSupportDir),
+             steps: syncSteps, onResolutionStarted: onResolutionStarted)
+     }
+ }

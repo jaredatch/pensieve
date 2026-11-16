@@ -1,0 +1,16 @@
+--- a/Pensieve/Services/SyncFailureCause.swift
++++ b/Pensieve/Services/SyncFailureCause.swift
+@@ -39,13 +39,6 @@
+         let executable = installer?.executable ?? Bundle.main.bundlePath + "/Contents/Helpers/pensieve"
+         // Display cleanup must never turn the command into a different filesystem path.
+         guard DisplayTextSanitizer.singleLine(executable) == executable else { return "pensieve log" }
+-        if let installer, let status = try? installer.status() {
+-            switch status {
+-            case .installed, .homebrew: return "pensieve log"
+-            case let .alongsideHomebrew(local, _) where !local.hasProblem: return "pensieve log"
+-            default: break
+-            }
+-        }
+         let bare = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+")
+         let path = executable.unicodeScalars.allSatisfy(bare.contains) ? executable
+             : "'" + executable.replacingOccurrences(of: "'", with: "'\\''") + "'"

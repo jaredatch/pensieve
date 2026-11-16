@@ -1,0 +1,13 @@
+--- a/Pensieve/Services/SyncFailureCause.swift
++++ b/Pensieve/Services/SyncFailureCause.swift
+@@ -46,9 +46,7 @@
+             default: break
+             }
+         }
+-        let bare = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+")
+-        let path = executable.unicodeScalars.allSatisfy(bare.contains) ? executable
+-            : "'" + executable.replacingOccurrences(of: "'", with: "'\\''") + "'"
++        let path = executable
+         return path + " log"
+     }
+ }

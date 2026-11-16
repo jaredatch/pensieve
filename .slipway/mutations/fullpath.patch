@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/SyncFailureCause.swift
++++ b/Pensieve/Services/SyncFailureCause.swift
+@@ -10,7 +10,7 @@
+     static func message(for error: Error, fallback: String? = nil, commandLink: CommandLinkInstaller? = nil) -> String {
+         let presentation = presentation(for: error, fallback: fallback)
+         guard presentation.needsLogPointer else { return presentation.cause }
+-        return presentation.cause + " Run " + logCommand(commandLink) + " in Terminal for the details."
++        return presentation.cause + " Run pensieve log in Terminal for the details."
+     }
+ 
+     /// Engines retain clean causes and pointer intent, without reading the command's installation state.
