@@ -64,7 +64,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
-- Update installs the commit you reviewed even if the GitHub branch has moved or been rewritten since the check.
+- Update installs the commit you reviewed when it is still on the tracked branch or tag. If the author removed it from that history, Update refuses and asks you to Re-check. If Pensieve cannot confirm the history, it says so and installs nothing.
 
 - After a skill updates in the Updates sheet, a green checkmark and “Updated” replace View Changes. The sheet’s Cancel button becomes Close after the first successful update.
 
