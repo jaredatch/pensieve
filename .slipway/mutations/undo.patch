@@ -1,7 +1,7 @@
 --- a/Pensieve/ViewModels/SkillRenameUndo.swift
 +++ b/Pensieve/ViewModels/SkillRenameUndo.swift
-@@ -49,3 +49,3 @@
-             } catch {
--                return finishMovedBack(restored: restored, window: window, failure: failure, context: context)
-+                throw failure
-             }
+@@ -82,3 +82,3 @@
+             .flatMap { String(validating: $0, as: UTF8.self) } ?? restored
+-        library.acceptRename(from: newSlug, to: oldSlug, document: document, carryingDraft: true)
++        library.acceptRename(from: newSlug, to: oldSlug, document: document, carryingDraft: false)
+         if let notice = restoreDeployments(context: context) { warnings.append(notice) }
