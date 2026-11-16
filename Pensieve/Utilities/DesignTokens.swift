@@ -26,6 +26,7 @@ enum DesignTokens {
     static let markdownListIndent: CGFloat = markdownBodySize * 2 // 2em
     static let markdownListItemGap: CGFloat = markdownBodySize * 0.25 // .25em
     static let markdownCodeScale: CGFloat = 0.85
+    static let markdownCodeFadeWidth: CGFloat = Spacing.xxl
     static let markdownCodePadding: CGFloat = Spacing.md // 16 px → 13 → 12 pt
     static let markdownCodeRadius: CGFloat = CornerRadius.sm // 6 px → 4.875 → 4 pt
     static let markdownCodeLineHeight: CGFloat = 1.45

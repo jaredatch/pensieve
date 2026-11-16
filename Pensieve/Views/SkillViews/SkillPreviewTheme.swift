@@ -55,22 +55,7 @@ enum SkillPreviewTheme {
             .fixedSize(horizontal: false, vertical: true)
             .markdownMargin(top: 0, bottom: DesignTokens.markdownBlockGap)
         }
-        .codeBlock { configuration in
-            ScrollView(.horizontal) {
-                configuration.label
-                    .fixedSize(horizontal: false, vertical: true)
-                    .markdownTextStyle {
-                        FontFamilyVariant(.monospaced)
-                        FontSize(.em(DesignTokens.markdownCodeScale))
-                    }
-                    .lineHeight(.multiple(factor: DesignTokens.markdownCodeLineHeight))
-                    .padding(DesignTokens.markdownCodePadding)
-            }
-            .scrollIndicators(.never, axes: .horizontal)
-            .background(DesignTokens.markdownCodeFill)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.markdownCodeRadius))
-            .markdownMargin(top: 0, bottom: DesignTokens.markdownBlockGap)
-        }
+        .codeBlock { SkillPreviewCodeBlock(configuration: $0) }
         .table { configuration in
             configuration.label
                 .fixedSize(horizontal: false, vertical: true)
