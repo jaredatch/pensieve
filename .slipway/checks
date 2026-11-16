@@ -1,0 +1,12 @@
+paths = Pensieve/Services/SkillInstallService+Checkout.swift Pensieve/Services/SkillInstallService+Credential.swift Pensieve/Services/SkillInstallService+Updates.swift Pensieve/Services/SkillInstallService.swift Pensieve/Services/SkillInstallGitServing+CallSite.swift Pensieve/Services/GitOperations.swift Pensieve/Services/GitService+PinnedFetch.swift Pensieve/ViewModels/UpdatesViewModel+Operations.swift PensieveTests/ViewModelTests/ PensieveTests/ServiceTests/ Pensieve.xcodeproj/project.pbxproj
+risk = Pensieve/Services/SkillInstallService+Checkout.swift Pensieve/Services/SkillInstallService+Credential.swift Pensieve/Services/SkillInstallService+Updates.swift Pensieve/Services/GitService+PinnedFetch.swift
+check.moved = tests PensieveTests/UpdatesViewModelTests/testViewChangesLoadsThePinnedUpdateAfterTheBranchMovesOn
+check.gone = tests PensieveTests/UpdatesViewModelTests/testViewChangesNamesAPinnedCommitThatIsGoneAndOffersRecheck
+check.causes = tests PensieveTests/UpdatesViewModelTests/testViewChangesKeepsEachDownloadFailuresOwnMessage
+check.malformed = tests PensieveTests/UpdatesViewModelTests/testViewChangesRefusesAMalformedPinBeforeGitRuns
+check.mismatch = tests PensieveTests/UpdatesViewModelTests/testViewChangesRefusesAMismatchedDownloadWithoutReadingFiles
+mutation.moved = .slipway/mutations/moved.patch
+mutation.gone = .slipway/mutations/gone.patch
+mutation.causes = .slipway/mutations/causes.patch
+mutation.malformed = .slipway/mutations/malformed.patch
+mutation.mismatch = .slipway/mutations/mismatch.patch
