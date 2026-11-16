@@ -1,0 +1,3 @@
+paths = Pensieve/Views/InstallViews/UpdatesSheetPresentation.swift Pensieve/Views/InstallViews/UpdatesRowView.swift PensieveTests/ViewTests/UpdatesSheetTests+AfterUpdate.swift PensieveTests/ViewTests/UpdatesSheetTests+Support.swift
+check.updated = tests PensieveTests/UpdatesSheetTests/testUpdatedRowDropsItsLocalEditsBox
+check.states = tests PensieveTests/UpdatesSheetTests/testLocalEditsBoxStaysUntilTheUpdateLands
