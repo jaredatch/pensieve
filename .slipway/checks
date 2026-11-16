@@ -1,0 +1,12 @@
+paths = Pensieve/Services/SkillInstallService+Updates.swift Pensieve/Services/SkillInstallService+Checkout.swift Pensieve/Services/SkillInstallService+Credential.swift Pensieve/Services/SkillInstallService.swift Pensieve/Services/GitService+PinnedFetch.swift Pensieve/Services/GitOperations.swift Pensieve/ViewModels/UpdatesViewModel+Operations.swift PensieveTests/ docs/SPEC.md docs/ARCHITECTURE.md CHANGELOG.md
+risk = Pensieve/Services/SkillInstallService+Updates.swift Pensieve/Services/SkillInstallService+Checkout.swift Pensieve/Services/SkillInstallService+Credential.swift Pensieve/Services/GitService+PinnedFetch.swift
+check.withdrawn = tests PensieveTests/UpdatesViewModelTests/testUpdateRefusesASavedVersionTheBranchNoLongerHolds
+check.gone = tests PensieveTests/UpdatesViewModelTests/testUpdateRefusesWhenTheTrackedBranchIsGone
+check.unconfirmed = tests PensieveTests/UpdatesViewModelTests/testUpdateInstallsNothingWhenTheBranchCannotBeConfirmed
+check.merged = tests PensieveTests/UpdatesViewModelTests/testUpdateInstallsASavedVersionOnceItIsMergedBackIntoTheBranch
+check.incomplete = tests PensieveTests/UpdatesViewModelTests/testUpdateCannotConfirmFromAHistoryCutShort
+mutation.withdrawn = .slipway/mutations/withdrawn.patch
+mutation.gone = .slipway/mutations/gone.patch
+mutation.unconfirmed = .slipway/mutations/unconfirmed.patch
+mutation.merged = .slipway/mutations/merged.patch
+mutation.incomplete = .slipway/mutations/incomplete.patch
