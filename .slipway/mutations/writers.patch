@@ -1,6 +1,6 @@
 --- a/Pensieve/Services/StoreIngestState.swift
 +++ b/Pensieve/Services/StoreIngestState.swift
-@@ -176,3 +176,3 @@
+@@ -182,3 +182,3 @@
          }
 -        let holds = Array(state.renameHolds.values)
 +        let holds = guardingPendingRenames ? Array(state.renameHolds.values) : []

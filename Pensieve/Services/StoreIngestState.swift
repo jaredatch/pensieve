@@ -157,6 +157,12 @@ final class StoreIngestState {
         preservedPeers.insert(slug)
     }
 
+    func preservedPeerNames() -> Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        return preservedPeers
+    }
+
     /// The four whole-row writers share this boundary. A collision's last observed durable
     /// overlay belongs to the peer even while the window's row contains this Mac's typed values.
     static func snapshotForPublication(using manifest: ManifestSnapshotting, context: ModelContext,

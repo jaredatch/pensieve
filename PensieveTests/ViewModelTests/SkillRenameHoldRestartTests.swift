@@ -81,9 +81,23 @@ final class SkillRenameHoldRestartTests: XCTestCase {
                     } else {
                         try h.assertPublished(exit == "rename" ? "free" : "zulu", carriesOld: false)
                     }
+                    if exit == "finish", oldExists {
+                        try await assertFinishedHoldSurvivesAnotherReopen(h, before: disk)
+                    }
                 }
             }
         }
+    }
+
+    private func assertFinishedHoldSurvivesAnotherReopen(_ h: SkillRenameTakeoverFixture,
+                                                         before: ManifestSnapshot) async throws {
+        h.tagLibrary.updateMetadata(h.other, tags: ["another edit"], scope: .user, context: h.context)
+        await h.saves.waitUntilIdle()
+        try await h.reopen()
+        try h.syncHeld()
+        let after = try h.manifest.read(fromRoot: h.root)
+        XCTAssertEqual(after.skills.first { $0.slug == "alpha" }, before.skills.first { $0.slug == "alpha" })
+        try assertOldNameUnchanged(h, before: before, after: after, bytes: nil)
     }
 
     private func assertOldNameUnchanged(_ h: SkillRenameTakeoverFixture, before: ManifestSnapshot,

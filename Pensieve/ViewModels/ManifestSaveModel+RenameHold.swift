@@ -83,7 +83,14 @@ extension ManifestSaveModel {
         heldRenames.removeAll { hold in
             let complete = durable.skills.contains { $0.slug == hold.record.new && hold.record.owns($0) }
                 && !durable.skills.contains { $0.slug == hold.record.old && hold.record.owns($0) }
-            if complete { StoreIngestState.shared(for: hold.context.container).forgetRename(hold.record.new) }
+            if complete {
+                let state = StoreIngestState.shared(for: hold.context.container)
+                if durable.skills.contains(where: { $0.slug == hold.record.old && !hold.record.owns($0) }) {
+                    state.preservePeer(hold.record.old)
+                    preservedPeerSlugs.insert(hold.record.old)
+                }
+                state.forgetRename(hold.record.new)
+            }
             return complete
         }
     }

@@ -280,6 +280,10 @@ extension ManifestSaveModel {
     /// Previously recorded creates stay until acknowledgement, even when their slug is temporarily absent on disk.
     func persistRefusedCreates(excludingPublished: UUID? = nil) {
         guard let refusedCreatesPath, !recordsRequireNewerVersion else { return }
+        // Sync can complete a hold on another context before this queue next writes its record.
+        for hold in heldRenames {
+            preservedPeerSlugs.formUnion(StoreIngestState.shared(for: hold.context.container).preservedPeerNames())
+        }
         let retained = refused.compactMap { edit -> RefusedCreateRecords.Held? in
             guard let create = edit.createdSkill,
                   edit.isCollisionHeld || edit.intentMove != nil || recordedCreateSlugs.contains(create.slug) else { return nil }
