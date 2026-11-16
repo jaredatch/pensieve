@@ -18,6 +18,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - View Changes opens its own window. It lists every file an update would change, with lines added and removed, and shows each one as an inline diff. Open it from a skill's update banner or from any row in the Updates sheet. Invisible characters show up as visible marks, so nothing can hide in a diff.
 - You can edit a skill's whole `SKILL.md` in Content › Source now, frontmatter included. Before it saves a changed header, Pensieve checks that the header still reads as YAML, still has a name and a description, and keeps the skill's name. If not, nothing is written and the header says why.
 - Source colors a skill's frontmatter as YAML.
+- Nested metadata in Content › Rendered shows as small tables, with keys above values and lists across one row. Large, deeply nested or cramped entries keep their YAML text.
 - Rendered shows a skill's frontmatter as a table of keys and values above the text. Values show as plain text, with invisible characters marked.
 
 ### Removed

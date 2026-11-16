@@ -40,7 +40,10 @@ final class SkillPreviewNestedMetadataTests: XCTestCase {
           - Bash(git:*)
         flowlist: [left, middle, right]
         repeated: [again, again]
-        empty: [before, , after]
+        empty:
+          - before
+          -
+          - after
         neighbors: [near, next]
         flow: {one: [1, 2], two: "value"}
         records: [{first: alpha}, {second: beta}]
@@ -117,7 +120,8 @@ final class SkillPreviewNestedMetadataTests: XCTestCase {
         try assertInside(["a-very-long-header-that-needs-to-wrap", long, "b", "short", "c", "nested"], fixture: tight)
         let wrapped = try cell(long, in: tight)
         XCTAssertGreaterThan(wrapped.height, 30)
-        XCTAssertLessThan(wrapped.height / 13, CGFloat(long.count) / 4, "Never one glyph per line")
+        let lineHeight = try cell("short", in: tight).height
+        XCTAssertLessThan(wrapped.height / lineHeight, CGFloat(long.count) / 4, "Never one glyph per line")
         XCTAssertLessThan(try cell("after", in: tight).maxY, wrapped.minY)
         let six = try await mount("metadata: [aa, bb, cc, dd, ee, ff]")
         defer { six.close() }
@@ -224,6 +228,7 @@ final class SkillPreviewNestedMetadataTests: XCTestCase {
 extension SkillPreviewNestedMetadataTests {
     private func mount(_ header: String) async throws -> FrontmatterHost {
         let fixture = try FrontmatterHost(document: "---\n\(header)\n---\n\nBody text.")
+        XCTAssertFalse(fixture.snapshot.frontmatterRows.isEmpty, "Fixture must have readable, trusted YAML")
         await TestWait.until(failureMessage: "Content preview must mount") {
             fixture.host.layoutSubtreeIfNeeded()
             return !self.cells("Body text.", in: fixture).isEmpty

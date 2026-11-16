@@ -23,7 +23,11 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
                 ("flow-control", "[one, two]"), ("count", "42")
             ]
             XCTAssertEqual(fixture.snapshot.frontmatterRows.map(\.value), expected.map(\.1))
-            let previousY = try await assertRows(expected, in: fixture.host)
+            let previousY = try await assertRows(expected, nested: [
+                "metadata": ["version", "enabled", "3.1.0", "true"], "tools": ["Read", "Bash(git:*)"],
+                "flow": ["one", "two", "1", "2", "value"], "tagged": ["version", "1"],
+                "flow-control": ["one", "two"]
+            ], in: fixture.host)
             if let paintedRows { XCTAssertEqual(fixture.snapshot.frontmatterRows, paintedRows) }
             paintedRows = fixture.snapshot.frontmatterRows
             let descriptionFrame = try await text(description, in: fixture.host).accessibilityFrame()
@@ -31,9 +35,9 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
             let body = try await text("Body heading", in: fixture.host)
             XCTAssertLessThan(body.accessibilityFrame().maxY, previousY, "The Markdown body follows the table")
             let scalar = try await text("MIT", in: fixture.host)
-            let collection = try await text(expected[3].1, in: fixture.host)
+            let collection = try await text("3.1.0", in: fixture.host)
             XCTAssertEqual(try fontSize(of: scalar), 13, accuracy: 0.01)
-            XCTAssertEqual(try fontSize(of: collection), 11, accuracy: 0.01)
+            XCTAssertEqual(try fontSize(of: collection), 13, accuracy: 0.01)
         }
         try assertGridPaint(XCTUnwrap(paintedRows))
     }
@@ -178,7 +182,9 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         ["\\n", "\\r", "\\r\\n", "\\v", "\\f", "\\N", "\\L", "\\P", "\\r\\n\\L\\P", "\\n\\n"]
             .enumerated().map { "terminal\($0.offset): \"Final line\($0.element)\"" }.joined(separator: "\n")
     }
+}
 
+extension SkillPreviewFrontmatterTests {
     private func assertGridPaint(_ rows: [SkillFrontmatterRow]) throws {
         let renderer = ImageRenderer(content: SkillFrontmatterTable(rows: rows)
             .frame(width: 612).background(Color.white).environment(\.colorScheme, .light))
@@ -217,14 +223,32 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         XCTAssertTrue(gaps.isEmpty, "Both cells' fills and bottom rules must span the full row height: \(gaps.count) gaps")
     }
 
-    private func assertRows(_ rows: [(String, String)], in host: NSView) async throws -> CGFloat {
+    private func assertRows(_ rows: [(String, String)], nested: [String: [String]],
+                            in host: NSView) async throws -> CGFloat {
         var previousY = CGFloat.infinity
         var valueX: CGFloat?
-        for (key, value) in rows {
+        for (index, entry) in rows.enumerated() {
+            let (key, value) = entry
             let keyFrame = try await text(key, in: host).accessibilityFrame()
-            let element = try await text(value, in: host)
-            let valueFrame = element.accessibilityFrame()
-            XCTAssertEqual(element.accessibilityValue() as? String, value, "Values end at their last text line")
+            let valueFrame: CGRect
+            if let values = nested[key] {
+                let bottom = index + 1 < rows.count
+                    ? try await text(rows[index + 1].0, in: host).accessibilityFrame().maxY : -.infinity
+                let ownCells = elements(in: host).filter {
+                    let frame = $0.accessibilityFrame()
+                    return frame.minX > keyFrame.minX && frame.maxY <= keyFrame.maxY + 0.5 && frame.minY > bottom
+                }
+                for value in values {
+                    XCTAssertTrue(ownCells.contains { ($0.accessibilityValue() as? String) == value }, value)
+                }
+                XCTAssertFalse(ownCells.contains { ($0.accessibilityValue() as? String) == value })
+                let first = try XCTUnwrap(ownCells.first { ($0.accessibilityValue() as? String) == values.first })
+                valueFrame = first.accessibilityFrame().offsetBy(dx: -DesignTokens.markdownTableCellHorizontal, dy: 0)
+            } else {
+                let element = try await text(value, in: host)
+                valueFrame = element.accessibilityFrame()
+                XCTAssertEqual(element.accessibilityValue() as? String, value, "Values end at their last text line")
+            }
             XCTAssertLessThan(keyFrame.maxY, previousY, "Rows must follow file order")
             XCTAssertGreaterThan(valueFrame.minX, keyFrame.minX)
             if let valueX { XCTAssertEqual(valueFrame.minX, valueX, accuracy: 0.5) }
@@ -281,11 +305,26 @@ extension SkillPreviewFrontmatterTests {
                 _ = try await text("Use for *.md files", in: fixture.host)
                 let key = try XCTUnwrap(syntax.expectedKey, syntax.label)
                 let value = try XCTUnwrap(syntax.expectedValue, syntax.label)
-                for (key, value) in [("description", "Use for *.md files"), (key, value)] {
+                XCTAssertEqual(fixture.snapshot.frontmatterRows.first { $0.key == key }?.value, value)
+                let nested: [String]
+                switch syntax.label {
+                case "flow star": nested = ["commands", "Bash(npm run *)", "*.md"]
+                case "flow ampersand": nested = ["names", "A &partner"]
+                default: nested = []
+                }
+                for textValue in nested { _ = try await text(textValue, in: fixture.host) }
+                let displayedValue = nested.first ?? value
+                for (key, value) in [("description", "Use for *.md files"), (key, displayedValue)] {
                     let keyFrame = try await text(key, in: fixture.host).accessibilityFrame()
                     let valueFrame = try await text(value, in: fixture.host).accessibilityFrame()
-                    XCTAssertLessThan(abs(keyFrame.maxY - valueFrame.maxY), 4,
-                                      "Rendered key and value must share a row: \(syntax.label), \(key)")
+                    if nested.isEmpty || key == "description" {
+                        XCTAssertLessThan(abs(keyFrame.maxY - valueFrame.maxY), 4,
+                                          "Rendered key and value must share a row: \(syntax.label), \(key)")
+                    } else {
+                        XCTAssertLessThanOrEqual(abs(keyFrame.maxY - valueFrame.maxY),
+                                                DesignTokens.markdownTableCellVertical + 0.5,
+                                                "Nested headers stay inside the same outer row: \(syntax.label)")
+                    }
                 }
                 for excluded in syntax.excludedText {
                     XCTAssertFalse(elements(in: fixture.host).contains {
