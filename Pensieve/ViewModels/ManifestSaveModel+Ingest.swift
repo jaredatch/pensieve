@@ -266,8 +266,9 @@ extension ManifestSaveModel {
                                durable: ManifestSnapshot, includingHeadEdit: Bool) throws -> HeadEditVerdict {
         var displayed = snapshot
         let state = StoreIngestState.shared(for: item.presentation.context.container)
-        state.projectHeldRenames(onto: &displayed, durable: durable,
-            local: try? manifest.snapshot(from: item.presentation.context))
+        state.projectHeldRenames(onto: &displayed, durable: durable) {
+            try? manifest.snapshot(from: item.presentation.context)
+        }
         let creates = knownCreates
         // The scan can synthesize an overlay from a folder before its create is on disk.
         // Only the actual durable manifest can say the move has already been published.

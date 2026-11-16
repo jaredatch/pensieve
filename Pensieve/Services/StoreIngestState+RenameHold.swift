@@ -67,11 +67,14 @@ extension StoreIngestState {
 }
 
 extension StoreIngestState {
-    func projectHeldRenames(onto snapshot: inout ManifestSnapshot, durable: ManifestSnapshot, local: ManifestSnapshot?) {
+    func projectHeldRenames(onto snapshot: inout ManifestSnapshot, durable: ManifestSnapshot,
+                            readLocal: () -> ManifestSnapshot?) {
         lock.lock()
         let holds = Array(renameHolds.values)
         lock.unlock()
-        projectRenameHolds(holds, onto: &snapshot, durable: durable, local: local)
+        // Only held renames need this optional read. Ordinary rebuild reads must stay throwing.
+        guard !holds.isEmpty else { return }
+        projectRenameHolds(holds, onto: &snapshot, durable: durable, local: readLocal())
     }
 }
 
