@@ -20,7 +20,7 @@ extension ManifestSaveTests {
         // This is the previous build's required-key shape. Decode the entire file, including
         // unrelated protection, so an incompatible move cannot hide a whole-record failure.
         let legacy = try JSONDecoder().decode(LegacyRefusedRecord.self, from: bytes)
-        XCTAssertEqual(legacy.schemaVersion, 1)
+        XCTAssertEqual(legacy.schemaVersion, 2)
         XCTAssertEqual(legacy.held.map(\.slug), ["item-2", "unrelated"])
         XCTAssertEqual(legacy.held.map(\.createdAt), [createdAt, createdAt])
         XCTAssertEqual(legacy.preserved, ["peer", "unrelated-peer"])
@@ -293,7 +293,7 @@ extension ManifestSaveTests {
             XCTAssertTrue(h.saves.hasCollision("item", context: h.context))
             XCTAssertEqual(try h.heldSlugs(), ["item"])
         }
-        for version in [2, Int.max] {
+        for version in [3, Int.max] {
             let h = try CollisionCreateFixture(persistent: true)
             defer { h.cleanup() }
             await h.saves.waitUntilIdle()

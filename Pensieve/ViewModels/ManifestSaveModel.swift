@@ -93,9 +93,11 @@ final class ManifestSaveModel {
             reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context, order: nextOrder, intentMove: intentMove),
             fallback: { try manifest.snapshot(from: context) },
-            accept: { prepared, snapshot in
+            accept: { [weak self] prepared, snapshot in
+                var displayed = snapshot
+                try self?.preserveRestoredReplacementRows(in: &displayed, context: context)
                 try StoreRebuildService(fileService: files, manifestService: manifest)
-                    .accept(prepared, snapshot: snapshot, context: context)
+                    .accept(prepared, snapshot: displayed, context: context)
             }, report: report)
         nextOrder += 1
         items.append(item)

@@ -10,6 +10,7 @@ extension ManifestSaveModel {
     struct RestoredDeletion {
         let slug: String
         let machineID: String?
+        let createdAt: String?
         let changes: [ManifestChange]
         let projectionIDs: Set<UUID>
     }
@@ -55,7 +56,7 @@ extension ManifestSaveModel {
             state.preservePeer(slug)
         }
         restoreRetirements(record.retirements, durable: durable, context: context)
-        restoreDeletions(record.deletions, context: context)
+        restoreDeletions(record.deletions, durable: durable, context: context)
         let local: ManifestSnapshot
         do { local = try manifest.snapshot(from: context) } catch {
             log("Couldn't restore refused creates: " + error.localizedDescription)
@@ -103,24 +104,30 @@ extension ManifestSaveModel {
         }
     }
 
-    private func restoreDeletions(_ records: [RefusedCreateRecords.Deletion], context: ModelContext) {
-        for record in records where record.machineID != nil || !retirementFolderMayExist(record.slug) {
+    private func restoreDeletions(_ records: [RefusedCreateRecords.Deletion], durable: ManifestSnapshot?, context: ModelContext) {
+        for record in records where record.machineID != nil
+            || !restoredDeletionReappeared(record.slug, createdAt: record.createdAt, durable: durable) {
             let changes: [ManifestChange] = record.machineID.map { [.retireLocalSkill(record.slug, $0)] }
                 ?? [.retireSkill(record.slug), .deleteSkill(record.slug)]
             let edits = changes.map { ManifestRefusedEdit($0, context: context, order: -1) }
             for edit in edits {
+                edit.deletionCreatedAt = record.createdAt
                 edit.retain()
                 refused.append(edit)
             }
             restoredDeletions.append(.init(slug: record.slug, machineID: record.machineID,
-                                          changes: changes, projectionIDs: Set(edits.map(\.id))))
+                                          createdAt: record.createdAt, changes: changes, projectionIDs: Set(edits.map(\.id))))
         }
     }
 
     /// A helper can pull a new creation while launch rebuilds. Withdraw both the replay and
     /// its projections; the caller must rebuild again before exposing or publishing those rows.
     func discardReappearedRestoredDeletions() -> Bool {
-        let reappeared = restoredDeletions.filter { $0.machineID == nil && retirementFolderMayExist($0.slug) }
+        guard !restoredDeletions.isEmpty else { return false }
+        let durable = probeLibraryForRecordRestore()
+        let reappeared = restoredDeletions.filter {
+            $0.machineID == nil && restoredDeletionReappeared($0.slug, createdAt: $0.createdAt, durable: durable)
+        }
         guard !reappeared.isEmpty else { return false }
         let slugs = Set(reappeared.map(\.slug))
         let projectionIDs = Set(reappeared.flatMap(\.projectionIDs))
@@ -143,10 +150,15 @@ extension ManifestSaveModel {
             && items[target].removedSkillDeletion == nil {
             switch items[target].change {
             case .retireSkill(let name), .deleteSkill(let name):
-                if name == slug { items[target].removedSkillDeletion = deletion }
+                if name == slug {
+                    items[target].removedSkillDeletion = deletion
+                    items[target].presentation.deletionCreatedAt = deletion.createdAt
+                }
             default: break
             }
         }
+        // Folder removal and this write share one main-actor turn, including a failed row save.
+        persistRefusedCreates()
     }
 
     private func checkedDeletionSlug(_ item: Item) -> String? {
@@ -180,6 +192,9 @@ extension ManifestSaveModel {
     func discardReappearedQueuedDeletions(durable: ManifestSnapshot?) {
         let reappeared = items.filter { item in
             guard let slug = checkedDeletionSlug(item) else { return false }
+            if let restored = item.restoredDeletion, let durable {
+                return restoredDeletionReappeared(slug, createdAt: restored.createdAt, durable: durable)
+            }
             return !hasQueuedLocalReplacement(for: item, slug: slug, durable: durable) && retirementFolderMayExist(slug)
         }
         let slugs = Set(reappeared.compactMap { checkedDeletionSlug($0) })
@@ -202,13 +217,42 @@ extension ManifestSaveModel {
     func replayRestoredDeletions(context: ModelContext) {
         let deletions = restoredDeletions
         restoredDeletions = []
+        guard !deletions.isEmpty else { return }
         for deletion in deletions {
             for change in deletion.changes {
                 // submit appends synchronously, before its worker can take a turn.
                 let index = items.count
                 submit(change, context: context) { _ in }
                 items[index].restoredDeletion = deletion
+                items[index].presentation.deletionCreatedAt = deletion.createdAt
             }
+        }
+        persistRefusedCreates()
+    }
+
+    /// Dated restart reminders identify the deleted creation without needing a queued replacement.
+    /// An unreadable launch probe defers the decision to the worker's locked manifest read.
+    private func restoredDeletionReappeared(_ slug: String, createdAt: String?, durable: ManifestSnapshot?) -> Bool {
+        guard let createdAt else { return retirementFolderMayExist(slug) }
+        guard let durable else { return false }
+        guard let overlay = durable.skills.first(where: { $0.slug == slug }) else { return false }
+        return RefusedCreateRecords.writtenDate(overlay.createdAt) != createdAt
+    }
+
+    /// A replay deletes the old overlay, not a reused folder's row. There is no queued create
+    /// after quit to restore that row during acceptance; its metadata stays local until sync.
+    func preserveRestoredReplacementRows(in displayed: inout ManifestSnapshot, context: ModelContext) throws {
+        let dates = Dictionary(items.compactMap { item -> (String, String)? in
+            guard !item.wasCancelled, item.presentation.context === context,
+                  let deletion = item.restoredDeletion, deletion.machineID == nil,
+                  let date = deletion.createdAt else { return nil }
+            return (deletion.slug, date)
+        }, uniquingKeysWith: { first, _ in first })
+        guard !dates.isEmpty else { return }
+        for row in try manifest.snapshot(from: context).skills {
+            guard let deleted = dates[row.slug], RefusedCreateRecords.writtenDate(row.createdAt) != deleted else { continue }
+            displayed.skills.removeAll { $0.slug == row.slug }
+            displayed.skills.append(row)
         }
     }
 
@@ -275,7 +319,10 @@ extension ManifestSaveModel {
             return record
         }
         return Dictionary(records.map { ($0.slug, $0) }, uniquingKeysWith: { first, last in
-            first.machineID == nil ? first : last
+            if first.machineID != nil { return last }
+            if last.machineID != nil { return first }
+            // A separate refused retirement must not hide the dated deletion for the same name.
+            return first.createdAt != nil ? first : last
         }).values.sorted { $0.slug < $1.slug }
     }
 }
