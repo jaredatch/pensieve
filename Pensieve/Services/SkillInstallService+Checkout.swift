@@ -77,6 +77,9 @@ extension SkillInstallService {
 
     private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?, preview: Bool = false,
                                       body: (String) throws -> Result) throws -> Result {
+        if preview, !GitService.isHistoryObjectID(source.headCommit) {
+            throw SkillUpdateFlowError.missingPinnedUpdate
+        }
         try previewOperation(.prepare, enabled: preview) { try prepareScratchRoot() }
         let sessionRoot = scratchRoot + "/" + UUID().uuidString
         try previewOperation(.prepare, enabled: preview) { try fileService.createDirectory(at: sessionRoot) }
@@ -88,8 +91,13 @@ extension SkillInstallService {
         let checkoutName = SkillStore.slugify(repositoryName(for: validatedRemote.repo))
         let checkoutPath = sessionRoot + "/" + checkoutName
         try previewOperation(.fetch, enabled: preview) {
-            try cloneForInstall(remote: validatedRemote.cloneRemote, branch: source.ref,
-                                into: checkoutPath, credential: credential)
+            if preview {
+                try downloadForPreview(remote: validatedRemote.cloneRemote, commit: source.headCommit,
+                                       into: checkoutPath)
+            } else {
+                try cloneForInstall(remote: validatedRemote.cloneRemote, branch: source.ref,
+                                    into: checkoutPath, credential: credential)
+            }
         }
         let commit = try previewOperation(.pinnedCommit, enabled: preview) { try gitService.commitSHA(at: checkoutPath) }
         guard commit == source.headCommit else {
@@ -103,6 +111,7 @@ extension SkillInstallService {
         do { return try body() } catch {
             guard enabled else { throw error }
             if error is CancellationError { throw error }
+            if case SkillUpdateFlowError.pinnedCommitUnavailable = error { throw error }
             let classified = Self.mappedRepositoryError(error)
             if case GitError.unusable = classified {
                 throw SkillUpdateFlowError.previewReadFailed(classified.localizedDescription)

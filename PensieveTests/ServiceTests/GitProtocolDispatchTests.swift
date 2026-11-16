@@ -149,11 +149,15 @@ final class GitProtocolDispatchTests: XCTestCase {
         let service: SkillInstallGitServing = operations
         expectCalled("cloneShallow(remote,branch,into,credential)",
             try service.cloneShallow(remote: "fixture", branch: "main", into: "fixture", credential: .sshAgent))
+        expectCalled("downloadPinnedCommit(remote,commit,into,credential)",
+            try service.downloadPinnedCommit(remote: "fixture", commit: String(repeating: "a", count: 40),
+                                             into: "fixture", credential: .sshAgent))
         expectCalled("commitSHA(at)", try service.commitSHA(at: "fixture"))
         expectCalled("treeHash(at,path)", try service.treeHash(at: "fixture", path: "fixture"))
         expectCalled("currentBranch(at)", try service.currentBranch(at: "fixture"))
         XCTAssertEqual(operations.calls, [
             "cloneShallow(remote,branch,into,credential)",
+            "downloadPinnedCommit(remote,commit,into,credential)",
             "commitSHA(at)",
             "treeHash(at,path)",
             "currentBranch(at)"

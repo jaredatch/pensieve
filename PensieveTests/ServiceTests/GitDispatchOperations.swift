@@ -227,6 +227,12 @@ final class GitDispatchOperations: GitServiceProtocol, FastForwardGitService,
         throw GitDispatchCalled.operation("fastForwardOnly(at,credential)")
     }
 
+    func downloadPinnedCommit(remote: String, commit: String, into path: String,
+                              credential: GitCredential?) throws {
+        calls.append("downloadPinnedCommit(remote,commit,into,credential)")
+        throw GitDispatchCalled.operation("downloadPinnedCommit(remote,commit,into,credential)")
+    }
+
     func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
         calls.append("cloneShallow(remote,branch,into,credential)")
         throw GitDispatchCalled.operation("cloneShallow(remote,branch,into,credential)")

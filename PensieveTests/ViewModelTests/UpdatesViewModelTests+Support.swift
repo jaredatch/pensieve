@@ -187,7 +187,9 @@ extension UpdatesViewModelTests {
             now: { Date(timeIntervalSince1970: 1_850_000_000) },
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
         )
-        let installedSource = try NativeTestWork.run { [self] in try service.fetch(repo: repository, ref: nil, credential: nil) }
+        let installedSource = try NativeTestWork.run {
+            try service.fetch(repo: "file://" + repository, ref: nil, credential: nil)
+        }
         let installedCandidate = try XCTUnwrap(installedSource.candidates.first)
         _ = try NativeTestWork.run(container: context.container) { [self] jobContext in
             try service.install(candidate: installedCandidate, from: installedSource, context: jobContext)
@@ -197,7 +199,9 @@ extension UpdatesViewModelTests {
         try writeSkill(name: "Fresh Name", description: "Fresh Description", body: "fresh body",
                        repository: repository)
         let pinnedCommit = try commit(repository, message: "checked update")
-        let updateSource = try NativeTestWork.run { [self] in try service.fetch(repo: repository, ref: nil, credential: nil) }
+        let updateSource = try NativeTestWork.run {
+            try service.fetch(repo: "file://" + repository, ref: nil, credential: nil)
+        }
         let updateCandidate = try XCTUnwrap(updateSource.candidates.first)
         skill.updateAvailable = true
         skill.upstreamTree = updateCandidate.treeHash

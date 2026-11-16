@@ -214,30 +214,4 @@ final class UpdatesViewModelTests: XCTestCase {
         XCTAssertEqual(model.status(for: rows[1]), .updated)
     }
 
-    func testViewChangesRefusesMovedPinWithoutMutatingSkill() throws {
-        let fixture = try prepareRealPinnedUpdate()
-        let before = try fileService.readData(
-            at: fixture.storeRoot + "/skills/vendor/SKILL.md"
-        )
-        try writeSkill(
-            name: "Moved Again",
-            description: "unreviewed",
-            body: "third body",
-            repository: fixture.repository
-        )
-        _ = try commit(fixture.repository, message: "move before diff")
-
-        XCTAssertThrowsError(
-            try nativePreview(fixture.service, skill: fixture.skill)
-        ) { error in
-            XCTAssertEqual(error as? SkillUpdateFlowError, .repositoryChanged)
-            XCTAssertEqual(error.localizedDescription, SkillUpdateFlowError.repositoryChangedMessage)
-        }
-        XCTAssertEqual(
-            try fileService.readData(at: fixture.storeRoot + "/skills/vendor/SKILL.md"),
-            before
-        )
-        XCTAssertTrue(fixture.skill.updateAvailable)
-        XCTAssertEqual(fixture.skill.upstreamCommit, fixture.pinnedCommit)
-    }
 }

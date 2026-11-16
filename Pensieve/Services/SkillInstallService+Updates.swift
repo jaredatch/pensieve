@@ -55,6 +55,7 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
 
     case missingPinnedUpdate
     case repositoryChanged
+    case pinnedCommitUnavailable(String)
     case localEditsRequireConfirmation
     case skillNotFound
     case unsafeSkillDirectory(String)
@@ -67,6 +68,8 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
             "This update is no longer pinned — re-check to review the latest version"
         case .repositoryChanged:
             Self.repositoryChangedMessage
+        case let .pinnedCommitUnavailable(commit):
+            "Commit \(commit) is no longer in the repository — re-check to review the latest version"
         case .localEditsRequireConfirmation:
             "This skill has local edits — updating will overwrite them"
         case .skillNotFound:

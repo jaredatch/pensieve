@@ -16,6 +16,17 @@ extension SkillInstallService {
         }
     }
 
+    func downloadForPreview(remote: String, commit: String, into path: String) throws {
+        let credential = credentialStore.credential(forHost: CredentialHost.githubInstall)
+        do {
+            try gitService.downloadPinnedCommit(remote: remote, commit: commit, into: path, credential: credential)
+        } catch PinnedCommitFetchError.unavailable {
+            throw SkillUpdateFlowError.pinnedCommitUnavailable(String(commit.prefix(7)))
+        } catch {
+            throw Self.mappedRepositoryError(error)
+        }
+    }
+
     static func mappedRepositoryError(_ error: Error) -> Error {
         guard let gitError = error as? GitError else { return error }
         switch gitError {
