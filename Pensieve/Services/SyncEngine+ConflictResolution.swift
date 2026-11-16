@@ -129,8 +129,11 @@ struct SyncConflictOperation {
                 try gitService.abortRebase(at: root)
             }
         } catch {
+            let reason = SyncFailureCause.presentation(for: failure)
+            let detail = SyncFailureCause.presentation(for: error)
             throw SyncError.returnToRestFailed(reason: failure.localizedDescription, detail: error.localizedDescription,
-                reasonCause: SyncFailureCause.message(for: failure), detailCause: SyncFailureCause.message(for: error))
+                reasonCause: reason.cause, detailCause: detail.cause,
+                needsLogPointer: reason.needsLogPointer || detail.needsLogPointer)
         }
     }
 

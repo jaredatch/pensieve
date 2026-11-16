@@ -84,7 +84,7 @@ extension AppRuntimePaths {
         onResolutionStarted: @escaping () throws -> (SyncCycleResult) -> Void
     ) -> ConflictResolutionModel {
         ConflictResolutionModel(engine: makeSyncEngine(), git: makeGitService(), credentials: makeCredentialStore(),
-            root: storeRoot, audit: SyncAudit(appSupport: appSupportDir),
+            root: storeRoot, audit: SyncAudit(appSupport: appSupportDir), commandLink: makeCommandLinkInstaller(),
             steps: syncSteps, onResolutionStarted: onResolutionStarted)
     }
 }

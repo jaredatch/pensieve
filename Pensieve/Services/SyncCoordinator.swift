@@ -52,6 +52,7 @@ actor SyncCoordinator {
     private var credentials: CredentialStoreProtocol?
     private var rebuildService: StoreRebuildServiceProtocol = StoreRebuildService()
     private var root = ""
+    private var commandLink: CommandLinkInstaller?
     private var audit: SyncAuditWriting?
     private var machineIdentity: MachineIdentityProviding?
     private var machineStateService: MachineStateServicing?
@@ -67,8 +68,10 @@ actor SyncCoordinator {
         audit: SyncAuditWriting,
         machine: (identity: MachineIdentityProviding, stateService: MachineStateServicing),
         now: @escaping () -> Date = Date.init,
-        headStamp: (() -> GitHeadStamp.State)? = nil
+        headStamp: (() -> GitHeadStamp.State)? = nil,
+        commandLink: CommandLinkInstaller? = nil
     ) {
+        self.commandLink = commandLink
         self.engine = engine
         self.git = git
         self.credentials = credentials
@@ -135,7 +138,7 @@ actor SyncCoordinator {
                 result = .manifestDamaged(recoveryMessage(recovery.underlying, authentication: authentication))
             } else {
                 cycleError = error
-                result = Self.cycleFailure(authentication.reporting(error))
+                result = cycleFailure(authentication.reporting(error))
             }
         }
         let token: String?
@@ -200,7 +203,7 @@ actor SyncCoordinator {
 
     /// Keep repairable damage distinct from the newer-schema fence when a cycle refuses the store.
     /// Busy locks remain retryable; other errors retain their localized failure.
-    private static func cycleFailure(_ error: Error) -> SyncCycleResult {
+    private func cycleFailure(_ error: Error) -> SyncCycleResult {
         switch error {
         case SyncError.syncInProgress:
             return .locked
@@ -209,9 +212,9 @@ actor SyncCoordinator {
         case let SyncError.storeUnreadable(warnings):
             return .storeUnreadable(SyncError.storeUnreadable(warnings).errorDescription ?? "Sync failed.")
         case let error as LocalizedError:
-            return .failed(SyncFailureCause.message(for: error, fallback: "Sync failed."))
+            return .failed(SyncFailureCause.message(for: error, fallback: "Sync failed.", commandLink: commandLink))
         default:
-            return .failed(SyncFailureCause.message(for: error))
+            return .failed(SyncFailureCause.message(for: error, commandLink: commandLink))
         }
     }
 
