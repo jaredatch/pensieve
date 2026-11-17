@@ -674,34 +674,73 @@ class WorkflowTests < Minitest::Test
     assert_includes witnesses, '[', 'the first unseen folded continuation must be present'
   end
 
-  def test_ci_test_baseline_includes_wrapper_self_test
-    assert_ci_test_baseline_includes_wrapper_self_test
-    step = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test').fetch('steps').find { |entry| entry['id'] == 'tests' }
+  def test_ci_test_steps_propagate_failure
+    jobs = @workflows.fetch('ci.yml').fetch('jobs')
+    steps = %w[build-test test-shard-2 test-shard-3].map do |name|
+      jobs.fetch(name).fetch('steps').find { |entry| entry['id'] == 'tests' }
+    end
+    steps << jobs.fetch('build-test').fetch('steps').find { |entry| entry['name'] == 'Test wrapper' }
     Dir.mktmpdir('pensieve-ci-test-') do |directory|
       Dir.mkdir(File.join(directory, 'script'))
       runner = File.join(directory, 'script/test.sh')
       File.write(runner, <<~SH)
         #!/bin/sh
         printf '%s\\n' "$*" >> calls
-        if [ "${1:-}" = --self-test ]; then
-          exit "${FAIL_SELF_TEST:-0}"
-        fi
-        exit "${FAIL_SUITE:-0}"
+        exit "${FAIL_WRAPPER:-0}"
       SH
       File.chmod(0755, runner)
-      [{}, { 'FAIL_SELF_TEST' => '7' }, { 'FAIL_SUITE' => '9' }].each do |environment|
-        File.write(File.join(directory, 'calls'), '')
-        stdout, stderr, status = Open3.capture3(environment, '/bin/bash', '-e', '-o', 'pipefail', '-c',
-                                               step.fetch('run'), chdir: directory)
-        assert_equal environment.empty?, status.success?, "#{environment.inspect}: #{stdout}#{stderr}"
-        expected = environment.key?('FAIL_SELF_TEST') ? ["--self-test\n"] : ["--self-test\n", "\n"]
-        assert_equal expected, File.readlines(File.join(directory, 'calls'))
+      steps.zip(['--shard 1/3', '--shard 2/3', '--shard 3/3', '--self-test']).each do |step, arguments|
+        [{}, { 'FAIL_WRAPPER' => '7' }].each do |environment|
+          File.write(File.join(directory, 'calls'), '')
+          stdout, stderr, status = Open3.capture3(environment, '/bin/bash', '-e', '-o', 'pipefail', '-c',
+                                                 step.fetch('run'), chdir: directory)
+          assert_equal environment.empty?, status.success?, "#{environment.inspect}: #{stdout}#{stderr}"
+          assert_equal [arguments], File.readlines(File.join(directory, 'calls'), chomp: true)
+        end
       end
     end
   end
 
-  def assert_ci_test_baseline_includes_wrapper_self_test
-    assert_operator CI_WORST_SECONDS.fetch('Test'), :>, CI_TEST_RUNNER_SECONDS, 'Test includes measured wrapper self-test work'
+  def test_ci_independent_shards_and_release_recovery
+    workflow = @workflows.fetch('ci.yml')
+    jobs = workflow.fetch('jobs')
+    assert_equal %w[build-test release-recovery test-shard-2 test-shard-3], jobs.keys.sort
+    assert_equal({ 'group' => 'ci-${{ github.ref }}', 'cancel-in-progress' => true }, workflow.fetch('concurrency'))
+    jobs.each_value do |job|
+      %w[needs if strategy continue-on-error concurrency].each { |key| refute job.key?(key), key }
+    end
+    all_steps = jobs.flat_map { |name, job| job.fetch('steps').map { |step| [name, step] } }
+    release = all_steps.select { |_, step| step.fetch('run', '').include?('script/release_self_test.py') }
+    assert_equal ['release-recovery'], release.map(&:first)
+    assert_equal 'python3 -B script/release_self_test.py', release.first.last.fetch('run').strip
+    %w[if continue-on-error].each { |key| refute release.first.last.key?(key) }
+    assert_equal ['Checkout', 'Select Xcode 26', 'Test release recovery'], jobs.fetch('release-recovery').fetch('steps').map { |step| step.fetch('name') }
+    %w[build-test test-shard-2 test-shard-3].each_with_index do |name, index|
+      steps = jobs.fetch(name).fetch('steps')
+      tests = steps.select { |step| step['name'] == 'Test' || step['id'] == 'tests' }
+      assert_equal 1, tests.length
+      step = tests.first
+      assert_equal 'Test', step.fetch('name')
+      assert_equal 'tests', step.fetch('id')
+      assert_equal "./script/test.sh --shard #{index + 1}/3", step.fetch('run').strip
+      %w[if continue-on-error].each { |key| refute step.key?(key) }
+    end
+    wrapper = all_steps.select { |_, step| step.fetch('run', '').include?('./script/test.sh --self-test') }
+    assert_equal ['build-test'], wrapper.map(&:first)
+    step = wrapper.first.last
+    assert_equal 'Test wrapper', step.fetch('name')
+    assert_equal './script/test.sh --self-test', step.fetch('run').strip
+    %w[if continue-on-error].each { |key| refute step.key?(key) }
+    steps = jobs.fetch('build-test').fetch('steps')
+    assert_operator steps.index(step), :<, steps.index { |entry| entry['id'] == 'tests' }
+    all_steps.each do |_, entry|
+      next unless entry.fetch('run', '').include?('./script/test.sh')
+      assert_match(%r{\A\./script/test\.sh (?:--self-test|--shard [123]/3)\z}, entry.fetch('run').strip)
+    end
+    ['Test public hygiene guard', 'Test workflow contracts', 'Test development build host selection',
+     'Compute replay range', 'Check public hygiene in pushed commits', 'Test wrapper', 'Test CLI contract', 'Headless smoke'].each do |name|
+      assert_equal ['build-test'], all_steps.select { |_, entry| entry['name'] == name }.map(&:first), name
+    end
   end
 
   def test_ci_hygiene_baseline_includes_stability_probe
@@ -713,24 +752,29 @@ class WorkflowTests < Minitest::Test
   end
 
   def test_ci_short_bound_fixtures_are_the_tight_boundary
-    baseline = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
-    observed = {}
-    original = method(:assert_ci_timeout_budget)
-    define_singleton_method(:assert_ci_timeout_budget) do |job|
-      job.fetch('steps').zip(baseline.fetch('steps')).each do |step, live|
-        if step.key?('timeout-minutes') && step['timeout-minutes'] != live['timeout-minutes']
-          observed[step.fetch('name')] = step.fetch('timeout-minutes')
+    @workflows.fetch('ci.yml').fetch('jobs').each_value do |baseline|
+      observed = {}
+      original = method(:assert_ci_timeout_budget)
+      define_singleton_method(:assert_ci_timeout_budget) do |job|
+        job.fetch('steps').zip(baseline.fetch('steps')).each do |step, live|
+          if step.key?('timeout-minutes') && step['timeout-minutes'] != live['timeout-minutes']
+            observed[step.fetch('name')] = step.fetch('timeout-minutes')
+          end
         end
+        original.call(job)
       end
-      original.call(job)
+      begin
+        assert_ci_job_budget_rejects_missing_short_and_unsummed_bounds(baseline)
+        baseline.fetch('steps').each do |step|
+          name = step.fetch('name')
+          worst = ci_worst_seconds(baseline).fetch(name)
+          next if worst.zero?
+          assert_equal((worst * 3 / 60.0).ceil - 1, observed.fetch(name), name + ': tight short-bound mutation')
+        end
+      ensure
+        singleton_class.send(:remove_method, :assert_ci_timeout_budget)
+      end
     end
-    assert_ci_budget_rejects_missing_short_and_unsummed_bounds
-    ci_worst_seconds(baseline).each do |name, worst|
-      next if worst.zero?
-      assert_equal((worst * 3 / 60.0).ceil - 1, observed.fetch(name), name + ': tight short-bound mutation')
-    end
-  ensure
-    singleton_class.send(:remove_method, :assert_ci_timeout_budget)
   end
 
   def test_explicit_read_only_permissions
@@ -786,24 +830,27 @@ class WorkflowTests < Minitest::Test
   # Workflow/recovery: worst of three serial wall-time samples, rounded up to milliseconds.
   # Measured 2026-10-05 on Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83).
   # CLI release suite 696.103 s (2026-10-13), workflow 8.951 s; ceil(2x) estimates 1393/18 s.
+  # Wrapper including shards, three serial local samples (2026-11-17):
+  # 45.347/44.299/47.171 s; ceil(2x worst) estimates 95 s.
   CI_LOCAL_WORST_SECONDS = {
-    'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731,
+    'Wrapper self-test' => 47.171, 'Hygiene added checks' => 0.731,
     'Workflow suite' => 8.951,
     'CLI contract' => 28.872,
     'Release recovery' => 696.103
   }.freeze
-  # The suite's runner time: run 39458867579 hit the old 45-minute bound at 2,713 s with 2,635 of
-  # 3,037 results in, so the whole run is estimated at ceil(2,713 x 3,037 / 2,635) s.
-  CI_TEST_RUNNER_SECONDS = 3127
+  # Share estimate: worst Test step 3515 s, less 354 s build, split three ways, plus build.
+  # ceil((3515 - 354) / 3 + 354) = 1408 s; each job builds independently.
+  CI_TEST_RUNNER_SECONDS = 1408
   CI_WORST_SECONDS = {
     'Checkout' => 2, 'Select Xcode 26' => 1, 'Install tools' => 3,
     'Generate Xcode project' => 1, 'Compute replay range' => 0,
     'Test public hygiene guard' => 156 + (CI_LOCAL_WORST_SECONDS.fetch('Hygiene added checks') * CI_RUNNER_FACTOR).ceil, 'Test workflow contracts' => [3, (CI_LOCAL_WORST_SECONDS.fetch('Workflow suite') * CI_RUNNER_FACTOR).ceil].max,
     'Test release recovery' => (CI_LOCAL_WORST_SECONDS.fetch('Release recovery') * CI_RUNNER_FACTOR).ceil, 'Test development build host selection' => 0,
-    'Test' => CI_TEST_RUNNER_SECONDS + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Test CLI contract' => (CI_LOCAL_WORST_SECONDS.fetch('CLI contract') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
+    'Test' => CI_TEST_RUNNER_SECONDS, 'Test wrapper' => (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Test CLI contract' => (CI_LOCAL_WORST_SECONDS.fetch('CLI contract') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
   }.freeze
 
   def ci_worst_seconds(job)
+    return CI_WORST_SECONDS unless job.fetch('steps').any? { |step| CI_PER_COMMIT_SECONDS.key?(step.fetch('name')) }
     limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
     assert_operator limit, :>, 0, 'CI: positive replay count limit'
     CI_WORST_SECONDS.merge(CI_PER_COMMIT_SECONDS.to_h do |name, seconds|
@@ -830,9 +877,13 @@ class WorkflowTests < Minitest::Test
 
   def assert_ci_budget_rejects_missing_short_and_unsummed_bounds
     assert_ci_replay_budget_requires_fixed_cost
-    assert_ci_test_baseline_includes_wrapper_self_test
     assert_ci_hygiene_baseline_includes_stability_probe
-    job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
+    @workflows.fetch('ci.yml').fetch('jobs').each_value do |job|
+      assert_ci_job_budget_rejects_missing_short_and_unsummed_bounds(job)
+    end
+  end
+
+  def assert_ci_job_budget_rejects_missing_short_and_unsummed_bounds(job)
     job.fetch('steps').each_with_index do |step, index|
       fixture = Marshal.load(Marshal.dump(job))
       fixture['steps'][index].delete('timeout-minutes')
@@ -855,6 +906,9 @@ class WorkflowTests < Minitest::Test
   end
 
   def test_ci_replay_budget_requires_fixed_cost
+    job = Marshal.load(Marshal.dump(@workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')))
+    job.fetch('env').delete('CI_LARGEST_PUSH')
+    assert_raises(KeyError) { ci_worst_seconds(job) }
     assert_ci_replay_budget_requires_fixed_cost
   end
 
@@ -874,24 +928,27 @@ class WorkflowTests < Minitest::Test
   end
 
   def test_ci_timeout_budget_preserves_failure_upload
-    job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
-    steps = job.fetch('steps')
-    test = steps.find { |step| step['id'] == 'tests' }
-    upload = steps.find { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
-    assert_ci_timeout_budget(job)
-    expanded = Marshal.load(Marshal.dump(job))
-    expanded.fetch('steps').find { |step| step.fetch('name') == 'Test release recovery' }['timeout-minutes'] += 1
-    expanded['timeout-minutes'] += 1
-    assert_ci_timeout_budget(expanded) # Extra step headroom is allowed; there is no job-cap limit.
-    assert_ci_replay_count_limit
-    # Runner StepsRunner.RunStepAsync maps a step timeout (not job cancellation) to Failed.
-    # Thus failure() is true and steps.tests.outcome is 'failure'; no success() implicit guard.
-    assert_equal "failure() && steps.tests.outcome == 'failure'", upload.fetch('if')
-    refute test.fetch('continue-on-error', false)
-    assert_operator steps.index(upload), :>, steps.index(test)
-    %w[DerivedData/FailedRuns/ DerivedData/TestRuns/ DerivedData/TestDiagnostics/].each do |path|
-      assert_includes upload.fetch('with').fetch('path').lines.map(&:strip), path
+    names = []
+    @workflows.fetch('ci.yml').fetch('jobs').each do |name, job|
+      steps = job.fetch('steps')
+      assert_ci_timeout_budget(job)
+      expanded = Marshal.load(Marshal.dump(job))
+      expanded.fetch('steps').last['timeout-minutes'] += 1
+      expanded['timeout-minutes'] += 1
+      assert_ci_timeout_budget(expanded)
+      next if name == 'release-recovery'
+      test = steps.find { |step| step['id'] == 'tests' }
+      uploads = steps.select { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
+      assert_equal 1, uploads.length
+      upload = uploads.first
+      assert_equal "failure() && steps.tests.outcome == 'failure'", upload.fetch('if')
+      refute test.fetch('continue-on-error', false)
+      assert_operator steps.index(upload), :>, steps.index(test)
+      assert_equal %w[DerivedData/FailedRuns/ DerivedData/TestRuns/ DerivedData/TestDiagnostics/], upload.fetch('with').fetch('path').lines.map(&:strip)
+      names << upload.fetch('with').fetch('name')
     end
+    assert_equal names.length, names.uniq.length
+    assert_ci_replay_count_limit
   end
 
   def test_ci_replay_count_limit

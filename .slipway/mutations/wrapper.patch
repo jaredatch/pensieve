@@ -1,0 +1,13 @@
+--- a/script/test.sh
++++ b/script/test.sh
+@@ -39,9 +39,7 @@
+     [ "$#" -eq 2 ] || { usage; exit 64; }
+     shard="$2"
+     if skips="$(python3 -B "$REPO/script/test_shards.py" "$REPO/.slipway/timings" "$shard")"; then
+-      while IFS= read -r name; do
+-        [ -z "$name" ] || FILTER_ARGS+=(-skip-testing "$name")
+-      done <<< "$skips"
++      FILTER_ARGS=()
+     else
+       status=$?
+       [ "$status" -ne 64 ] || usage

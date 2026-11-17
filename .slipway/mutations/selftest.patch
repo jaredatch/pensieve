@@ -1,0 +1,10 @@
+--- a/script/test.sh
++++ b/script/test.sh
+@@ -81,7 +81,6 @@
+   unset TEST_RUNNER_PENSIEVE_TEST_WINDOW_SAMPLE_DIR
+   python3 -B "$(dirname "$0")/test_lifecycle_self_test.py" || fail "test lifecycle regressions"
+   python3 -B "$(dirname "$0")/test_display_self_test.py" || fail "display lifecycle regressions"
+-  python3 -B "$(dirname "$0")/test_shards_self_test.py" || fail "shard regressions"
+   echo "test.sh --self-test: OK"
+   exit 0
+ fi
