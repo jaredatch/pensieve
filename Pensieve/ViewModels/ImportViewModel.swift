@@ -144,7 +144,8 @@ final class ImportViewModel {
         guard let manifestService else { return }
         do {
             try manifestService.write(StoreIngestState.snapshotForPublication(
-                using: manifestService, context: context, root: manifestRoot), toRoot: manifestRoot)
+                using: manifestService, context: context, root: manifestRoot,
+                guardingPendingRenames: true), toRoot: manifestRoot)
         } catch {
             self.error = "Imported, but updating the sync manifest failed: \(error.localizedDescription)"
         }
@@ -307,6 +308,7 @@ private extension ImportViewModel {
         }
         do {
             return try takenSlugs(context).union(skillStore.prepareImport())
+                .union(StoreIngestState.shared(for: context.container).pendingSkillRenames.map(\.old))
         } catch let refusal as CommandLinkError {
             self.error = refusal.localizedDescription
             return nil

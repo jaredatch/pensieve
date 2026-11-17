@@ -1,0 +1,10 @@
+--- a/Pensieve/ViewModels/ImportViewModel.swift
++++ b/Pensieve/ViewModels/ImportViewModel.swift
+@@ -308,7 +308,6 @@
+         }
+         do {
+             return try takenSlugs(context).union(skillStore.prepareImport())
+-                .union(StoreIngestState.shared(for: context.container).pendingSkillRenames.map(\.old))
+         } catch let refusal as CommandLinkError {
+             self.error = refusal.localizedDescription
+             return nil

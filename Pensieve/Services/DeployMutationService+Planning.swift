@@ -46,6 +46,7 @@ extension DeployMutationService {
                     throw DeployIntentModelError.syncInProgress
                 }
                 defer { lock.release() }
+                try refusePendingRenames(skills: pairs.map(\.skill), context: context)
                 guard !StoreIngestState.shared(for: context.container).needsRebuild else {
                     throw DeployIntentModelError.ingestPending
                 }

@@ -1,0 +1,11 @@
+--- a/Pensieve/ViewModels/ImportViewModel.swift
++++ b/Pensieve/ViewModels/ImportViewModel.swift
+@@ -145,7 +145,7 @@
+         do {
+             try manifestService.write(StoreIngestState.snapshotForPublication(
+                 using: manifestService, context: context, root: manifestRoot,
+-                guardingPendingRenames: true), toRoot: manifestRoot)
++                guardingPendingRenames: false), toRoot: manifestRoot)
+         } catch {
+             self.error = "Imported, but updating the sync manifest failed: \(error.localizedDescription)"
+         }

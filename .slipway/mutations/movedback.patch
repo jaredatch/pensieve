@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/DeployMutationService+Mutations.swift
++++ b/Pensieve/Services/DeployMutationService+Mutations.swift
+@@ -215,7 +215,7 @@
+     }
+ 
+     func refusePendingRenames(skills: [Skill], context: ModelContext) throws {
+-        let waiting = Set(StoreIngestState.shared(for: context.container).pendingSkillRenames.map(\.new))
++        let waiting = Set<String>()
+         if let skill = skills.first(where: { waiting.contains($0.directoryName) }) {
+             throw DeployIntentModelError.renamePending(skill.name)
+         }

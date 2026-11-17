@@ -1,0 +1,11 @@
+--- a/Pensieve/Services/DeployMutationService.swift
++++ b/Pensieve/Services/DeployMutationService.swift
+@@ -75,7 +75,7 @@
+             writeManifest: { context in
+                 try manifestService.write(try StoreIngestState.snapshotForPublication(
+                     using: manifestService, context: context, root: root,
+-                    guardingPendingRenames: true), toRoot: root)
++                    guardingPendingRenames: false), toRoot: root)
+             },
+             notifier: notifier,
+             reconcile: reconcile,

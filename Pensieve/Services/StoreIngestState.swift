@@ -290,6 +290,18 @@ final class StoreIngestState {
     }
 }
 
+extension StoreIngestState {
+    /// Writers reserve the rollback name and refuse deployment edits to the moved row until settlement.
+    var pendingSkillRenames: [(old: String, new: String)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return edits.compactMap {
+            guard case .renameSkill(let old, let new, _) = $0.change else { return nil }
+            return (old, new)
+        }
+    }
+}
+
 /// Carries the rebuild's actual cause through every writer, including non-sync operations.
 struct StoreIngestFailure: LocalizedError {
     let cause: String
