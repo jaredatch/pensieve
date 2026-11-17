@@ -20,6 +20,16 @@ extension SkillLibraryViewModel {
         })
     }
 
+    /// Publish from the held skill's owned source, never from the peer under its folder name.
+    func publishRenamedHold(_ skill: Skill, from slug: String, context: ModelContext) throws {
+        guard let saves = manifestSaves,
+              let hold = StoreIngestState.shared(for: context.container).heldRename(slug) else { return }
+        let current = try ManifestService().snapshot(from: context).skills.first { $0.slug == skill.directoryName }
+        guard let current else { return }
+        saves.releaseRenameHold(slug, context: context, durable: try? saves.manifest.read(fromRoot: saves.root))
+        regenerateManifest(hold.record.change(publishing: current, as: skill.directoryName), context: context)
+    }
+
     /// Sheet admission includes row reservations and every disk entry, without following links.
     func renameValidationMessage(_ name: String, skill: Skill, context: ModelContext) -> String? {
         if let problem = Self.renameNameProblem(name) { return problem }

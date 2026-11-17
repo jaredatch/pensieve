@@ -5,6 +5,16 @@ import Foundation
 struct RefusedCreateRecords {
     static let currentSchemaVersion = 2
 
+    struct Rename: Codable, Equatable {
+        let old: String
+        let new: String
+        let createdAt: String
+
+        func owns(_ record: SkillOverlay) -> Bool {
+            RefusedCreateRecords.writtenDate(record.createdAt) == createdAt
+        }
+    }
+
     struct Held: Codable {
         let slug: String
         let createdAt: String
@@ -38,6 +48,7 @@ struct RefusedCreateRecords {
         let slug: String
         let machineID: String?
         var createdAt: String?
+        var requiresCreation: Bool?
     }
 
     struct Record: Codable {
@@ -46,6 +57,7 @@ struct RefusedCreateRecords {
         var preserved: [String] = []
         var retirements: [Retirement] = []
         var deletions: [Deletion] = []
+        var renames: [Rename] = []
     }
 
     enum ReadError: Error {
@@ -71,10 +83,13 @@ struct RefusedCreateRecords {
         guard let record = try? decoder.decode(Record.self, from: data),
               (1...Self.currentSchemaVersion).contains(record.schemaVersion),
               record.held.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) && ManifestService.parseDate($0.createdAt) != nil }),
+              record.renames.allSatisfy({ SkillStore.isPathSafeSlug($0.old) && SkillStore.isPathSafeSlug($0.new)
+                  && ManifestService.parseDate($0.createdAt) != nil }),
               record.preserved.allSatisfy(SkillStore.isPathSafeSlug),
               record.retirements.allSatisfy({ SkillStore.isPathSafeSlug($0.slug) }),
               record.deletions.allSatisfy({ SkillStore.isPathSafeSlug($0.slug)
-                  && ($0.createdAt.map { ManifestService.parseDate($0) != nil } ?? true) }) else { throw ReadError.unreadable }
+                  && ($0.createdAt.map { ManifestService.parseDate($0) != nil } ?? true)
+                  && ($0.requiresCreation != true || $0.createdAt != nil) }) else { throw ReadError.unreadable }
         return record
     }
 
@@ -82,7 +97,7 @@ struct RefusedCreateRecords {
         // A failed restore must never make the next edit downgrade a future file.
         do { _ = try read() } catch ReadError.unreadable { /* Replace corrupt bytes from current state. */ }
         if record.held.isEmpty && record.preserved.isEmpty && record.retirements.isEmpty
-            && record.deletions.isEmpty && !exists { return }
+            && record.deletions.isEmpty && record.renames.isEmpty && !exists { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         var current = record
@@ -112,7 +127,7 @@ private extension RefusedCreateRecords.Held {
 
 private extension RefusedCreateRecords.Record {
     enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version", held, preserved, retirements, deletions
+        case schemaVersion = "schema_version", held, preserved, retirements, deletions, renames
     }
 }
 
@@ -128,6 +143,7 @@ extension RefusedCreateRecords.Record {
         preserved = try values.decode([String].self, forKey: .preserved)
         retirements = try values.decodeIfPresent([RefusedCreateRecords.Retirement].self, forKey: .retirements) ?? []
         deletions = try values.decodeIfPresent([RefusedCreateRecords.Deletion].self, forKey: .deletions) ?? []
+        renames = try values.decodeIfPresent([RefusedCreateRecords.Rename].self, forKey: .renames) ?? []
     }
 }
 
@@ -142,7 +158,10 @@ private extension RefusedCreateRecords.RetirementIntent {
 }
 
 private extension RefusedCreateRecords.Deletion {
-    enum CodingKeys: String, CodingKey { case slug, machineID = "machine_id", createdAt = "created_at" }
+    enum CodingKeys: String, CodingKey {
+        case slug, machineID = "machine_id", createdAt = "created_at"
+        case requiresCreation = "requires_creation"
+    }
 }
 
 extension RefusedCreateRecords.Deletion {
@@ -151,5 +170,10 @@ extension RefusedCreateRecords.Deletion {
         slug = try values.decode(String.self, forKey: .slug)
         machineID = try values.decodeIfPresent(String.self, forKey: .machineID)
         createdAt = values.contains(.createdAt) ? try values.decode(String.self, forKey: .createdAt) : nil
+        requiresCreation = try values.decodeIfPresent(Bool.self, forKey: .requiresCreation)
     }
+}
+
+private extension RefusedCreateRecords.Rename {
+    enum CodingKeys: String, CodingKey { case old, new, createdAt = "created_at" }
 }

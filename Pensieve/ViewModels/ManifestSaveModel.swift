@@ -24,7 +24,7 @@ final class ManifestSaveModel {
     @ObservationIgnored var preservedPeerSlugs: Set<String> = []
     let manifest: ManifestSnapshotting
     let files: FileServiceProtocol
-    private let waitSeconds: TimeInterval
+    let waitSeconds: TimeInterval
     let log: (String) -> Void
     @ObservationIgnored var items: [Item] = []
     var showsDamageAlert = false
@@ -47,6 +47,7 @@ final class ManifestSaveModel {
     @ObservationIgnored private var categoryMessages: [OrderedCategoryNotice] = []
     @ObservationIgnored var stagedRefusals: [StagedRefusal] = []
     @ObservationIgnored var worker: Task<Void, Never>?
+    @ObservationIgnored var heldRenames: [(record: RefusedCreateRecords.Rename, context: ModelContext)] = []
     @ObservationIgnored var renameRefusalReports: [() -> Void] = []
 
     struct Item {
@@ -113,11 +114,12 @@ final class ManifestSaveModel {
         var savedAny = false
         pausedForRepair = false
         while !items.isEmpty {
-            let outcome = await save(items[0])
+            let item = items[0]
+            let outcome = await save(item)
             if case .retry = outcome { continue }
             if case .finished(let saved) = outcome { savedAny = saved || savedAny }
             if pausedForRepair { break }
-            items.removeFirst()
+            items.removeAll { $0.id == item.id }
             pendingCount = items.count
             isWaiting = false
         }
@@ -141,7 +143,8 @@ final class ManifestSaveModel {
         var report: (() -> Void)?
         var needsDamageRefresh = false
         do {
-            heldLock = try await takeLock()
+            heldLock = try await takeItemLock(item)
+            guard heldLock != nil else { return .finished(false) }
             let read = try await readCurrentManifest()
             discardReappearedQueuedDeletions(durable: read.disk)
             item = items.first { $0.id == item.id } ?? item
@@ -152,11 +155,13 @@ final class ManifestSaveModel {
             if case ManifestError.damaged = error {
                 outcome = .paused
                 needsDamageRefresh = true
-            } else if case ManifestSaveError.renameTaken = error {
+            } else if isRefusedRename(item, durable: disk, error: error) {
                 let failure = restoreRefusedRename(item, durable: disk, error: error)
                 report = { self.renameRefusalReports.append { item.report(failure) } }
             } else if item.categoryEdit != nil {
                 stageCategoryRefusal(item, durable: disk, error: error)
+            } else if retainHeldRenameEdit(item) {
+                report = { item.report(ManifestSaveError.createCollision(self.heldEditSlug(item.change) ?? "")) }
             } else {
                 let acknowledged = retainUnsaved(item, durable: disk)
                 if case ManifestSaveError.createCollision = error, let disk {
@@ -258,27 +263,11 @@ final class ManifestSaveModel {
             edit.cache(local: locals[key])
         }
         guard let durable else { return }
+        refreshRenameHolds(durable: durable)
         refused = refused.filter { $0.acknowledge(durable: durable) }
         persistRefusedCreates()
     }
 
-    @MainActor
-    func takeLock() async throws -> SyncLock {
-        let path = lockPath
-        // Start the clock before the first attempt, including native-worker admission time.
-        let deadline = ContinuousClock.now.advanced(by: .seconds(waitSeconds))
-        let notice = Task { @MainActor in
-            try? await Task.sleep(until: deadline, clock: .continuous)
-            if !Task.isCancelled { isWaiting = true }
-        }
-        defer { notice.cancel() }
-        return try await BlockingWork.run { try SyncLock.waitForSave(at: path) }
-    }
-
-    static func logMessage(_ message: String) {
-        Logger(subsystem: "com.jaredatch.pensieve", category: "manifest")
-            .warning("\(message, privacy: .public)")
-    }
 }
 
 extension ManifestSaveModel {
@@ -390,5 +379,12 @@ extension ManifestSaveModel {
             }
             try context.save()
         } catch { log("Couldn't preserve skill retirement during category undo: " + error.localizedDescription) }
+    }
+}
+
+extension ManifestSaveModel {
+    static func logMessage(_ message: String) {
+        Logger(subsystem: "com.jaredatch.pensieve", category: "manifest")
+            .warning("\(message, privacy: .public)")
     }
 }

@@ -8,16 +8,16 @@ final class SkillRenameTakeoverFixture {
     private let directory = TestStoreDirectory(named: "rename-takeover")
     let files = FileService()
     let manifest: ManifestService
-    let context: ModelContext
-    let skill = Skill(name: "Alpha", tags: ["own"], scope: .project, directoryName: "alpha")
-    let other = Skill(name: "Other", directoryName: "other")
-    let ownCategory = Pensieve.Category(name: "Own")
-    let goneCategory = Pensieve.Category(name: "Gone")
-    let projects: [Project]
+    var context: ModelContext
+    var skill = Skill(name: "Alpha", tags: ["own"], scope: .project, directoryName: "alpha")
+    var other = Skill(name: "Other", directoryName: "other")
+    var ownCategory = Pensieve.Category(name: "Own")
+    var goneCategory = Pensieve.Category(name: "Gone")
+    var projects: [Project]
     let store: SkillStore
-    let saves: ManifestSaveModel
-    let library: SkillLibraryViewModel
-    let tagLibrary: SkillLibraryViewModel
+    var saves: ManifestSaveModel
+    var library: SkillLibraryViewModel
+    var tagLibrary: SkillLibraryViewModel
     let platform: PlatformViewModel
     let local: String
     let peer = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
@@ -26,15 +26,26 @@ final class SkillRenameTakeoverFixture {
     var root: String { directory.storeRoot }
     var lockPath: String { directory.root + "/support/sync.lock" }
 
+    let persistent: Bool
+    var runtime: AppRuntime?
+    var guardedRecordBytes: [String: Data] = [:]
+    var recordPath: String { directory.root + "/support/refused-creates.json" }
+    var storeURL: URL { URL(fileURLWithPath: directory.root + "/library.store") }
+
     init(record: Bool = true, leftovers: Bool = true,
          queueManifest: ManifestSnapshotting? = nil, distinctRecords: Bool = false,
+         persistent: Bool = false, faults: RenameHoldFileFaults? = nil,
          writeLockAttempted: @escaping (Bool) -> Void = { _ in }) throws {
+        self.persistent = persistent
         manifest = ManifestService(writeLockAttempted: writeLockAttempted)
         let parent = directory.root
         let root = directory.storeRoot, support = parent + "/support"
-        context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        context = ModelContext(try AppRuntime.makeContainer(configuration: persistent
+            ? ModelConfiguration(url: URL(fileURLWithPath: parent + "/library.store"))
+            : ModelConfiguration(isStoredInMemoryOnly: true)))
         context.autosaveEnabled = false
-        store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
+        store = SkillStore(fileService: FaultyFileService(wrapped: files, renameHoldFaults: faults),
+            baseDir: root + "/skills", storeRoot: root)
         local = try MachineIdentity(fileService: files, appSupportDir: support).identifier()
         skill.createdAt = Date(timeIntervalSince1970: 1_700_000_000.123)
         if distinctRecords {
@@ -45,15 +56,7 @@ final class SkillRenameTakeoverFixture {
             context.insert(row)
             _ = try store.createSkill(name: row.name, description: "Job", body: "Own body.")
         }
-        let modelContext = context, fileService = files
-        projects = try ["own", "gone"].map { name in
-            let row = Project(name: name, path: parent + "/" + name)
-            row.identityKey = "github.com/owner/" + name
-            row.identityKind = "git"
-            try fileService.createDirectory(at: row.path)
-            modelContext.insert(row)
-            return row
-        }
+        projects = try Self.makeProjects(parent: parent, context: context, files: files)
         try Self.seedAssignments(context: context, categories: [ownCategory, goneCategory],
             machines: [local, peer], leftovers: leftovers)
         var snapshot = try manifest.snapshot(from: context)
@@ -62,7 +65,8 @@ final class SkillRenameTakeoverFixture {
         if record { snapshot.skills.append(leftover) }
         try manifest.write(snapshot, toRoot: root)
         saves = ManifestSaveModel(manifest: queueManifest ?? manifest, root: root, lockPath: support + "/sync.lock",
-            waitSeconds: 0.01, files: files)
+            refusedCreatesPath: persistent ? parent + "/support/refused-creates.json" : nil,
+            waitSeconds: 0.01, files: FaultyFileService(wrapped: files, renameHoldFaults: faults))
         library = SkillLibraryViewModel(skillStore: store, fileService: files,
             fileWatchService: RecordingWatcher(), manifestRoot: root,
             notifier: SyncStateNotifier.suppressed, manifestSaves: saves)
@@ -79,6 +83,17 @@ final class SkillRenameTakeoverFixture {
             deployStateStore: DeployStateStore(fileService: files, appSupportDir: support), skillsDirectory: store.baseDir)
         let batch = CategoryReconciler(platformVM: platform).reconcileDeployments(context: context)
         XCTAssertFalse(batch.hasFailures)
+    }
+
+    private static func makeProjects(parent: String, context: ModelContext, files: FileService) throws -> [Project] {
+        try ["own", "gone"].map { name in
+            let row = Project(name: name, path: parent + "/" + name)
+            row.identityKey = "github.com/owner/" + name
+            row.identityKind = "git"
+            try files.createDirectory(at: row.path)
+            context.insert(row)
+            return row
+        }
     }
 
     private static func peerRecord(from own: SkillOverlay, distinctRecords: Bool) -> SkillOverlay {
@@ -110,7 +125,11 @@ final class SkillRenameTakeoverFixture {
         try context.save()
     }
 
-    func cleanup() { try? files.deleteDirectory(at: directory.root) }
+    func cleanup() {
+        runtime?.commandServer?.stop()
+        library.stopWatching()
+        try? files.deleteDirectory(at: directory.root)
+    }
 
     func rename(persist: (ModelContext) throws -> Void = { try $0.save() }) -> Bool {
         SkillRenameFlow.rename(skill: skill, to: "Zulu", library: library, platformVM: platform,

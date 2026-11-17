@@ -34,7 +34,9 @@ enum SkillRenameFlow {
             }
             if succeeded {
                 if operation.oldSlug != operation.newSlug {
-                    if operation.refusedCreate {
+                    if library.manifestSaves?.hasHeldRename(operation.oldSlug, context: context) == true {
+                        try library.publishRenamedHold(skill, from: operation.oldSlug, context: context)
+                    } else if operation.refusedCreate {
                         library.publishRenamedCreate(skill, from: operation.oldSlug,
                             machineID: operation.localMachine, context: context)
                     } else {
@@ -168,7 +170,8 @@ private final class SkillRenameOperation {
     }
 
     private func captureRenameDetails() throws {
-        guard oldSlug != newSlug, !refusedCreate, let saves = library.manifestSaves else { return }
+        guard oldSlug != newSlug, !refusedCreate, let saves = library.manifestSaves,
+              !saves.hasHeldRename(oldSlug, context: context) else { return }
         let snapshot = try saves.manifest.snapshot(from: context)
         originalAssignments = snapshot
         let own = snapshot.skills.first { $0.slug == oldSlug }

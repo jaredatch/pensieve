@@ -58,9 +58,10 @@ extension ManifestSaveModel {
             $0.presentation.context === item.presentation.context && !$0.wasCancelled
         }.map(\.id)) : []
         let context = item.presentation.context
+        let heldDeletion = try applyHeldRenameDeletion(item, to: &saved)
         let collisionDelete = try collisionDeletion(for: item)
         if disk != nil, !item.wasHealed { try item.change.validate(in: saved) }
-        if disk != nil, !item.wasHealed, collisionDelete == nil, !item.change.apply(to: &saved) {
+        if disk != nil, !item.wasHealed, !heldDeletion, collisionDelete == nil, !item.change.apply(to: &saved) {
             if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
                 throw ManifestSaveError.unsavedTarget
             }
@@ -87,6 +88,7 @@ extension ManifestSaveModel {
         if headChanged { ingest.invalidate() }
         finishPublishedItems(item, healedItems: healedItems, ingest: ingest)
         if let collisionDelete { discardRefusedCreate(collisionDelete, context: context) }
+        finishHeldRenamePublication(item, durable: saved)
         acknowledgePublication(item, durable: saved)
         persistRefusedCreates(excludingPublished: item.id)
         return headChanged ? .headChanged : .saved(saved)
@@ -135,6 +137,8 @@ extension ManifestSaveModel {
         switch item.change {
         case .deleteSkill(let slug) where hasCollision(slug, context: item.presentation.context): return slug
         case .skillMetadata(let slug, _, _) where hasCollision(slug, context: item.presentation.context):
+            throw ManifestSaveError.createCollision(slug)
+        case .categorySkill(_, let slug, _) where hasHeldRename(slug, context: item.presentation.context):
             throw ManifestSaveError.createCollision(slug)
         default: return nil
         }
@@ -261,6 +265,10 @@ extension ManifestSaveModel {
     private func acceptRebuild(_ item: Item, prepared: PreparedStoreRebuild, snapshot: ManifestSnapshot,
                                durable: ManifestSnapshot, includingHeadEdit: Bool) throws -> HeadEditVerdict {
         var displayed = snapshot
+        let state = StoreIngestState.shared(for: item.presentation.context.container)
+        state.projectHeldRenames(onto: &displayed, durable: durable) {
+            try? manifest.snapshot(from: item.presentation.context)
+        }
         let creates = knownCreates
         // The scan can synthesize an overlay from a folder before its create is on disk.
         // Only the actual durable manifest can say the move has already been published.
@@ -325,5 +333,34 @@ enum ManifestSaveError: LocalizedError {
             "Another Mac already has a skill named “\(slug)”. Rename this skill to keep its tags and scope; "
                 + "they aren't saved until you do."
         }
+    }
+}
+
+extension ManifestSaveModel {
+    @MainActor
+    func takeLock() async throws -> SyncLock {
+        let path = lockPath
+        // Start the clock before the first attempt, including native-worker admission time.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(waitSeconds))
+        let notice = Task { @MainActor in
+            try? await Task.sleep(until: deadline, clock: .continuous)
+            if !Task.isCancelled { isWaiting = true }
+        }
+        defer { notice.cancel() }
+        return try await BlockingWork.run { try SyncLock.waitForSave(at: path) }
+    }
+
+}
+
+extension ManifestSaveModel {
+    @MainActor
+    func takeItemLock(_ item: Item) async throws -> SyncLock? {
+        let held = try await takeLock()
+        guard !Task.isCancelled else {
+            held.release()
+            StoreIngestState.shared(for: item.presentation.context.container).finish(item.id)
+            return nil
+        }
+        return held
     }
 }

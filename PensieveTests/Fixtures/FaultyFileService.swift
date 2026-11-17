@@ -12,6 +12,7 @@ struct FaultyFileService: FileServiceProtocol {
     var failListPath: String?
     var failDeletePath: String?
     var deletionFailures: DeletionFailures?
+    var renameHoldFaults: RenameHoldFileFaults?
 
     func readFile(at path: String) throws -> String {
         if path == failReadPath { throw Boom() }
@@ -21,7 +22,14 @@ struct FaultyFileService: FileServiceProtocol {
         if path == failReadPath { throw Boom() }
         return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
     }
-    func writeFile(at path: String, content: String) throws { try wrapped.writeFile(at: path, content: content) }
+    func writeFile(at path: String, content: String) throws {
+        try renameHoldFaults?.beforeWrite?(path)
+        try wrapped.writeFile(at: path, content: content)
+    }
+    func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {
+        try renameHoldFaults?.beforeWrite?(path)
+        try wrapped.writeStoreFile(at: path, content: content, root: root, control: control)
+    }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
@@ -49,4 +57,10 @@ struct FaultyFileService: FileServiceProtocol {
     func realPath(at path: String) -> String { wrapped.realPath(at: path) }
     func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func storeTemporaryParent(root: String) throws -> String { try wrapped.storeTemporaryParent(root: root) }
+}
+
+/// Injects failures at real file writes or exclusive directory publication; every successful
+/// operation uses FileService, and reads and admission are never simulated.
+final class RenameHoldFileFaults {
+    var beforeWrite: ((String) throws -> Void)?
 }
