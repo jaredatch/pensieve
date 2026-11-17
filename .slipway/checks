@@ -1,0 +1,15 @@
+paths = script/release_recovery.sh script/release_state.py script/release_self_test.py docs/ARCHITECTURE.md
+risk = script/release_recovery.sh script/release_state.py
+behavior = none
+check.leftover = run bash -c 'python3 -B script/release_self_test.py ReleaseSequenceTests.test_rerun_deletes_every_leftover_draft_then_publishes && python3 -B script/release_self_test.py'
+check.replace = run python3 -B script/release_self_test.py ReleaseSequenceTests.test_leftover_draft_is_deleted_before_assets_are_replaced
+check.foreign = run python3 -B script/release_self_test.py ReleaseSequenceTests.test_draft_that_is_not_ours_stops_before_any_changes
+check.unreadable = run python3 -B script/release_self_test.py ReleaseSequenceTests.test_unreadable_draft_list_stops_before_any_changes
+check.changed = run python3 -B script/release_self_test.py ReleaseSequenceTests.test_draft_changed_since_preflight_is_not_deleted
+check.retry = run python3 -B script/release_self_test.py ReleaseSequenceTests.test_rerun_completes_after_a_failed_draft_deletion
+mutation.leftover = .slipway/mutations/leftover.patch
+mutation.replace = .slipway/mutations/replace.patch
+mutation.foreign = .slipway/mutations/foreign.patch
+mutation.unreadable = .slipway/mutations/unreadable.patch
+mutation.changed = .slipway/mutations/changed.patch
+mutation.retry = .slipway/mutations/retry.patch
