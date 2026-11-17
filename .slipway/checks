@@ -1,0 +1,9 @@
+paths = .github/workflows/ci.yml script/test.sh script/test_shards.py script/test_shards_self_test.py script/workflow_self_test.rb docs/TESTING.md
+behavior = none
+check.shards = run python3 -B script/test_shards_self_test.py ShardPlanTests
+check.wrapper = run python3 -B script/test_shards_self_test.py WrapperShardTests
+check.selftest = run python3 -B script/test_shards_self_test.py SelfTestWiringTests
+check.workflow = run bash -c 'grep -q "^  release-recovery:" .github/workflows/ci.yml && ruby script/workflow_self_test.rb'
+mutation.shards = .slipway/mutations/shards.patch
+mutation.wrapper = .slipway/mutations/wrapper.patch
+mutation.selftest = .slipway/mutations/selftest.patch
