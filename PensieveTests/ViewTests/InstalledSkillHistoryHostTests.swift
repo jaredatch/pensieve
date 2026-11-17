@@ -66,6 +66,50 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         XCTAssertEqual(owner.currentSkillID, second.id)
     }
 
+    func testSwitchingFromAPagedSkillAsksForItsHistoryOnce() async throws {
+        let first = installedHistorySkill(name: "First")
+        let second = installedHistorySkill(name: "Second", commit: String(repeating: "c", count: 40))
+        let firstHead = try XCTUnwrap(first.installedOrigin?.installedCommit)
+        let secondHead = try XCTUnwrap(second.installedOrigin?.installedCommit)
+        let intents = HostedHistoryIntentProbe()
+        let owner = historyOwner(
+            read: { origin, _, windowCount in
+                Self.result(head: origin.installedCommit, windowCount: windowCount)
+            },
+            onRequest: intents.record
+        )
+        let model = InstalledHistoryHostModel(skill: first)
+        let session = InstalledSkillHistorySession()
+        let fixture = makeFixture(model: model, history: owner, session: session)
+        defer { fixture.window.close() }
+
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: firstHead, windowCount: 1)),
+                                    timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                                    failureMessage: "The first mounted skill must finish its initial history read")
+        session.requestedWindow = 4
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: firstHead, windowCount: 4)),
+                                    failureMessage: "Paging must settle the wider history window before switching")
+        let requestsBeforeSwitch = intents.values.count
+
+        model.skill = second
+
+        let expected = UpstreamHistoryLoadState.loaded(Self.result(head: secondHead, windowCount: 1))
+        await waitForSettledHistory(owner: owner, expected: expected,
+                                    failureMessage: "The second skill must finish loading its window-one history",
+                                    ready: { owner.currentSkillID == second.id })
+        // Start observing only after the new skill owns a settled result. Keep the
+        // pre-switch count so requests received during loading count as well.
+        await waitForSettledHistory(owner: owner, expected: expected,
+                                    timeout: .seconds(TestWait.timeoutSeconds),
+                                    observeFor: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                    failureMessage: "The switch must keep the second skill's settled window-one history",
+                                    ready: { owner.currentSkillID == second.id })
+        XCTAssertEqual(intents.values.count - requestsBeforeSwitch, 1,
+                       "Switching from a paged skill must ask for the new skill's history exactly once")
+        XCTAssertEqual(owner.currentSkillID, second.id)
+        XCTAssertEqual(owner.state, expected)
+    }
+
     private func makeWindow(
         model: InstalledHistoryHostModel,
         history: UpstreamHistoryViewModel,
