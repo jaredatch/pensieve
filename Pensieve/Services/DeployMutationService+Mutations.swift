@@ -209,8 +209,16 @@ extension DeployMutationService {
             throw DeployIntentModelError.syncInProgress
         }
         defer { lock.release() }
+        try refusePendingRenames(skills: skills, context: context)
         try prepareSelection(skills: skills, context: context)
         return try operation()
+    }
+
+    func refusePendingRenames(skills: [Skill], context: ModelContext) throws {
+        let waiting = Set(StoreIngestState.shared(for: context.container).pendingSkillRenames.map(\.new))
+        if let skill = skills.first(where: { waiting.contains($0.directoryName) }) {
+            throw DeployIntentModelError.renamePending(skill.name)
+        }
     }
 
     func directSet(

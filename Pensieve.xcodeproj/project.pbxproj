@@ -138,6 +138,7 @@
 		1F53C1399EE914A95355D60A /* DeployPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64C29DE54B3ED2AD1D3A46F4 /* DeployPaths.swift */; };
 		1F7C574F9999820281EB1BFF /* SkillSerializer+Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE5A0A1E1811FF4BB52DEFF /* SkillSerializer+Skill.swift */; };
 		1F88CF63DC6DA4C32427BA06 /* CLILibraryHandler+Install.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76ACC83A3076E07CF3198F17 /* CLILibraryHandler+Install.swift */; };
+		1F90077AB840854E848A8D3A /* SkillRenameTakeoverFixture+WaitingWrites.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01622BFE19A782A9CAE1AB39 /* SkillRenameTakeoverFixture+WaitingWrites.swift */; };
 		204F61012ACABA244C206E6E /* FrontmatterRewriteFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B92D87A42D70E89E91F04933 /* FrontmatterRewriteFixture.swift */; };
 		20BA0B8509B22F5A1AF8CAF9 /* DeployIntentModelRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC66B78E109213031A75BEC8 /* DeployIntentModelRuntimeTests.swift */; };
 		20BA81CC21643BBEFB93B4ED /* SyncConflictByteFixture+Folders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47770BAC5F2C5DE7EC749761 /* SyncConflictByteFixture+Folders.swift */; };
@@ -1314,6 +1315,7 @@
 		FAEC04B14375FB2176C3C989 /* ViewChangesFileHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13E836C9D575CD092268A18 /* ViewChangesFileHeader.swift */; };
 		FAFFACA73C0BF7F324C8CD89 /* PreProjectIntent.store in Resources */ = {isa = PBXBuildFile; fileRef = 37DCE4C679974A0650F3E6FC /* PreProjectIntent.store */; };
 		FB32EB4B8CC75861140BBB51 /* pensieve in Resources */ = {isa = PBXBuildFile; fileRef = 4E09038F62E99D70E826779E /* pensieve */; };
+		FB3A889CE17995A333C95F34 /* SkillRenameWaitingWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A54FA1FEBA21463FE922137 /* SkillRenameWaitingWriteTests.swift */; };
 		FBB3B8D483E1482A75782F44 /* VendorTemporaryDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281D38DC513CA0C26676E423 /* VendorTemporaryDirectory.swift */; };
 		FBF2FB0607F8A22698C063BD /* ManifestSaveTests+Refresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D67D84D08D9D8D00ABFDEB7 /* ManifestSaveTests+Refresh.swift */; };
 		FC0846A1F2F109D17EBC2ED9 /* TokenCounterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05EBB77387B8F038939B931F /* TokenCounterTests.swift */; };
@@ -1414,6 +1416,7 @@
 		010E25952E892120A36F2423 /* SkillLibraryViewModel+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Lifecycle.swift"; sourceTree = "<group>"; };
 		011B142C69879C13A13C669F /* ConflictResolutionJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictResolutionJob.swift; sourceTree = "<group>"; };
 		012653CF0ABD2A787A7B03B7 /* PensieveSkillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PensieveSkillTests.swift; sourceTree = "<group>"; };
+		01622BFE19A782A9CAE1AB39 /* SkillRenameTakeoverFixture+WaitingWrites.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillRenameTakeoverFixture+WaitingWrites.swift"; sourceTree = "<group>"; };
 		01A0836EE840B36D2F08A73C /* SafeSkillFileGUISinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeSkillFileGUISinkTests.swift; sourceTree = "<group>"; };
 		01BAABC39D6B8A80E6C05457 /* ImportDoneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportDoneView.swift; sourceTree = "<group>"; };
 		01CFDD258E411599E861AAE5 /* SkillInstallViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallViewModel.swift; sourceTree = "<group>"; };
@@ -1606,6 +1609,7 @@
 		2922322CAC6936D869763A61 /* UnsavedChangesNavigationGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsavedChangesNavigationGuard.swift; sourceTree = "<group>"; };
 		29312F8083275BA278B82942 /* PreviewImageTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewImageTestSupport.swift; sourceTree = "<group>"; };
 		29894E52843F7F2EADA75425 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileService.swift; sourceTree = "<group>"; };
+		2A54FA1FEBA21463FE922137 /* SkillRenameWaitingWriteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillRenameWaitingWriteTests.swift; sourceTree = "<group>"; };
 		2A830F2F3C9158ADC9C32C42 /* SyncLogCommandTests+Copy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SyncLogCommandTests+Copy.swift"; sourceTree = "<group>"; };
 		2AB5E4749F6A5EFA842F2F3E /* DetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailView.swift; sourceTree = "<group>"; };
 		2B00504E1EDA89F3FF04FA73 /* DetailTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailTabTests.swift; sourceTree = "<group>"; };
@@ -3293,6 +3297,7 @@
 				9DAA20C2DAED07EA805DF3A7 /* SkillRenameQueuedRefusalTests.swift */,
 				50EAF41B3F40B14C3F2A04A7 /* SkillRenameRefreshTests.swift */,
 				9BEA2C1B5A3766D37BDDC6DD /* SkillRenameTakenTests.swift */,
+				2A54FA1FEBA21463FE922137 /* SkillRenameWaitingWriteTests.swift */,
 				D7B2735BA74A50AC1983C447 /* SkillRenameWindowReadFailureTests.swift */,
 				5888EBDA7D999F7EEE92C453 /* StoreUnreadableFenceTests.swift */,
 				616FE867DF1EBB063D4E87DE /* StoreUnreadableFenceTests+Damage.swift */,
@@ -3679,6 +3684,7 @@
 				0593B325C00698DF4E323AFD /* sample-skill-with-frontmatter.md */,
 				22F670AB56C69AC36B75DF15 /* SkillRenameTakeoverFixture.swift */,
 				A0F2497E9B39A4AA953D2B2D /* SkillRenameTakeoverFixture+Hold.swift */,
+				01622BFE19A782A9CAE1AB39 /* SkillRenameTakeoverFixture+WaitingWrites.swift */,
 				264A6D7029690D0B7F6D953A /* SocketTestDirectory.swift */,
 				18887373FFD8DDCC572877A4 /* StoreDirectorySwapFileService.swift */,
 				A19BBAA62E1D5A4441C1AFA0 /* StoreWriteCrashProbe.swift */,
@@ -4894,7 +4900,9 @@
 				35CB1828560B33C6A28B361C /* SkillRenameRefreshTests.swift in Sources */,
 				C93C6B609736A276E2755566 /* SkillRenameTakenTests.swift in Sources */,
 				A3418162B1D9E06CB2BCA6B6 /* SkillRenameTakeoverFixture+Hold.swift in Sources */,
+				1F90077AB840854E848A8D3A /* SkillRenameTakeoverFixture+WaitingWrites.swift in Sources */,
 				411D843EFAEA6A8A16D1AD0D /* SkillRenameTakeoverFixture.swift in Sources */,
+				FB3A889CE17995A333C95F34 /* SkillRenameWaitingWriteTests.swift in Sources */,
 				E49BF617D1DE5D56773AAE72 /* SkillRenameWindowReadFailureTests.swift in Sources */,
 				95638E60B7BAC825B82EF815 /* SkillRewriteRegressionTests.swift in Sources */,
 				D256655D23E2D9FCA07AD120 /* SkillSaveRevisionTests.swift in Sources */,

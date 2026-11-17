@@ -130,7 +130,8 @@ extension ManifestSaveModel {
         guard let hold = state.heldRename(slug) else { return }
         state.preservePeer(slug)
         preservedPeerSlugs.insert(slug)
-        if durable?.skills.contains(where: { $0.slug == hold.record.old && !hold.record.owns($0) }) == true {
+        // A failed probe is no evidence that the old name is free of a peer's record.
+        if durable == nil || durable?.skills.contains(where: { $0.slug == hold.record.old && !hold.record.owns($0) }) == true {
             state.preservePeer(hold.record.old)
             preservedPeerSlugs.insert(hold.record.old)
         }

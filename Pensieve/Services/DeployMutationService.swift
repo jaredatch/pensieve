@@ -74,7 +74,8 @@ struct DeployIntentDependencies {
             manifestService: manifestService,
             writeManifest: { context in
                 try manifestService.write(try StoreIngestState.snapshotForPublication(
-                    using: manifestService, context: context, root: root), toRoot: root)
+                    using: manifestService, context: context, root: root,
+                    guardingPendingRenames: true), toRoot: root)
             },
             notifier: notifier,
             reconcile: reconcile,
@@ -96,6 +97,7 @@ enum DeployIntentModelError: LocalizedError {
     case syncInProgress
     case selectionChanged
     case ingestPending
+    case renamePending(String)
 
     var errorDescription: String? {
         switch self {
@@ -109,6 +111,8 @@ enum DeployIntentModelError: LocalizedError {
             "Deployment couldn't update this Mac's library. Try deploying again."
         case .selectionChanged:
             "A selected skill was removed while the library updated. Choose the skills again."
+        case let .renamePending(name):
+            "Pensieve is still saving the rename of “\(name)”. Try again in a moment."
         }
     }
 }
