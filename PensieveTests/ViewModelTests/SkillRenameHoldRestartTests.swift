@@ -38,9 +38,9 @@ final class SkillRenameHoldRestartTests: XCTestCase {
     func testLeavingAHoldNeverTouchesAnotherSkillUnderTheOldName() async throws {
         for restart in [false, true] {
             for oldExists in [false, true] {
-                for exit in ["rename", "finish", "delete"] {
+                for exit in ["rename", "rename-unreadable", "finish", "delete"] {
                     let h = try SkillRenameTakeoverFixture(record: false, leftovers: false,
-                        distinctRecords: true, persistent: true)
+                        queueManifest: RecordingSaveManifest(), distinctRecords: true, persistent: true)
                     defer { h.cleanup() }
                     _ = try await h.beginHold()
                     var disk = try h.manifest.read(fromRoot: h.root)
@@ -56,22 +56,12 @@ final class SkillRenameHoldRestartTests: XCTestCase {
                     if restart { try await h.reopen() }
                     await h.editHeld()
                     let peer = disk.skills.first { $0.slug == "zulu" }
-                    if exit == "rename" {
-                        XCTAssertTrue(h.renameHeld(), h.library.error ?? "")
-                    } else if exit == "delete" {
-                        XCTAssertTrue(h.deleteHeld(), h.library.deletionNotice?.message ?? "")
-                    } else {
-                        disk.skills.removeAll { $0.slug == "zulu" }
-                        // The peer moves to another name; it still must survive publication.
-                        var moved = try XCTUnwrap(peer); moved.slug = "peer-away"
-                        disk.skills.append(moved)
-                        _ = try h.store.createSkill(name: "Peer Away", description: "Peer", body: "Peer body")
-                        try h.manifest.write(disk, toRoot: h.root)
-                    }
+                    try leaveHold(h, by: exit, disk: &disk)
                     await h.saves.waitUntilIdle()
                     try h.syncHeld()
                     let after = try h.manifest.read(fromRoot: h.root)
-                    XCTAssertEqual(after.skills.first { $0.slug == "alpha" }, disk.skills.first { $0.slug == "alpha" })
+                    XCTAssertEqual(after.skills.first { $0.slug == "alpha" }, disk.skills.first { $0.slug == "alpha" },
+                        "restart=\(restart), oldExists=\(oldExists), exit=\(exit)")
                     try assertOldNameUnchanged(h, before: disk, after: after, bytes: oldBytes)
                     var expectedPeer = try XCTUnwrap(peer)
                     expectedPeer.slug = exit == "finish" ? "peer-away" : "zulu"
@@ -79,13 +69,40 @@ final class SkillRenameHoldRestartTests: XCTestCase {
                     if exit == "delete" {
                         XCTAssertFalse(after.skills.contains { ManifestService.sameCreation($0, h.own) })
                     } else {
-                        try h.assertPublished(exit == "rename" ? "free" : "zulu", carriesOld: false)
+                        try h.assertPublished(exit.hasPrefix("rename") ? "free" : "zulu", carriesOld: false)
                     }
                     if exit == "finish", oldExists {
                         try await assertFinishedHoldSurvivesAnotherReopen(h, before: disk)
                     }
                 }
             }
+        }
+    }
+
+    private func leaveHold(_ h: SkillRenameTakeoverFixture, by exit: String,
+                           disk: inout ManifestSnapshot) throws {
+        if exit.hasPrefix("rename") {
+            let reader = try XCTUnwrap(h.saves.manifest as? RecordingSaveManifest)
+            var probeFailed = false
+            if exit == "rename-unreadable" {
+                reader.afterRead = {
+                    guard Thread.isMainThread, !probeFailed else { return }
+                    probeFailed = true
+                    throw CocoaError(.fileReadNoPermission)
+                }
+            }
+            XCTAssertTrue(h.renameHeld(), h.library.error ?? "")
+            if exit == "rename-unreadable" { XCTAssertTrue(probeFailed) }
+        } else if exit == "delete" {
+            XCTAssertTrue(h.deleteHeld(), h.library.deletionNotice?.message ?? "")
+        } else {
+            var moved = try XCTUnwrap(disk.skills.first { $0.slug == "zulu" })
+            disk.skills.removeAll { $0.slug == "zulu" }
+            // The peer moves to another name; it still must survive publication.
+            moved.slug = "peer-away"
+            disk.skills.append(moved)
+            _ = try h.store.createSkill(name: "Peer Away", description: "Peer", body: "Peer body")
+            try h.manifest.write(disk, toRoot: h.root)
         }
     }
 
