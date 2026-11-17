@@ -1,0 +1,10 @@
+--- a/script/release_recovery.sh
++++ b/script/release_recovery.sh
+@@ -260,7 +260,6 @@
+   state_tool compare-drafts "$DRAFT_PREFLIGHT" "$current" || return 1
+   read_release_state
+   [ "$RELEASE_STATE" = "$expected" ] || { echo "release: release changed since preflight; stopping" >&2; return 1; }
+-  cleanup_leftover_drafts "$current" || return 1
+   if [ "$RELEASE_STATE" = absent ]; then
+     build_release_args "$CHANGELOG_PATH"
+     run_gh "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"

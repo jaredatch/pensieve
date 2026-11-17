@@ -1,0 +1,18 @@
+--- a/script/release_recovery.sh
++++ b/script/release_recovery.sh
+@@ -137,7 +137,6 @@
+     run_gh api --include "repos/$PUBLIC_REPO/releases/$release_id" > "$response" || {
+       echo "release: draft $release_id read before delete failed" >&2; return 1;
+     }
+-    state_tool draft-by-id "$response" "$VERSION" "$DRAFT_NOTES" "$release_id" || return 1
+     # GitHub has no conditional draft-only DELETE. A person can still publish or
+     # edit this draft in the one-request gap between this read and the delete.
+     run_gh api -X DELETE "repos/$PUBLIC_REPO/releases/$release_id" || {
+@@ -257,7 +256,6 @@
+   local expected="$RELEASE_STATE" current="$DIST_DIR/drafts-current.json"
+   verify_tag_target
+   read_draft_snapshot "$current" || return 1
+-  state_tool compare-drafts "$DRAFT_PREFLIGHT" "$current" || return 1
+   read_release_state
+   [ "$RELEASE_STATE" = "$expected" ] || { echo "release: release changed since preflight; stopping" >&2; return 1; }
+   cleanup_leftover_drafts "$current" || return 1

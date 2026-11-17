@@ -1,0 +1,10 @@
+--- a/script/release_state.py
++++ b/script/release_state.py
+@@ -318,7 +318,6 @@
+     require(value.get("tag_name") == "v" + version, f"{label} has another tag")
+     require(type(value.get("id")) is int and value["id"] > 0, f"{label} has invalid ID")
+     require(value.get("prerelease") is bool(publication_channel(version)), f"{label} has wrong prerelease flag")
+-    require(value.get("name") == f"Pensieve {version}", f"{label} has edited title")
+     require(isinstance(value.get("body"), str) and normalized_notes(value["body"]) == normalized_notes(notes),
+             f"{label} has edited notes")
+     assets = value.get("assets")

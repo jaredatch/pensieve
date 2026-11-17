@@ -112,6 +112,43 @@ if cmd == "gh":
         s.setdefault("credential_calls", []).append([path, os.environ.get("GH_TOKEN", "")])
         save()
         method = args[args.index("-X") + 1] if "-X" in args else "GET"
+        if path.split("?")[0] == "repos/jaredatch/pensieve/releases":
+            from urllib.parse import parse_qs, urlsplit
+            page = int(parse_qs(urlsplit(path).query).get("page", ["1"])[0])
+            if page == 1:
+                s["draft_list_reads"] = s.get("draft_list_reads", 0) + 1
+                if s["draft_list_reads"] == 2 and "draft_race" in s:
+                    race = s.pop("draft_race")
+                    if race == "new": s["other_releases"].append(dict(s["other_releases"][0], id=12))
+                    elif race == "published": s["other_releases"][0]["draft"] = False
+                    elif race == "asset": s["other_releases"][0]["assets"].append({"name": "handmade.txt"})
+                    elif race == "notes": s["other_releases"][0]["body"] = "Human notes."
+            save()
+            fault = s.get("draft_list_fault")
+            if fault == "failed" or (fault == "missing" and page == 2):
+                print('HTTP/2.0 503 Failed\n\n{}'); fail("draft list unavailable")
+            if fault == "malformed":
+                print('HTTP/2.0 200 OK\n\n{"bad":'); sys.exit(0)
+            releases = s.get("other_releases", []) + ([s["release"]] if s["release"] else [])
+            size = s.get("draft_page_size", 100)
+            entries = releases[(page - 1) * size:page * size]
+            print('HTTP/2.0 200 OK')
+            if page * size < len(releases):
+                print('Link: <https://api.github.com/repos/jaredatch/pensieve/releases?per_page=100&page=' + str(page + 1) + '>; rel="next"')
+            print('\n' + json.dumps(entries)); sys.exit(0)
+        if "/releases/" in path and path.rsplit("/", 1)[-1].isdigit():
+            release_id = int(path.rsplit("/", 1)[-1])
+            entry = next((r for r in s.get("other_releases", []) if r["id"] == release_id), None)
+            if entry is None:
+                print('HTTP/2.0 404 Not Found\n\n{}'); fail("release missing")
+            if method == "GET":
+                if s.pop("publish_before_delete", False): entry["draft"] = False
+                save(); print('HTTP/2.0 200 OK\n\n' + json.dumps(entry)); sys.exit(0)
+            if method == "DELETE":
+                if s.get("fail_delete_once") == release_id:
+                    del s["fail_delete_once"]; fail("draft delete failed")
+                s["other_releases"].remove(entry)
+                s["writes"].append("delete:" + str(release_id)); save(); sys.exit(0)
         kind = "appcast" if "appcast.xml" in path else "cask" if "pensieve.rb" in path else "release" if "/releases/tags/" in path else "tag" if "/git/ref/" in path else "repo"
         if method == "PUT":
             fields = dict(a.split("=", 1) for i, a in enumerate(args) if i and args[i-1] == "-f")
@@ -140,7 +177,11 @@ if cmd == "gh":
             if s["release_reads"] > 1 and "recheck_release" in s:
                 s["release"] = s["recheck_release"]
             save()
-        if kind == "repo": print(s.get("branch", "master")); sys.exit(0)
+        if kind == "repo":
+            if path != "repos/jaredatch/pensieve":
+                s["unexpected_call"] = [cmd] + args
+                fail("unexpected stub call " + cmd + " " + repr(args))
+            print(s.get("branch", "master")); sys.exit(0)
         if kind == "tag": value = {"object": {"type": "commit", "sha": s.get("target", "a" * 40)}}
         elif kind == "release": value = s["release"]
         else:
@@ -150,6 +191,7 @@ if cmd == "gh":
             print('HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}'); sys.exit(1)
         print('HTTP/2.0 200 OK\n\n' + json.dumps(value)); sys.exit(0)
     if args[:2] == ["release", "create"]:
+        if s.pop("fail_create_once", False): fail("release create failed")
         if s["release"] is not None: fail("second release creation")
         s["release"] = dict(s["expected_release"], assets=[])
         for argument in args:
@@ -275,6 +317,7 @@ elif cmd == "generate":
 elif cmd == "verify":
     if pathlib.Path(args[0]).read_text() != "fresh built DMG" or args[1:3] != ["15", s["signature"]]: fail("EdDSA or length mismatch")
     sys.exit(0)
+s["unexpected_call"] = [cmd] + args
 fail("unexpected stub call " + cmd + " " + repr(args))
 '''
 
@@ -1217,6 +1260,140 @@ sys.exit(result.returncode)
         self.assertEqual(signed[-3:], ["/fixture/Pensieve.app/Contents/Helpers/pensieve",
             "/fixture/Pensieve.app/Contents/MacOS/pensieve-daemon", "/fixture/Pensieve.app"])
         self.assertEqual(len(signed), 8)
+
+    def leftover_draft(self, release_id=10, **changes):
+        version = self.state["version"]
+        return dict(dict(id=release_id, tag_name="v" + version, draft=True,
+                         prerelease=PUBLICATION_CASES[version][1], name="Pensieve " + version,
+                         body="Release fixture.\n", assets=[]), **changes)
+
+    def assert_draft_stop(self, output, name, builds=0):
+        self.assertIn(name, output)
+        self.assertNotIn("unexpected stub call", output)
+        self.assertNotIn("unexpected_call", self.state)
+        self.assertGreater(self.state.get("draft_list_reads", 0), 0)
+        self.assertEqual(self.state["builds"], builds)
+        self.assertEqual(self.state["writes"], [])
+
+    def assert_release_assets_and_appcast(self):
+        version = self.state["version"]
+        self.assertFalse(self.state["release"]["draft"])
+        self.assertEqual(self.state["release"]["tag_name"], "v" + version)
+        self.assertEqual(self.state["release"]["prerelease"], PUBLICATION_CASES[version][1])
+        self.assertEqual({a["name"] for a in self.state["release"]["assets"]},
+                         {f"Pensieve-{version}.dmg", f"Pensieve-{version}-dSYMs.zip"})
+        self.assertEqual(self.state["asset"], DMG.decode())
+        self.assertEqual(self.state["symbols_asset"], base64.b64encode(
+            (self.root / f"build/dist/Pensieve-{version}-dSYMs.zip").read_bytes()).decode())
+        items = ET.fromstring(self.state["appcast"]).findall("./channel/item")
+        item = next(i for i in items if i.findtext(STATE_TOOL.SPARKLE + "shortVersionString") == version)
+        self.assertEqual(item.find("enclosure").get("url"),
+                         f"{DOWNLOAD_PREFIX}/v{version}/Pensieve-{version}.dmg")
+
+    def test_rerun_deletes_every_leftover_draft_then_publishes(self):
+        original = json.loads(json.dumps(self.state))
+        for version in (VERSION, "1.0.0-beta.1"):
+            with self.subTest(version=version):
+                self.state = json.loads(json.dumps(original))
+                self.set_version(version)
+                keep = [self.leftover_draft(20, draft=False, name="Published human notes"),
+                        self.leftover_draft(21, tag_name="v9.0.0", body="Other draft")]
+                partial = dict(self.state["expected_release"]["assets"][0], state="starter", size=0)
+                self.state.update(other_releases=[self.leftover_draft(10, assets=[partial]),
+                    *keep, self.leftover_draft(11, body="Release fixture.  \r\n\t\r\n")], draft_page_size=2)
+                self.run_release()
+                self.assertEqual(self.state["other_releases"], keep)
+                self.assertEqual(self.state["writes"], ["delete:10", "delete:11", "create", "appcast"])
+                self.assert_release_assets_and_appcast()
+                self.assertNotIn("unexpected_call", self.state)
+                # Live recovery and the separate cask credential must never inspect drafts.
+                reads = self.state["draft_list_reads"]
+                self.state["other_releases"].append(self.leftover_draft(22, body="Human notes"))
+                self.run_release()
+                self.run_release(cask_only=True)
+                self.assertEqual(self.state["draft_list_reads"], reads)
+                self.assertEqual(self.state["other_releases"][-1]["id"], 22)
+
+    def test_leftover_draft_is_deleted_before_assets_are_replaced(self):
+        self.state.update(release=self.state["expected_release"],
+                          other_releases=[self.leftover_draft()])
+        release_id = self.state["release"]["id"]
+        self.run_release()
+        self.assertEqual(self.state["other_releases"], [])
+        self.assertEqual(self.state["writes"], ["delete:10", "replace", "appcast"])
+        self.assertEqual(self.state["release"]["id"], release_id)
+        self.assert_release_assets_and_appcast()
+
+    def test_draft_that_is_not_ours_stops_before_any_changes(self):
+        original = json.loads(json.dumps(self.state))
+        asset = self.state["expected_release"]["assets"][0]
+        for change in ({"assets": [{"name": "handmade.txt"}]}, {"name": "Human title"},
+                       {"body": "Human notes"}, {"prerelease": True}, {"assets": [asset, asset]},
+                       {"id": 0}, {"id": True}, {"assets": None}, {"body": None}):
+            with self.subTest(change=change):
+                self.state = json.loads(json.dumps(original))
+                draft = self.leftover_draft(**change)
+                self.state["other_releases"] = [draft]
+                remote = json.loads(json.dumps(draft))
+                output = self.run_release(expected=1)
+                self.assert_draft_stop(output, "draft " + str(draft["id"]))
+                self.assertEqual(self.state["other_releases"], [remote])
+                self.assertIsNone(self.state["release"])
+                self.assertEqual(self.state["appcast"], original["appcast"])
+                self.assertEqual(self.state["cask"], original["cask"])
+
+    def test_unreadable_draft_list_stops_before_any_changes(self):
+        original = json.loads(json.dumps(self.state))
+        for fault in ("failed", "malformed", "missing"):
+            with self.subTest(fault=fault):
+                self.state = json.loads(json.dumps(original))
+                drafts = [self.leftover_draft(10), self.leftover_draft(11)]
+                self.state.update(other_releases=drafts, draft_list_fault=fault, draft_page_size=1)
+                output = self.run_release(expected=1)
+                self.assert_draft_stop(output, "draft list")
+                self.assertEqual(self.state["other_releases"], drafts)
+                self.assertIsNone(self.state["release"])
+                self.assertEqual(self.state["appcast"], original["appcast"])
+                self.assertEqual(self.state["cask"], original["cask"])
+
+    def test_draft_changed_since_preflight_is_not_deleted(self):
+        original = json.loads(json.dumps(self.state))
+        for race in ("published", "asset", "notes", "new", "before-delete"):
+            with self.subTest(race=race):
+                self.state = json.loads(json.dumps(original))
+                self.state["other_releases"] = [self.leftover_draft()]
+                if race == "before-delete": self.state["publish_before_delete"] = True
+                else: self.state["draft_race"] = race
+                output = self.run_release(expected=1)
+                self.assert_draft_stop(output, "draft " + ("12" if race == "new" else "10"), builds=1)
+                self.assertEqual(len(self.state["other_releases"]), 2 if race == "new" else 1)
+                self.assertIsNone(self.state["release"])
+                self.assertEqual(self.state["appcast"], original["appcast"])
+                self.assertEqual(self.state["cask"], original["cask"])
+                self.assertTrue((self.root / "build/dist/Pensieve-1.0.0.dmg").exists())
+                self.assertTrue((self.root / "build/dist/appcast-input/appcast.xml").exists())
+
+    def test_rerun_completes_after_a_failed_draft_deletion(self):
+        original = json.loads(json.dumps(self.state))
+        for failure in ("delete", "create"):
+            with self.subTest(failure=failure):
+                self.state = json.loads(json.dumps(original))
+                self.state["other_releases"] = [self.leftover_draft(10), self.leftover_draft(11)]
+                if failure == "delete": self.state["fail_delete_once"] = 11
+                else: self.state["fail_create_once"] = True
+                output = self.run_release(expected=1)
+                self.assertNotIn("unexpected stub call", output)
+                self.assertIn("draft 11" if failure == "delete" else "create failed", output)
+                self.assertEqual([d["id"] for d in self.state["other_releases"]], [11] if failure == "delete" else [])
+                self.assertEqual(self.state["writes"], ["delete:10"] if failure == "delete" else ["delete:10", "delete:11"])
+                self.assertIsNone(self.state["release"])
+                self.assertEqual(self.state["appcast"], original["appcast"])
+                self.assertEqual(self.state["cask"], original["cask"])
+                self.run_release()
+                self.assertEqual(self.state["other_releases"], [])
+                self.assertEqual(self.state["writes"], ["delete:10", "delete:11", "create", "appcast"])
+                self.assert_release_assets_and_appcast()
+                self.assertEqual(self.state["builds"], 2)
 
     def test_fresh_release_and_second_run(self):
         self.run_release(); self.run_release(cask_only=True)

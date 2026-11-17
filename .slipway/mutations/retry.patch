@@ -1,0 +1,11 @@
+--- a/script/release_recovery.sh
++++ b/script/release_recovery.sh
+@@ -141,7 +141,7 @@
+     # GitHub has no conditional draft-only DELETE. A person can still publish or
+     # edit this draft in the one-request gap between this read and the delete.
+     run_gh api -X DELETE "repos/$PUBLIC_REPO/releases/$release_id" || {
+-      echo "release: draft $release_id delete failed; rerun to finish cleanup" >&2; return 1;
++      echo "release: draft $release_id delete failed; rerun to finish cleanup" >&2; return 0;
+     }
+   done <<< "$ids"
+ }

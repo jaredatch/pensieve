@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from urllib.parse import parse_qs, urlsplit
 
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?"
@@ -276,6 +277,89 @@ def release_state(value, version, require_uploaded=False):
     return json.dumps(action, sort_keys=True)
 
 
+def draft_page(path, page, repo, output):
+    """Follow only the next page of this repository's release list, failing closed."""
+    headers, body = re.split(rb"\r?\n\r?\n", Path(path).read_bytes(), maxsplit=1)
+    require(re.match(rb"HTTP/\S+ 200\b", headers), "draft list has unexpected HTTP response")
+    entries = json.loads(body)
+    require(isinstance(entries, list) and len(entries) <= 100, "draft list page is not a release list")
+    next_page = None
+    for line in headers.decode("ascii").splitlines()[1:]:
+        if not line.lower().startswith("link:"):
+            continue
+        for link in line.split(":", 1)[1].split(","):
+            match = re.fullmatch(r'\s*<([^>]+)>;\s*rel="([^" ]+)"\s*', link)
+            require(match, "draft list has malformed pagination")
+            if match[2] != "next":
+                continue
+            require(next_page is None, "draft list has duplicate next page")
+            url = urlsplit(match[1])
+            query = parse_qs(url.query)
+            require(url.scheme == "https" and url.netloc == "api.github.com"
+                    and url.path == f"/repos/{repo}/releases" and not url.fragment,
+                    "draft list has unexpected next page URL")
+            require(query == {"per_page": ["100"], "page": [str(page + 1)]},
+                    "draft list has missing or unexpected next page")
+            next_page = page + 1
+    collected = json.loads(Path(output).read_text())
+    collected.extend(entries)
+    Path(output).write_text(json.dumps(collected))
+    # Also read beyond a full terminal page: unknown never becomes absent.
+    return next_page or (page + 1 if len(entries) == 100 else "absent")
+
+
+def normalized_notes(text):
+    return "\n".join(line.rstrip() for line in text.splitlines()).rstrip()
+
+
+def owned_draft(value, version, notes):
+    label = f"draft {value.get('id', 'unknown')}"
+    require(value.get("draft") is True, f"{label} is no longer a draft")
+    require(value.get("tag_name") == "v" + version, f"{label} has another tag")
+    require(type(value.get("id")) is int and value["id"] > 0, f"{label} has invalid ID")
+    require(value.get("prerelease") is bool(publication_channel(version)), f"{label} has wrong prerelease flag")
+    require(value.get("name") == f"Pensieve {version}", f"{label} has edited title")
+    require(isinstance(value.get("body"), str) and normalized_notes(value["body"]) == normalized_notes(notes),
+            f"{label} has edited notes")
+    assets = value.get("assets")
+    require(isinstance(assets, list), f"{label} has invalid assets")
+    seen = set()
+    for asset in assets:
+        require(isinstance(asset, dict), f"{label} has invalid asset")
+        name = asset.get("name")
+        require(isinstance(name, str) and name in (f"Pensieve-{version}.dmg", f"Pensieve-{version}-dSYMs.zip"),
+                f"{label} has foreign asset")
+        require(name not in seen, f"{label} has duplicate asset name")
+        seen.add(name)
+    # Keep all fields so a concurrent edit also invalidates the preflight snapshot.
+    return dict(value, body=normalized_notes(value["body"]), assets=sorted(assets, key=lambda a: a["name"]))
+
+
+def draft_snapshot(path, version, notes_path):
+    entries = json.loads(Path(path).read_text())
+    require(isinstance(entries, list), "draft list is not a list")
+    result, seen = [], set()
+    notes = Path(notes_path).read_text()
+    for value in entries:
+        require(isinstance(value, dict) and isinstance(value.get("tag_name"), str)
+                and type(value.get("draft")) is bool, "draft list has malformed release entry")
+        if value["tag_name"] != "v" + version or not value["draft"]:
+            continue
+        draft = owned_draft(value, version, notes)
+        require(draft["id"] not in seen, f"draft {draft['id']} appears twice in draft list")
+        seen.add(draft["id"])
+        result.append(draft)
+    return sorted(result, key=lambda draft: draft["id"])
+
+
+def compare_drafts(before, after):
+    expected, current = ({draft["id"]: draft for draft in json.loads(Path(path).read_text())}
+                         for path in (before, after))
+    for release_id in sorted(expected.keys() | current.keys()):
+        require(expected.get(release_id) == current.get(release_id),
+                f"draft {release_id} changed since preflight; stopping")
+
+
 def main(args):
     mode = args[0]
     if mode == "log-text":
@@ -288,6 +372,17 @@ def main(args):
         print(contents_sha(args[1]))
     elif mode == "release":
         print(release_state(response_json(args[1]), args[2], args[3] == "live"))
+    elif mode == "draft-page":
+        print(draft_page(args[1], int(args[2]), args[3], args[4]))
+    elif mode == "drafts":
+        print(json.dumps(draft_snapshot(*args[1:]), sort_keys=True))
+    elif mode == "compare-drafts":
+        compare_drafts(*args[1:])
+    elif mode == "draft-ids":
+        print(*(draft["id"] for draft in json.loads(Path(args[1]).read_text())), sep="\n")
+    elif mode == "draft-by-id":
+        draft = owned_draft(response_json(args[1]), args[2], Path(args[3]).read_text())
+        require(draft["id"] == int(args[4]), f"draft {args[4]} read returned another ID")
     elif mode == "release-symbols":
         print(json.loads(args[1])["symbols"])
     elif mode == "tag":

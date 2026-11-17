@@ -1,0 +1,11 @@
+--- a/script/release_recovery.sh
++++ b/script/release_recovery.sh
+@@ -118,7 +118,7 @@
+   printf '[]\n' > "$output.pages" || return 1
+   while :; do
+     run_gh api --include "repos/$PUBLIC_REPO/releases?per_page=100&page=$page" > "$response" || {
+-      echo "release: draft list read failed on page $page" >&2; return 1;
++      printf '[]\n' > "$output"; return 0;
+     }
+     next="$(state_tool draft-page "$response" "$page" "$PUBLIC_REPO" "$output.pages")" || {
+       echo "release: draft list is unreadable on page $page" >&2; return 1;

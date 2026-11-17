@@ -8,6 +8,8 @@ CASK_SHA=""
 CASK_VERSION=""
 CASK_DIGEST=""
 CASK_PREFLIGHT=0
+DRAFT_PREFLIGHT=""
+DRAFT_NOTES=""
 
 state_tool() { python3 "$REPO/script/release_state.py" "$@"; }
 
@@ -109,6 +111,41 @@ read_release_state() {
   fi
 }
 
+# Drafts are not visible through the published by-tag endpoint. Read every page
+# explicitly so a failed or malformed later page cannot look like absence.
+read_draft_snapshot() {
+  local output="$1" response="$DIST_DIR/draft-response.txt" page=1 next
+  printf '[]\n' > "$output.pages" || return 1
+  while :; do
+    run_gh api --include "repos/$PUBLIC_REPO/releases?per_page=100&page=$page" > "$response" || {
+      echo "release: draft list read failed on page $page" >&2; return 1;
+    }
+    next="$(state_tool draft-page "$response" "$page" "$PUBLIC_REPO" "$output.pages")" || {
+      echo "release: draft list is unreadable on page $page" >&2; return 1;
+    }
+    [ "$next" != absent ] || break
+    page="$next"
+  done
+  state_tool drafts "$output.pages" "$VERSION" "$DRAFT_NOTES" > "$output" || return 1
+}
+
+cleanup_leftover_drafts() {
+  local current="$1" response="$DIST_DIR/draft-by-id.txt" ids release_id
+  ids="$(state_tool draft-ids "$current")" || return 1
+  while IFS= read -r release_id; do
+    [ -n "$release_id" ] || continue
+    run_gh api --include "repos/$PUBLIC_REPO/releases/$release_id" > "$response" || {
+      echo "release: draft $release_id read before delete failed" >&2; return 1;
+    }
+    state_tool draft-by-id "$response" "$VERSION" "$DRAFT_NOTES" "$release_id" || return 1
+    # GitHub has no conditional draft-only DELETE. A person can still publish or
+    # edit this draft in the one-request gap between this read and the delete.
+    run_gh api -X DELETE "repos/$PUBLIC_REPO/releases/$release_id" || {
+      echo "release: draft $release_id delete failed; rerun to finish cleanup" >&2; return 1;
+    }
+  done <<< "$ids"
+}
+
 verify_tag_target() {
   local response="$DIST_DIR/tag-response.txt" target kind sha depth=0
   local endpoint="repos/$PUBLIC_REPO/git/ref/tags/v$VERSION"
@@ -163,6 +200,12 @@ publication_preflight() {
   fi
   read_release_state
   verify_tag_target
+  if [ "$APPCAST_ITEM" = absent ]; then
+    DRAFT_NOTES="$DIST_DIR/draft-notes.txt"
+    notes_for "$VERSION" "$CHANGELOG_PATH" > "$DRAFT_NOTES" || return 1
+    DRAFT_PREFLIGHT="$DIST_DIR/drafts-preflight.json"
+    read_draft_snapshot "$DRAFT_PREFLIGHT" || return 1
+  fi
   cask_preflight
   if [ "$APPCAST_ITEM" != absent ] && [ "$RELEASE_STATE" = absent ]; then
     echo "release: appcast item exists but GitHub release/DMG is missing" >&2; return 1
@@ -211,10 +254,13 @@ recover_live_release() (
 )
 
 publish_release_asset() {
-  local expected="$RELEASE_STATE"
+  local expected="$RELEASE_STATE" current="$DIST_DIR/drafts-current.json"
   verify_tag_target
+  read_draft_snapshot "$current" || return 1
+  state_tool compare-drafts "$DRAFT_PREFLIGHT" "$current" || return 1
   read_release_state
   [ "$RELEASE_STATE" = "$expected" ] || { echo "release: release changed since preflight; stopping" >&2; return 1; }
+  cleanup_leftover_drafts "$current" || return 1
   if [ "$RELEASE_STATE" = absent ]; then
     build_release_args "$CHANGELOG_PATH"
     run_gh "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"
