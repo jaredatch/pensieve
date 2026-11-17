@@ -226,10 +226,15 @@ extension SkillPreviewFrontmatterTests {
     private func assertRows(_ rows: [(String, String)], nested: [String: [String]],
                             in host: NSView) async throws -> CGFloat {
         var previousY = CGFloat.infinity
-        var valueX: CGFloat?
+        let scale = try XCTUnwrap(host.window).backingScaleFactor
+        // Two independently snapped text edges can differ from the padding by up to one pixel.
+        let alignmentAccuracy = 1 / scale
+        let firstPlainRow = try XCTUnwrap(rows.first { nested[$0.0] == nil })
+        let valueX = try await text(firstPlainRow.1, in: host).accessibilityFrame().minX
         for (index, entry) in rows.enumerated() {
             let (key, value) = entry
             let keyFrame = try await text(key, in: host).accessibilityFrame()
+            let rawValueFrame: CGRect
             let valueFrame: CGRect
             if let values = nested[key] {
                 let bottom = index + 1 < rows.count
@@ -243,16 +248,19 @@ extension SkillPreviewFrontmatterTests {
                 }
                 XCTAssertFalse(ownCells.contains { ($0.accessibilityValue() as? String) == value })
                 let first = try XCTUnwrap(ownCells.first { ($0.accessibilityValue() as? String) == values.first })
-                valueFrame = first.accessibilityFrame().offsetBy(dx: -DesignTokens.markdownTableCellHorizontal, dy: 0)
+                rawValueFrame = first.accessibilityFrame()
+                valueFrame = rawValueFrame.offsetBy(dx: -DesignTokens.markdownTableCellHorizontal, dy: 0)
             } else {
                 let element = try await text(value, in: host)
-                valueFrame = element.accessibilityFrame()
+                rawValueFrame = element.accessibilityFrame()
+                valueFrame = rawValueFrame
                 XCTAssertEqual(element.accessibilityValue() as? String, value, "Values end at their last text line")
             }
             XCTAssertLessThan(keyFrame.maxY, previousY, "Rows must follow file order")
             XCTAssertGreaterThan(valueFrame.minX, keyFrame.minX)
-            if let valueX { XCTAssertEqual(valueFrame.minX, valueX, accuracy: 0.5) }
-            valueX = valueFrame.minX
+            XCTAssertEqual(valueFrame.minX, valueX, accuracy: alignmentAccuracy,
+                           "Row \(key): backingScaleFactor=\(scale), plainReferenceRawMinX=\(valueX), "
+                            + "rowRawMinX=\(rawValueFrame.minX) before subtracting nested padding")
             previousY = keyFrame.minY
         }
         return previousY
