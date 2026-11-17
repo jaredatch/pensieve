@@ -1,0 +1,12 @@
+paths = Pensieve/ViewModels/ImportViewModel.swift Pensieve/Services/DeployMutationService.swift Pensieve/Services/DeployMutationService+Mutations.swift Pensieve/Services/DeployMutationService+Planning.swift Pensieve/Services/StoreIngestState.swift PensieveTests/ViewModelTests/SkillRenameWaitingWriteTests.swift PensieveTests/Fixtures/ docs/ARCHITECTURE.md
+risk = Pensieve/ViewModels/ImportViewModel.swift Pensieve/Services/DeployMutationService.swift Pensieve/Services/DeployMutationService+Mutations.swift Pensieve/Services/DeployMutationService+Planning.swift Pensieve/Services/StoreIngestState.swift
+check.import = tests PensieveTests/SkillRenameWaitingWriteTests/testAnImportWhileARenameWaitsLeavesTheOtherMacsSkillAlone
+check.oldname = tests PensieveTests/SkillRenameWaitingWriteTests/testAnImportWhileARenameWaitsDoesNotTakeTheSkillsOldName
+check.others = tests PensieveTests/SkillRenameWaitingWriteTests/testADeploymentChangeToAnotherSkillWhileARenameWaitsLeavesTheOtherMacsSkillAlone
+check.movedback = tests PensieveTests/SkillRenameWaitingWriteTests/testADeploymentChangeToTheWaitingSkillIsRefusedAndWorksOnceTheRenameIsMovedBack
+check.through = tests PensieveTests/SkillRenameWaitingWriteTests/testASelectionWithTheWaitingSkillIsRefusedAndWorksOnceTheRenameGoesThrough
+mutation.import = .slipway/mutations/import.patch
+mutation.oldname = .slipway/mutations/oldname.patch
+mutation.others = .slipway/mutations/others.patch
+mutation.movedback = .slipway/mutations/movedback.patch
+mutation.through = .slipway/mutations/through.patch
