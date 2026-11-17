@@ -1,0 +1,1 @@
+verdict tier=t0 result=green fingerprint=f0a15f0aa99801e1e9193fa172bcde58f3903f9437def387dc0c1eaf20c9aeeb tree=59f12cf630ab48ac5c3c03971abfa1964f2fbc82 base=3ffae2fa53c8fda82f1c665a524fd81974d13248 checks=- selected=none passed=none failed=none flaky=none twice=none red=none smoke=skipped project_check=skipped module=macos time=2026-11-17T18:03:31Z
