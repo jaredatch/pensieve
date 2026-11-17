@@ -91,7 +91,7 @@ def feeds(*versions, publication_version=VERSION):
 # The stub only handles the command shapes used by production. An unexpected
 # call fails rather than reaching a real network, compiler, or signing service.
 STUB = r'''#!/usr/bin/env python3
-import base64, json, os, pathlib, sys
+import base64, json, os, pathlib, re, sys
 p = pathlib.Path(os.environ["RELEASE_TEST_STATE"])
 s = json.loads(p.read_text())
 cmd, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
@@ -112,7 +112,7 @@ if cmd == "gh":
         s.setdefault("credential_calls", []).append([path, os.environ.get("GH_TOKEN", "")])
         save()
         method = args[args.index("-X") + 1] if "-X" in args else "GET"
-        if path.split("?")[0] == "repos/jaredatch/pensieve/releases":
+        if re.fullmatch(r"repos/[^/]+/[^/]+/releases", path.split("?")[0]):
             from urllib.parse import parse_qs, urlsplit
             page = int(parse_qs(urlsplit(path).query).get("page", ["1"])[0])
             if page == 1:
@@ -134,7 +134,7 @@ if cmd == "gh":
             entries = releases[(page - 1) * size:page * size]
             print('HTTP/2.0 200 OK')
             if page * size < len(releases):
-                print('Link: <https://api.github.com/repos/jaredatch/pensieve/releases?per_page=100&page=' + str(page + 1) + '>; rel="next"')
+                print('Link: <https://api.github.com/' + path.split("?")[0] + '?per_page=100&page=' + str(page + 1) + '>; rel="next"')
             print('\n' + json.dumps(entries)); sys.exit(0)
         if "/releases/" in path and path.rsplit("/", 1)[-1].isdigit():
             release_id = int(path.rsplit("/", 1)[-1])
@@ -178,7 +178,7 @@ if cmd == "gh":
                 s["release"] = s["recheck_release"]
             save()
         if kind == "repo":
-            if path != "repos/jaredatch/pensieve":
+            if not re.fullmatch(r"repos/[^/]+/[^/]+", path):
                 s["unexpected_call"] = [cmd] + args
                 fail("unexpected stub call " + cmd + " " + repr(args))
             print(s.get("branch", "master")); sys.exit(0)
