@@ -233,6 +233,12 @@ final class GitDispatchOperations: GitServiceProtocol, FastForwardGitService,
         throw GitDispatchCalled.operation("downloadPinnedCommit(remote,commit,into,credential)")
     }
 
+    func pinnedCommitIsReachable(_ commit: String, from tip: String, remote: String,
+                                 into path: String, credential: GitCredential?) throws -> Bool? {
+        calls.append("pinnedCommitIsReachable(_,from,remote,into,credential)")
+        throw GitDispatchCalled.operation("pinnedCommitIsReachable(_,from,remote,into,credential)")
+    }
+
     func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
         calls.append("cloneShallow(remote,branch,into,credential)")
         throw GitDispatchCalled.operation("cloneShallow(remote,branch,into,credential)")

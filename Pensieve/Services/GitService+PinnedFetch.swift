@@ -6,6 +6,30 @@ enum PinnedCommitFetchError: Error {
 }
 
 extension GitService {
+    /// Fetch the tip's complete commit graph, without checking out files or fetching the saved pin.
+    /// A successful fetch can still be empty when the server itself has only shallow history.
+    @_disfavoredOverload
+    func pinnedCommitIsReachable(_ commit: String, from tip: String, remote: String,
+                                 into path: String, credential: GitCredential?) throws -> Bool? {
+        guard Self.isHistoryObjectID(commit), Self.isHistoryObjectID(tip) else {
+            throw PinnedCommitFetchError.invalidCommit
+        }
+        try runOrThrow(["init", "--bare", "--quiet", "--", path], in: nil, environment: Self.historyEnvironment)
+        let args = ["-C", path, "fetch", "--quiet", "--no-tags", "--update-shallow", "--filter=tree:0",
+                    "--recurse-submodules=no",
+                    "--", remote, tip]
+        let output = try runUpstreamHistoryNetwork(args, credential: credential)
+        guard output.exit == 0 else {
+            throw commandError(output, args: args, authenticationRemote: remote)
+        }
+        // Accept the server's shallow roots so a cut graph stays visibly shallow locally.
+        guard try objectExists(tip + "^{commit}", at: path),
+              try !isShallowRepository(at: path) else { return nil }
+        // Missing in this complete graph means withdrawn; asking merge-base would throw for it.
+        guard try objectExists(commit + "^{commit}", at: path) else { return false }
+        return try isAncestor(commit, of: tip, at: path)
+    }
+
     /// Fetch only the saved commit, without resolving a moving branch or copying local history.
     @_disfavoredOverload
     func downloadPinnedCommit(remote: String, commit: String, into path: String,

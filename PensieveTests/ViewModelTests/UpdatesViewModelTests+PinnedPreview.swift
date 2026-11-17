@@ -168,6 +168,9 @@ extension UpdatesViewModelTests {
 final class PinnedPreviewGit: SkillInstallGitServing {
     let git = TestPaths.git
     let failure: Error?
+    var questionFailure: Error?
+    var questionObservation: (() -> Void)?
+    var questionCredentials: [GitCredential?] = []
     var wrongHead: Bool
     var wrongTree: Bool
     var downloadedCommits: [String] = []
@@ -178,6 +181,22 @@ final class PinnedPreviewGit: SkillInstallGitServing {
         self.failure = failure
         self.wrongHead = wrongHead
         self.wrongTree = wrongTree
+    }
+
+    func remoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String? {
+        calls += 1
+        questionCredentials.append(credential)
+        questionObservation?()
+        return try git.remoteHead(remote: remote, ref: ref, credential: credential)
+    }
+
+    func pinnedCommitIsReachable(_ commit: String, from tip: String, remote: String,
+                                 into path: String, credential: GitCredential?) throws -> Bool? {
+        calls += 1
+        questionCredentials.append(credential)
+        questionObservation?()
+        if let questionFailure { throw questionFailure }
+        return try git.pinnedCommitIsReachable(commit, from: tip, remote: remote, into: path, credential: credential)
     }
 
     func downloadPinnedCommit(remote: String, commit: String, into path: String,

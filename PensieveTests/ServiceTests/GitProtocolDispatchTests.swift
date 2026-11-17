@@ -152,12 +152,19 @@ final class GitProtocolDispatchTests: XCTestCase {
         expectCalled("downloadPinnedCommit(remote,commit,into,credential)",
             try service.downloadPinnedCommit(remote: "fixture", commit: String(repeating: "a", count: 40),
                                              into: "fixture", credential: .sshAgent))
+        expectCalled("remoteHead(remote,ref,credential)",
+            try service.remoteHead(remote: "fixture", ref: "main", credential: .sshAgent))
+        expectCalled("pinnedCommitIsReachable(_,from,remote,into,credential)",
+            try service.pinnedCommitIsReachable(String(repeating: "a", count: 40), from: String(repeating: "b", count: 40),
+                                                remote: "fixture", into: "fixture", credential: .sshAgent))
         expectCalled("commitSHA(at)", try service.commitSHA(at: "fixture"))
         expectCalled("treeHash(at,path)", try service.treeHash(at: "fixture", path: "fixture"))
         expectCalled("currentBranch(at)", try service.currentBranch(at: "fixture"))
         XCTAssertEqual(operations.calls, [
             "cloneShallow(remote,branch,into,credential)",
             "downloadPinnedCommit(remote,commit,into,credential)",
+            "remoteHead(remote,ref,credential)",
+            "pinnedCommitIsReachable(_,from,remote,into,credential)",
             "commitSHA(at)",
             "treeHash(at,path)",
             "currentBranch(at)"
