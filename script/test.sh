@@ -18,6 +18,39 @@ wait_lock() {
   python3 -c 'import fcntl, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX)' "$1"
 }
 
+# Parse before locks, source guards or generated output. Invalid requests must never queue.
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+usage() {
+  echo "usage: $0 [--filter TEST_IDENTIFIER | --shard K/N | --self-test]" >&2
+}
+FILTER_ARGS=()
+filter=""
+shard=""
+case "${1:-}" in
+  "") [ "$#" -eq 0 ] || { usage; exit 64; } ;;
+  --self-test) [ "$#" -eq 1 ] || { usage; exit 64; } ;;
+  --filter)
+    [ "$#" -eq 2 ] || { usage; exit 64; }
+    filter="$2"
+    case "$filter" in */*) ;; *) filter="PensieveTests/$filter" ;; esac
+    FILTER_ARGS=(-only-testing "$filter")
+    ;;
+  --shard)
+    [ "$#" -eq 2 ] || { usage; exit 64; }
+    shard="$2"
+    if skips="$(python3 -B "$REPO/script/test_shards.py" "$REPO/.slipway/timings" "$shard")"; then
+      while IFS= read -r name; do
+        [ -z "$name" ] || FILTER_ARGS+=(-skip-testing "$name")
+      done <<< "$skips"
+    else
+      status=$?
+      [ "$status" -ne 64 ] || usage
+      exit "$status"
+    fi
+    ;;
+  *) usage; exit 64 ;;
+esac
+
 if [ "${1:-}" = "--self-test" ]; then
   st="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-test-selftest.XXXXXX")"; trap 'rm -rf "$st"' EXIT
   fail() { echo "test.sh --self-test: FAIL: $1" >&2; exit 1; }
@@ -48,6 +81,7 @@ if [ "${1:-}" = "--self-test" ]; then
   unset TEST_RUNNER_PENSIEVE_TEST_WINDOW_SAMPLE_DIR
   python3 -B "$(dirname "$0")/test_lifecycle_self_test.py" || fail "test lifecycle regressions"
   python3 -B "$(dirname "$0")/test_display_self_test.py" || fail "display lifecycle regressions"
+  python3 -B "$(dirname "$0")/test_shards_self_test.py" || fail "shard regressions"
   echo "test.sh --self-test: OK"
   exit 0
 fi
@@ -77,7 +111,6 @@ if [ -n "${XP_TEST_T0:-}" ]; then   # this run took the lock itself (a caller ho
   echo "test.sh: waited $(( $(date +%s) - XP_TEST_T0 )) s for the test lock" >&2
 fi
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DESTINATION="platform=macOS,arch=arm64"
 DERIVED_DATA="$REPO/DerivedData"
 # Reject live-state defaults before any test can construct an unsafe collaborator.
@@ -96,40 +129,6 @@ export TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR="${TEST_RUNNER_PENSIEVE_TEST_DI
 export TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1
 # Hosted UI assertions inspect SwiftUI's rendered tree, including state and visible Text values.
 export TEST_RUNNER_SWIFTUI_VIEW_DEBUG=1
-
-usage() {
-  echo "usage: $0 [--filter TEST_IDENTIFIER] | --self-test" >&2
-}
-
-FILTER_ARGS=()
-case "${1:-}" in
-  "")
-    ;;
-  "--filter")
-    if [ "$#" -ne 2 ]; then
-      usage
-      exit 64
-    fi
-    filter="$2"
-    case "$filter" in
-      */*)
-        ;;
-      *)
-        filter="PensieveTests/$filter"
-        ;;
-    esac
-    FILTER_ARGS=(-only-testing "$filter")
-    ;;
-  *)
-    usage
-    exit 64
-    ;;
-esac
-
-if [ "${1:-}" != "--filter" ] && [ "$#" -ne 0 ]; then
-  usage
-  exit 64
-fi
 
 cd "$REPO"
 "$REPO/script/generate.sh"
@@ -255,11 +254,11 @@ if [ "$unread" -eq 1 ] && [ "$status" -eq 0 ]; then
   exit 1
 fi
 
-# A --filter that matches no test class/method makes xcodebuild exit 0 having run nothing — a vacuous pass a
+# A filter or shard that matches no test class/method makes xcodebuild exit 0 having run nothing — a vacuous pass a
 # Verify block would read as green. Refuse it. The full run (no filter) is untouched: a zero count there is
 # reported as PENSIEVE_TEST_COUNT for the caller to evaluate.
-if [ -n "${filter:-}" ] && [ "$count" -eq 0 ] && [ "$status" -eq 0 ]; then
-  echo "test.sh: --filter matched zero tests (vacuous pass refused)" >&2
+if { [ -n "$filter" ] || [ -n "$shard" ]; } && [ "$count" -eq 0 ] && [ "$status" -eq 0 ]; then
+  echo "test.sh: $1 matched zero tests (vacuous pass refused)" >&2
   exit 1
 fi
 exit "$status"

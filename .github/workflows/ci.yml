@@ -23,9 +23,7 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    # Expanded release suite: 696.103 s local (2026-10-13); workflow baseline: 8.951 s.
-    # Bounds use 2x runner time and 3x margin.
-    timeout-minutes: 280 # 270 step minutes + 10 headroom; no job-cap limit.
+    timeout-minutes: 128 # Step minutes + 10 headroom.
     env:
       CI_LARGEST_PUSH: 200 # Covers plan merges; larger pushes must resize the measured bounds.
     # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
@@ -106,11 +104,6 @@ jobs:
         timeout-minutes: 1 # Estimate 18 s = max(3 s runner, ceil(2 x 8.951)); bound >= 3x.
         run: ruby script/workflow_self_test.rb
 
-      - name: Test release recovery
-        # Full suite including CLI release checks, 2026-10-13: 696.103 s local.
-        timeout-minutes: 70 # Estimate 1393 s = ceil(2 x 696.103); bound >= 3x.
-        run: python3 -B script/release_self_test.py
-
       - name: Test development build host selection
         timeout-minutes: 1 # Worst measured: 0 s; bound >= 3x.
         run: python3 -B script/pull_dev_build_self_test.py
@@ -122,12 +115,14 @@ jobs:
           HYGIENE_RANGE: ${{ steps.replay-range.outputs.range }}
         run: ./script/public-hygiene.sh --range "$HYGIENE_RANGE"
 
+      - name: Test wrapper
+        timeout-minutes: 5 # Three serial local samples: 45.347/44.299/47.171 s; ceil(2x worst) = 95 s; bound >= 3x.
+        run: ./script/test.sh --self-test
+
       - name: Test
-        timeout-minutes: 158 # Worst estimate: 3147 s = 3127 s runner + ceil(2 x 9.826 s local wrapper self-test); bound >= 3x.
+        timeout-minutes: 71 # Estimate 1408 s = ceil((3515 - 354) / 3 + 354); bound >= 3x.
         id: tests
-        run: |
-          ./script/test.sh --self-test
-          ./script/test.sh
+        run: ./script/test.sh --shard 1/3
 
       - name: Test CLI contract
         timeout-minutes: 3 # Three serial local samples: 28.872/28.594/28.480 s; 2x runner and 3x margin.
@@ -138,7 +133,7 @@ jobs:
         if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: failed-test-evidence
+          name: failed-test-evidence-1
           path: |
             DerivedData/FailedRuns/
             DerivedData/TestRuns/
@@ -149,3 +144,137 @@ jobs:
         timeout-minutes: 1 # Worst measured: 14 s; bound >= 3x.
         run: |
           ./script/build_and_run.sh --headless
+
+  test-shard-2:
+    name: Test shard 2
+    permissions:
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 95 # Step minutes + 10 headroom.
+    steps:
+      - name: Checkout
+        timeout-minutes: 2 # Worst measured: 2 s; bound >= 3x.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Xcode 26
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
+        run: |
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          if [ -z "$xcode_path" ]; then
+            echo "::error::No Xcode 26 installation found on this runner"
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode_path/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install tools
+        timeout-minutes: 5 # Worst measured: 3 s; bound >= 3x.
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
+        run: |
+          ./script/generate.sh
+
+      - name: Test
+        timeout-minutes: 71 # Estimate 1408 s = ceil((3515 - 354) / 3 + 354); bound >= 3x.
+        id: tests
+        run: ./script/test.sh --shard 2/3
+
+      - name: Upload failed test evidence
+        timeout-minutes: 5 # Worst measured: 7 s; bound >= 3x.
+        if: failure() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: failed-test-evidence-2
+          path: |
+            DerivedData/FailedRuns/
+            DerivedData/TestRuns/
+            DerivedData/TestDiagnostics/
+          if-no-files-found: warn
+
+  test-shard-3:
+    name: Test shard 3
+    permissions:
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 95 # Step minutes + 10 headroom.
+    steps:
+      - name: Checkout
+        timeout-minutes: 2 # Worst measured: 2 s; bound >= 3x.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Xcode 26
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
+        run: |
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          if [ -z "$xcode_path" ]; then
+            echo "::error::No Xcode 26 installation found on this runner"
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode_path/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install tools
+        timeout-minutes: 5 # Worst measured: 3 s; bound >= 3x.
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
+        run: |
+          ./script/generate.sh
+
+      - name: Test
+        timeout-minutes: 71 # Estimate 1408 s = ceil((3515 - 354) / 3 + 354); bound >= 3x.
+        id: tests
+        run: ./script/test.sh --shard 3/3
+
+      - name: Upload failed test evidence
+        timeout-minutes: 5 # Worst measured: 7 s; bound >= 3x.
+        if: failure() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: failed-test-evidence-3
+          path: |
+            DerivedData/FailedRuns/
+            DerivedData/TestRuns/
+            DerivedData/TestDiagnostics/
+          if-no-files-found: warn
+
+  release-recovery:
+    name: Release recovery
+    permissions:
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 83 # Step minutes + 10 headroom.
+    steps:
+      - name: Checkout
+        timeout-minutes: 2 # Worst measured: 2 s; bound >= 3x.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Xcode 26
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
+        run: |
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          if [ -z "$xcode_path" ]; then
+            echo "::error::No Xcode 26 installation found on this runner"
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode_path/Contents/Developer"
+          xcodebuild -version
+
+      - name: Test release recovery
+        # Full suite including CLI release checks, 2026-10-13: 696.103 s local.
+        timeout-minutes: 70 # Estimate 1393 s = ceil(2 x 696.103); bound >= 3x.
+        run: python3 -B script/release_self_test.py
