@@ -11,6 +11,7 @@ import re
 import runpy
 import select
 import shlex
+import signal
 import sys
 import time
 from pathlib import Path
@@ -937,6 +938,10 @@ sys.exit(result.returncode)
         return cls.crypto_tools
 
     def setUp(self):
+        # Background runners can inherit SIG_IGN for SIGINT. Give child shells
+        # a catchable interrupt, then restore the runner's handler after the case.
+        previous_sigint = signal.signal(signal.SIGINT, signal.default_int_handler)
+        self.addCleanup(signal.signal, signal.SIGINT, previous_sigint)
         self.temp = tempfile.TemporaryDirectory(prefix="pensieve-release test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
