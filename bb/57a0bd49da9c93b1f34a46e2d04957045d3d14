@@ -1,0 +1,1 @@
+verdict tier=t2 result=green tree=127e4930c0d730ffe60bd06fab0f2ad6273b1457 head=bb57a0bd49da9c93b1f34a46e2d04957045d3d14 tests=3347 failed=none flaky=none culprit=none module=macos time=2026-11-20T09:09:29Z
